@@ -36,7 +36,30 @@ function currentId() {
   return mods[0]?.id || null;
 }
 
+let rendering = false;
+let queued = null;
+
+/**
+ * Renders the module named by the hash.
+ *
+ * Serialised on purpose: mounts are async (most fetch before painting), and two
+ * overlapping mounts race to write the same view — the loser paints stale or
+ * empty content into the winner's page. Clicking quickly through the sidebar is
+ * enough to trigger it, so a render that arrives mid-flight is queued and run
+ * once the current one settles.
+ */
 export async function render() {
+  if (rendering) { queued = true; return; }
+  rendering = true;
+  try {
+    await renderOnce();
+  } finally {
+    rendering = false;
+    if (queued) { queued = false; await render(); }
+  }
+}
+
+async function renderOnce() {
   const id = currentId();
   if (!id) return;
   const mod = modules.get(id);
