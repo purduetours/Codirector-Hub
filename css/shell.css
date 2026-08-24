@@ -133,6 +133,11 @@ p { margin: 0; }
   .burger { display: inline-flex; }
   .topbar { padding: 11px 14px; }
   .view { padding: 16px 14px 48px; }
+
+  /* The title, its subtitle and the sync stamp all wrap on a phone and turn the
+     header into three cramped lines. Keep the title; drop the rest. */
+  .topbar .crumb { display: none; }
+  .topbar h2 { font-size: 1rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

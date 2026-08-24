@@ -8,10 +8,10 @@ import evals         from './modules/evals.js';
 import schedule      from './modules/schedule.js';
 import directory     from './modules/directory.js';
 import desks         from './modules/desks.js';
-import guideroom     from './modules/guideroom.js';
+import interviews    from './modules/interviews.js';
 import announcements from './modules/announcements.js';
 
-[announcements, evals, guideroom, schedule, directory, desks].forEach(register);
+[announcements, evals, interviews, schedule, directory, desks].forEach(register);
 
 function paintShell() {
   $('#who-name').textContent = state.name;
