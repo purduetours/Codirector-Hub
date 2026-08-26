@@ -421,6 +421,28 @@ function setupView() {
     </div>`;
 }
 
+/**
+ * Saves a grade in one request, falling back to the original four calls when the
+ * Guide Room script hasn't been redeployed with saveGrade yet. Slow, but working,
+ * beats fast-but-broken while a deploy is pending.
+ */
+let canBatchGrade = true;
+
+async function saveGradeCall(key, who, scores, note) {
+  if (canBatchGrade) {
+    try {
+      return await gr('saveGrade', [key, who, scores, note]);
+    } catch (err) {
+      if (!/unknown function/i.test(err.message)) throw err;
+      canBatchGrade = false;                       // don't keep probing for it
+      toast('Interviews backend is out of date — saving the slow way. Redeploy Code.gs.', 'err');
+    }
+  }
+  for (const cr of CRIT) await gr('setScore', [key, who, cr.k, scores[cr.k]]);
+  await gr('setNote', [key, who, note]);
+  return true;
+}
+
 /* ---------------------------------------------------------------- breakdown */
 
 /** Who may wipe an interviewer's rating: that interviewer, or an admin. */
@@ -630,7 +652,7 @@ export default {
 
       b.disabled = true;
       try {
-        await gr('saveGrade', [c.key, who, { spk: null, per: null, imp: null }, '']);
+        await saveGradeCall(c.key, who, { spk: null, per: null, imp: null }, '');
         if (c.scores) delete c.scores[who];
         if (c.comments) delete c.comments[who];
         $('#gr-d-body').innerHTML = renderDetail(c);
@@ -786,9 +808,10 @@ export default {
 
       btn.disabled = true; btn.textContent = 'Saving…'; err.hidden = true;
       try {
-        // One request for all four values. This used to be four separate calls,
-        // which at ~5s each made saving a single grade take about twenty seconds.
-        await gr('saveGrade', [c.key, local.who, scores, note]);
+        // One request for all four values, instead of the four separate calls this
+        // used to make — at ~4s each that was fifteen-odd seconds per candidate.
+        // Older deployments don't have saveGrade, so fall back rather than break.
+        await saveGradeCall(c.key, local.who, scores, note);
 
         // Update in place rather than refetching the whole roster — another 6s
         // round trip for data we already know the shape of.
