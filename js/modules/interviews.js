@@ -61,6 +61,10 @@ injectStyle('gr-css', `
 .gr-dec[data-v="Yes"]   { border-color:var(--good); color:var(--good); }
 .gr-dec[data-v="Maybe"] { border-color:var(--warn); color:var(--warn); }
 .gr-dec[data-v="No"]    { border-color:var(--danger); color:var(--danger); }
+.gr-legend { display:flex; gap:11px; flex-wrap:wrap; font-size:.76rem; color:var(--text-soft); }
+.gr-group { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.gr-group i { width:9px; height:9px; border-radius:50%; flex:none; display:inline-block;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.14); }
 .gr-choice { display:flex; gap:14px; align-items:center; justify-content:space-between;
   border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:13px 15px; }
 .gr-choice strong { display:block; font-size:.875rem; }
@@ -82,6 +86,30 @@ injectStyle('gr-css', `
 /* ---------------------------------------------------------------- helpers */
 
 const num = v => (typeof v === 'number' && !isNaN(v) ? v : null);
+
+/* Groups are usually colour names, so show the colour. Anything that isn't a
+   known colour still gets a stable swatch derived from its name, so a group
+   called "Star" looks deliberate rather than broken. */
+const GROUP_COLORS = {
+  green: '#22c55e', blue: '#3b82f6', pink: '#ec4899', red: '#ef4444',
+  orange: '#f97316', yellow: '#eab308', purple: '#a855f7', violet: '#8b5cf6',
+  teal: '#14b8a6', cyan: '#06b6d4', gold: '#d4a017', silver: '#9ca3af',
+  black: '#111827', white: '#e5e7eb', grey: '#6b7280', gray: '#6b7280',
+  brown: '#92400e', lime: '#84cc16', navy: '#1e3a8a', maroon: '#7f1d1d'
+};
+
+function groupColor(name) {
+  const key = String(name || '').trim().toLowerCase();
+  if (GROUP_COLORS[key]) return GROUP_COLORS[key];
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) % 360;
+  return `hsl(${h} 62% 55%)`;
+}
+
+function groupTag(name) {
+  if (!name) return '';
+  return `<span class="gr-group"><i style="background:${groupColor(name)}"></i>${esc(name)}</span>`;
+}
 
 function averages(c) {
   const who = Object.keys(c.scores || {});
@@ -216,13 +244,15 @@ function checkinView() {
         ${data.groups.map(g => `<option value="${esc(g)}" ${local.group === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}
       </select>
       <span class="muted">${inCount} of ${data.candidates.length} checked in</span>
+      <span class="gr-legend">${data.groups.map(g => groupTag(g)).join('')}</span>
     </div>
     <div class="panel">${list.length ? list.map(c => `
       <label class="gr-cand">
         <input type="checkbox" class="gr-in" data-key="${esc(c.key)}" ${isIn(c) ? 'checked' : ''}>
         <span class="gr-main">
           <span class="gr-name">${esc(c.name)}</span>
-          <span class="gr-sub">${esc([c.year, c.major, c.group].filter(Boolean).join(' · '))}</span>
+          <span class="gr-sub">${esc([c.year, c.major].filter(Boolean).join(' · '))}${
+            c.group ? (c.year || c.major ? ' · ' : '') + groupTag(c.group) : ''}</span>
         </span>
       </label>`).join('') : '<div class="empty"><div class="empty-mark">🔍</div><p>No candidates match.</p></div>'}
     </div>`;
@@ -256,7 +286,8 @@ function gradeView() {
       return `<button class="gr-cand" data-grade="${esc(c.key)}">
         <span class="gr-main">
           <span class="gr-name">${esc(c.name)}</span>
-          <span class="gr-sub">${esc([c.year, c.major, c.group].filter(Boolean).join(' · '))}</span>
+          <span class="gr-sub">${esc([c.year, c.major].filter(Boolean).join(' · '))}${
+            c.group ? (c.year || c.major ? ' · ' : '') + groupTag(c.group) : ''}</span>
         </span>
         <span class="gr-nums">${s
           ? CRIT.map(cr => `<span class="gr-num">${cr.k} ${s[cr.k] ?? '—'}</span>`).join('')
@@ -286,7 +317,7 @@ function resultsView() {
       <tbody>${rows.length ? rows.map(({ c, t }) => `
         <tr>
           <td><strong>${esc(c.name)}</strong><br><span class="gr-sub">${esc(c.major || '')}</span></td>
-          <td>${esc(c.group || '')}</td>
+          <td>${groupTag(c.group)}</td>
           <td>${esc(c.year || '')}</td>
           <td class="num">${t.raters}</td>
           <td class="num">${fmt(t.spk)}</td>
@@ -310,10 +341,18 @@ function setupView() {
       <div class="panel-head"><h3>Cycle &amp; interviewers</h3></div>
       <div style="padding:15px;display:grid;gap:13px">
         <label class="field"><span>Cycle label</span><input id="gr-cycle" value="${esc(data.cycle || '')}"></label>
+
+        <label class="field"><span>Groups — one per line</span>
+          <textarea id="gr-groups" rows="4">${esc((data.groups || []).join('\n'))}</textarea></label>
+        <p class="hint">Candidates are dealt into these groups evenly as they're imported.
+          Changing them here only affects <em>future</em> imports — anyone already on the roster
+          keeps the group they were given.</p>
+
         <label class="field"><span>Interviewers — one per line</span>
           <textarea id="gr-people" rows="6">${esc((data.interviewers || []).join('\n'))}</textarea></label>
         <p class="hint">Scores are filed under an interviewer's exact name. Renaming or removing
           someone deletes the scores they gave.</p>
+
         <div><button class="btn btn-primary" id="gr-save">Save settings</button></div>
       </div>
     </div>
@@ -505,10 +544,21 @@ export default {
       /* ---- setup actions (admin only) ---- */
       if (e.target.id === 'gr-save') {
         const btn = e.target;
+        const lines = sel => $(sel).value.split('\n').map(x => x.trim()).filter(Boolean);
+        const groups = lines('#gr-groups');
+        const people = lines('#gr-people');
+
+        if (!groups.length) return toast('Keep at least one group.', 'err');
+
+        // Renaming an interviewer drops their score columns, so name the cost first.
+        const losing = (data.interviewers || []).filter(w => !people.includes(w));
+        const scored = losing.filter(w => data.candidates.some(c => c.scores?.[w]));
+        if (scored.length && !confirm(
+          `Removing ${scored.join(', ')} deletes the scores they gave. Continue?`)) return;
+
         btn.disabled = true;
         try {
-          const people = $('#gr-people').value.split('\n').map(s => s.trim()).filter(Boolean);
-          await gr('saveSettings', [$('#gr-cycle').value.trim(), data.groups, people]);
+          await gr('saveSettings', [$('#gr-cycle').value.trim(), groups, people]);
           await refresh(); paint(); toast('Settings saved.');
         } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
       }
