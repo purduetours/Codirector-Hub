@@ -84,6 +84,7 @@ function profile(g) {
 
 export default {
   id: 'directory',
+  adminOnly: true,
   title: 'Guide Directory',
   crumb: 'Everyone on the roster, and what we know about them',
   icon: '👥',

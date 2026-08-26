@@ -55,6 +55,7 @@ function paint() {
 
 export default {
   id: 'desks',
+  adminOnly: true,
   title: 'Desk Coverage',
   crumb: 'Front and Welcome desk shifts',
   icon: '🛎️',

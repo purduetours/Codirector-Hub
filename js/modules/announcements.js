@@ -49,6 +49,7 @@ function paint() {
 
 export default {
   id: 'announcements',
+  adminOnly: true,
   title: 'Announcements',
   crumb: 'Notices for the committee',
   icon: '📣',
