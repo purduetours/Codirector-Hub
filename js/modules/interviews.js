@@ -21,7 +21,8 @@ const DECISIONS = ['', 'Yes', 'Maybe', 'No'];
 
 let data = null;                 // { cycle, groups, interviewers, candidates[] }
 let pending = [];                // parsed roster rows awaiting Add/Replace
-const local = { tab: 'checkin', search: '', who: '', group: '', decision: '', target: null };
+const local = { tab: 'checkin', search: '', who: '', group: '', decision: '',
+                target: null, detail: null };
 
 injectStyle('gr-css', `
 .gr-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
@@ -65,6 +66,24 @@ injectStyle('gr-css', `
 .gr-group { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
 .gr-group i { width:9px; height:9px; border-radius:50%; flex:none; display:inline-block;
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.14); }
+.gr-clickrow { cursor:pointer; }
+.gr-brk { width:100%; border-collapse:collapse; font-size:.83rem; }
+.gr-brk th, .gr-brk td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; }
+.gr-brk th { font-size:.68rem; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--text-faint); font-weight:700; }
+.gr-brk td.n { font-variant-numeric:tabular-nums; text-align:center; width:52px; }
+.gr-brk tr.pending td { color:var(--text-faint); font-style:italic; }
+.gr-note { font-size:.82rem; color:var(--text-soft); background:var(--bg-sunken);
+  border-radius:var(--radius-sm); padding:8px 11px; white-space:pre-wrap; }
+.gr-brk tr.has-note td { border-bottom:0; padding-bottom:4px; }
+.gr-brk tr.noterow td { padding-top:0; }
+.gr-brk td.act { text-align:right; white-space:nowrap; width:1%; }
+.gr-brk td, .gr-brk th { vertical-align:middle; }
+.gr-who { font-weight:600; }
+.gr-sumrow { display:flex; gap:9px; flex-wrap:wrap; margin-bottom:4px; }
+.gr-sum { background:var(--bg-sunken); border-radius:var(--radius-sm); padding:9px 13px; flex:1; min-width:88px; }
+.gr-sum .n { font-size:1.15rem; font-weight:700; font-variant-numeric:tabular-nums; }
+.gr-sum .l { font-size:.7rem; color:var(--text-soft); }
 .gr-choice { display:flex; gap:14px; align-items:center; justify-content:space-between;
   border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:13px 15px; }
 .gr-choice strong { display:block; font-size:.875rem; }
@@ -315,7 +334,7 @@ function resultsView() {
       <thead><tr><th>Name</th><th>Group</th><th>Year</th><th>Raters</th>
         <th>Speak</th><th>Person</th><th>Impress</th><th>Final</th><th>Decision</th></tr></thead>
       <tbody>${rows.length ? rows.map(({ c, t }) => `
-        <tr>
+        <tr class="gr-clickrow" data-open="${esc(c.key)}">
           <td><strong>${esc(c.name)}</strong><br><span class="gr-sub">${esc(c.major || '')}</span></td>
           <td>${groupTag(c.group)}</td>
           <td>${esc(c.year || '')}</td>
@@ -324,7 +343,7 @@ function resultsView() {
           <td class="num">${fmt(t.per)}</td>
           <td class="num">${fmt(t.imp)}</td>
           <td class="num"><strong>${fmt(t.final)}</strong></td>
-          <td><select class="gr-dec" data-dec="${esc(c.key)}" data-v="${esc(c.decision || '')}">
+          <td data-noopen><select class="gr-dec" data-dec="${esc(c.key)}" data-v="${esc(c.decision || '')}">
             ${DECISIONS.map(d => `<option value="${d}" ${(c.decision || '') === d ? 'selected' : ''}>${d || '—'}</option>`).join('')}
           </select></td>
         </tr>`).join('') : '<tr><td colspan="9"><div class="empty"><p>No candidates match.</p></div></td></tr>'}
@@ -402,6 +421,68 @@ function setupView() {
     </div>`;
 }
 
+/* ---------------------------------------------------------------- breakdown */
+
+/** Who may wipe an interviewer's rating: that interviewer, or an admin. */
+function canClear(who) {
+  return state.isAdmin || who.toLowerCase() === String(local.who || '').trim().toLowerCase();
+}
+
+function renderDetail(c) {
+  const t = averages(c);
+  const graded = data.interviewers.filter(w => c.scores?.[w]);
+  const pending = data.interviewers.filter(w => !c.scores?.[w]);
+
+  const avg = s => {
+    const v = [s.spk, s.per, s.imp].filter(x => x !== null && x !== undefined);
+    return v.length ? (v.reduce((a, b) => a + b, 0) / v.length).toFixed(2) : '—';
+  };
+
+  return `
+    <div class="gr-sumrow">
+      <div class="gr-sum"><div class="n">${t.raters}</div><div class="l">Raters</div></div>
+      <div class="gr-sum"><div class="n">${fmt(t.spk)}</div><div class="l">Speaking</div></div>
+      <div class="gr-sum"><div class="n">${fmt(t.per)}</div><div class="l">Personable</div></div>
+      <div class="gr-sum"><div class="n">${fmt(t.imp)}</div><div class="l">Impression</div></div>
+      <div class="gr-sum"><div class="n">${fmt(t.final)}</div><div class="l">Final</div></div>
+    </div>
+
+    ${graded.length ? `
+    <table class="gr-brk">
+      <thead><tr><th>Interviewer</th><th class="n">Spk</th><th class="n">Per</th>
+        <th class="n">Imp</th><th class="n">Avg</th><th></th></tr></thead>
+      <tbody>${graded.map(w => {
+        const sc = c.scores[w];
+        const note = c.comments?.[w];
+        return `<tr class="${note ? 'has-note' : ''}">
+          <td><span class="gr-who">${esc(w)}</span></td>
+          <td class="n">${sc.spk ?? '—'}</td>
+          <td class="n">${sc.per ?? '—'}</td>
+          <td class="n">${sc.imp ?? '—'}</td>
+          <td class="n"><strong>${avg(sc)}</strong></td>
+          <td class="act">${canClear(w)
+            ? `<button class="btn btn-quiet btn-sm" data-clear="${esc(w)}" title="Clear ${esc(w)}'s rating">Clear</button>`
+            : ''}</td>
+        </tr>
+        ${note ? `<tr class="noterow"><td colspan="6"><div class="gr-note">${esc(note)}</div></td></tr>` : ''}`;
+      }).join('')}</tbody>
+    </table>` : '<p class="hint">Nobody has graded this candidate yet.</p>'}
+
+    ${pending.length ? `<p class="hint" style="margin-top:11px">Not yet graded by
+      <strong>${esc(pending.join(', '))}</strong>.</p>` : ''}`;
+}
+
+function openDetail(c) {
+  local.detail = c;
+  $('#gr-d-name').textContent = c.name;
+  $('#gr-d-sub').innerHTML = [
+    esc([c.year, c.major].filter(Boolean).join(' · ')),
+    c.group ? groupTag(c.group) : ''
+  ].filter(Boolean).join(' · ');
+  $('#gr-d-body').innerHTML = renderDetail(c);
+  openModal($('#gr-detail'));
+}
+
 /* ---------------------------------------------------------------- grading modal */
 
 function openGrade(c) {
@@ -461,6 +542,18 @@ export default {
       </nav>
       <div id="gr-body"><div class="loading"><div class="spinner"></div><p>Loading interviews…</p></div></div>
 
+      <div class="modal-root" id="gr-detail" hidden>
+        <div class="modal-scrim" data-close></div>
+        <div class="modal modal-lg">
+          <header class="modal-head">
+            <div><h2 id="gr-d-name"></h2><p class="muted" id="gr-d-sub"></p></div>
+            <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+          </header>
+          <div class="modal-body" id="gr-d-body"></div>
+          <footer class="modal-foot"><button class="btn btn-ghost" data-close>Close</button></footer>
+        </div>
+      </div>
+
       <div class="modal-root" id="gr-modal" hidden>
         <div class="modal-scrim" data-close></div>
         <form class="modal modal-lg" id="gr-form">
@@ -478,7 +571,9 @@ export default {
       </div>`;
 
     wireModal($('#gr-modal'));
-    await refresh();
+    // Re-entering the tab shouldn't cost another 6-second round trip; the toolbar's
+    // Refresh is there when someone wants the sheet re-read.
+    if (!data) await refresh();
     if (!local.who && data.interviewers.includes(state.name)) local.who = state.name;
     paint();
 
@@ -524,7 +619,33 @@ export default {
       }
     });
 
+    wireModal($('#gr-detail'));
+
+    // Clear one interviewer's rating, from inside the breakdown.
+    $('#gr-d-body').addEventListener('click', async e => {
+      const b = e.target.closest('[data-clear]');
+      if (!b) return;
+      const who = b.dataset.clear, c = local.detail;
+      if (!confirm(`Clear ${who}'s rating for ${c.name}? Their scores and note are deleted.`)) return;
+
+      b.disabled = true;
+      try {
+        await gr('saveGrade', [c.key, who, { spk: null, per: null, imp: null }, '']);
+        if (c.scores) delete c.scores[who];
+        if (c.comments) delete c.comments[who];
+        $('#gr-d-body').innerHTML = renderDetail(c);
+        paint();
+        toast(`Cleared ${who}'s rating for ${c.name}.`);
+      } catch (err) { toast(err.message, 'err'); b.disabled = false; }
+    });
+
     body.addEventListener('click', async e => {
+      const openRow = e.target.closest('[data-open]');
+      if (openRow && !e.target.closest('[data-noopen]')) {
+        const c = data.candidates.find(x => x.key === openRow.dataset.open);
+        if (c) return openDetail(c);
+      }
+
       const g = e.target.closest('[data-grade]');
       if (g) {
         const c = data.candidates.find(x => x.key === g.dataset.grade);
@@ -655,15 +776,32 @@ export default {
       e.preventDefault();
       const btn = $('#gr-g-save'), err = $('#gr-g-error');
       const c = local.target;
+
+      const scores = {};
+      for (const cr of CRIT) {
+        const picked = $(`#gr-g-body input[name="gr-${cr.k}"]:checked`);
+        scores[cr.k] = picked ? Number(picked.value) : null;
+      }
+      const note = $('#gr-note').value;
+
       btn.disabled = true; btn.textContent = 'Saving…'; err.hidden = true;
       try {
-        for (const cr of CRIT) {
-          const picked = $(`#gr-g-body input[name="gr-${cr.k}"]:checked`);
-          await gr('setScore', [c.key, local.who, cr.k, picked ? Number(picked.value) : null]);
+        // One request for all four values. This used to be four separate calls,
+        // which at ~5s each made saving a single grade take about twenty seconds.
+        await gr('saveGrade', [c.key, local.who, scores, note]);
+
+        // Update in place rather than refetching the whole roster — another 6s
+        // round trip for data we already know the shape of.
+        if (Object.values(scores).some(v => v !== null)) {
+          c.scores = { ...(c.scores || {}), [local.who]: scores };
+        } else if (c.scores) {
+          delete c.scores[local.who];
         }
-        await gr('setNote', [c.key, local.who, $('#gr-note').value]);
+        c.comments = { ...(c.comments || {}) };
+        if (note) c.comments[local.who] = note; else delete c.comments[local.who];
+
         closeModal($('#gr-modal'));
-        await refresh(); paint();
+        paint();
         toast(`Saved scores for ${c.name}.`);
       } catch (e2) { showError(err, e2.message); }
       finally { btn.disabled = false; btn.textContent = 'Save scores'; }
