@@ -14,7 +14,7 @@ window.CONFIG = {
      rather than the hub's access codes. The hub still gates the module behind
      a valid hub sign-in; this is just the onward connection. */
   GUIDE_ROOM: {
-    apiUrl: 'https://script.google.com/macros/s/AKfycbw5TfAclMyu2lUkUVdxr7VtbbDlbbstr-_P6SzvnJbJbxM_0dZH5JrxF7DxqAI2SJPf/exec',
+    apiUrl: 'https://script.google.com/macros/s/AKfycbxdMj93rekhlqYyBY894C8E0ns0o87q7m2hktzSjl4CJ5UQ5LMHUsiLv7VDVELDCLAq/exec',
     token: 'NK6pWGXepY_WMnEJvYDviz8k6LSSHLnh'
   },
   REQUIRE_CODE: true,
