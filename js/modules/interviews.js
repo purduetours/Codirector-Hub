@@ -427,18 +427,30 @@ function setupView() {
  * beats fast-but-broken while a deploy is pending.
  */
 let canBatchGrade = true;
+let warnedSlow = false;
 
 async function saveGradeCall(key, who, scores, note) {
   if (canBatchGrade) {
     try {
       return await gr('saveGrade', [key, who, scores, note]);
     } catch (err) {
-      if (!/unknown function/i.test(err.message)) throw err;
-      canBatchGrade = false;                       // don't keep probing for it
-      toast('Interviews backend is out of date — saving the slow way. Redeploy Code.gs.', 'err');
+      // Any failure here falls back to the original four calls. The obvious case is
+      // an older deployment without saveGrade, but a dropped request is worth the
+      // same treatment — the writes are idempotent, so re-sending them is safe and
+      // a saved grade matters more than saving it the fast way.
+      canBatchGrade = false;
+      console.warn('saveGrade unavailable, using per-field writes:', err.message);
     }
   }
-  for (const cr of CRIT) await gr('setScore', [key, who, cr.k, scores[cr.k]]);
+
+  // Set each criterion individually. Same end state as saveGrade, four round trips.
+  // Spaced out on purpose: firing four at Apps Script back to back is exactly when
+  // it starts dropping them, and a failure here can leave a grade half-written.
+  const gap = () => new Promise(r => setTimeout(r, 350));
+  for (const cr of CRIT) {
+    await gr('setScore', [key, who, cr.k, scores[cr.k]]);
+    await gap();
+  }
   await gr('setNote', [key, who, note]);
   return true;
 }
@@ -825,7 +837,12 @@ export default {
 
         closeModal($('#gr-modal'));
         paint();
-        toast(`Saved scores for ${c.name}.`);
+        if (!canBatchGrade && !warnedSlow) {
+          warnedSlow = true;
+          toast(`Saved ${c.name}. (Interviews backend is a version behind — saves are slower until it's redeployed.)`);
+        } else {
+          toast(`Saved scores for ${c.name}.`);
+        }
       } catch (e2) { showError(err, e2.message); }
       finally { btn.disabled = false; btn.textContent = 'Save scores'; }
     });

@@ -18,6 +18,13 @@ const LOST_BODY = /incorrect access code/i;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+/**
+ * Backoff between retries. Apps Script sheds load when it's busy, and hammering it
+ * a few hundred milliseconds later just adds to the pile — so wait over a second,
+ * with a little jitter so several people retrying at once don't sync up.
+ */
+const backoff = i => 1200 * i + Math.random() * 600;
+
 export async function api(action, payload = {}) {
   const url = window.CONFIG?.API_URL;
   if (!url || url.startsWith('PASTE_')) {
@@ -29,7 +36,7 @@ export async function api(action, payload = {}) {
   let lastErr;
 
   for (let i = 0; i < attempts; i++) {
-    if (i) await sleep(700 * i);
+    if (i) await sleep(backoff(i));
 
     let res;
     try {
