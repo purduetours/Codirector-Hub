@@ -82,8 +82,17 @@ function paint() {
     : '<div class="empty"><div class="empty-mark">📅</div><p>No tours match.</p></div>';
 }
 
+/** Loads the schedule once per session. Safe to call in the background. */
+async function prime() {
+  if (rows) return;
+  const data = await api('tourSchedule');
+  rows = data.rows || [];
+}
+
 export default {
   id: 'schedule',
+  prefetch: prime,
+  bust: () => { rows = null; },
   title: 'Tour Schedule',
   crumb: 'Who is leading which tour, and when',
   icon: '📅',
@@ -103,10 +112,7 @@ export default {
       </div>
       <div id="sch-body"></div>`;
 
-    if (!rows) {
-      const data = await api('tourSchedule');
-      rows = data.rows || [];
-    }
+    if (!rows) await prime();
 
     if (!rows.length) {
       $('#sch-body').innerHTML =

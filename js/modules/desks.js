@@ -53,8 +53,17 @@ function paint() {
     : 'Every slot is covered.';
 }
 
+/** Loads desk coverage once per session. Safe to call in the background. */
+async function prime() {
+  if (rows) return;
+  const data = await api('desks');
+  rows = data.rows || [];
+}
+
 export default {
   id: 'desks',
+  prefetch: prime,
+  bust: () => { rows = null; },
   adminOnly: true,
   title: 'Desk Coverage',
   crumb: 'Front and Welcome desk shifts',
@@ -71,10 +80,7 @@ export default {
       <p class="hint" id="desk-note" style="margin-top:12px"></p>
       <p class="hint" style="margin-top:6px">This is the recurring weekly template from the schedule workbook, not a dated calendar.</p>`;
 
-    if (!rows) {
-      const data = await api('desks');
-      rows = data.rows || [];
-    }
+    if (!rows) await prime();
 
     if (!rows.length) {
       $('#desk-body').innerHTML =

@@ -20,7 +20,7 @@ injectStyle('ann-css', `
 .ann.pinned .ann-body { color:var(--warn); }
 `);
 
-let items = [];
+let items = null;      // null = never loaded; [] = loaded and empty
 
 function card(a) {
   return `<article class="card ann ${a.pinned ? 'pinned' : ''}">
@@ -35,14 +35,18 @@ function card(a) {
   </article>`;
 }
 
-async function load() {
+async function prime() {
   const data = await api('announcements');
   items = data.items || [];
+}
+
+async function load() {
+  await prime();
   paint();
 }
 
 function paint() {
-  $('#ann-list').innerHTML = items.length
+  $('#ann-list').innerHTML = (items || []).length
     ? items.map(card).join('')
     : `<div class="empty"><div class="empty-mark">📣</div><p>Nothing posted yet.</p></div>`;
 }
@@ -54,7 +58,9 @@ export default {
   crumb: 'Notices for the committee',
   icon: '📣',
   section: 'Hub',
-  badge: () => items.filter(a => a.pinned).length || null,
+  badge: () => (items || []).filter(a => a.pinned).length || null,
+  prefetch: prime,
+  bust: () => { items = null; },
 
   async mount(view) {
     view.innerHTML = `
@@ -85,7 +91,8 @@ export default {
         </form>
       </div>`;
 
-    await load();
+    if (items === null) await prime();
+    paint();
 
     if (!state.isAdmin) return;
     wireModal($('#ann-modal'));

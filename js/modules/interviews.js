@@ -555,6 +555,7 @@ function paint() {
 export default {
   id: 'interviews',
   adminOnly: true,
+  bust: () => { data = null; },
   title: 'Interviews',
   crumb: 'Check-in, grading and results',
   icon: '🎤',
