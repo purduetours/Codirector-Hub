@@ -555,6 +555,7 @@ function paint() {
 export default {
   id: 'interviews',
   adminOnly: true,
+  prefetch: async () => { if (!data) await refresh(); },
   bust: () => { data = null; },
   title: 'Interviews',
   crumb: 'Check-in, grading and results',
@@ -634,24 +635,37 @@ export default {
       if (t.id === 'gr-who')      { local.who = t.value; return paint(); }
 
       if (t.classList.contains('gr-in')) {
-        t.disabled = true;
+        // Optimistic: the tick lands immediately and the write happens behind it.
+        // Waiting three seconds per person made checking in a queue feel broken,
+        // and the write is idempotent, so the worst case is a revert.
+        const key = t.dataset.key;
+        const want = t.checked;
+        const c = data.candidates.find(x => x.key === key);
+        if (c) c.checkin = want ? 'Yes' : '';
+        paint();
+
         try {
-          await gr('setField', [t.dataset.key, 'checkin', t.checked ? 'Yes' : '']);
-          const c = data.candidates.find(x => x.key === t.dataset.key);
-          if (c) c.checkin = t.checked ? 'Yes' : '';
+          await gr('setField', [key, 'checkin', want ? 'Yes' : '']);
+        } catch (err) {
+          const back = data.candidates.find(x => x.key === key);
+          if (back) back.checkin = want ? '' : 'Yes';     // put it back
           paint();
-        } catch (err) { toast(err.message, 'err'); t.checked = !t.checked; }
-        finally { t.disabled = false; }
+          toast(`Could not ${want ? 'check in' : 'un-check'} ${c ? c.name : 'that candidate'} — ${err.message}`, 'err');
+        }
       }
 
       if (t.classList.contains('gr-dec')) {
         const prev = t.dataset.v;
+        const c = data.candidates.find(x => x.key === t.dataset.dec);
+        if (c) c.decision = t.value;
+        t.dataset.v = t.value;                            // colour updates at once
         try {
           await gr('setField', [t.dataset.dec, 'decision', t.value]);
-          const c = data.candidates.find(x => x.key === t.dataset.dec);
-          if (c) c.decision = t.value;
-          t.dataset.v = t.value;
-        } catch (err) { toast(err.message, 'err'); t.value = prev; }
+        } catch (err) {
+          if (c) c.decision = prev;
+          t.value = prev; t.dataset.v = prev;
+          toast(err.message, 'err');
+        }
       }
     });
 
