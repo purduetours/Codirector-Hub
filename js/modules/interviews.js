@@ -20,6 +20,7 @@ const CRIT = [
 const DECISIONS = ['', 'Yes', 'Maybe', 'No'];
 
 let data = null;                 // { cycle, groups, interviewers, candidates[] }
+let pending = [];                // parsed roster rows awaiting Add/Replace
 const local = { tab: 'checkin', search: '', who: '', group: '', decision: '', target: null };
 
 injectStyle('gr-css', `
@@ -60,6 +61,22 @@ injectStyle('gr-css', `
 .gr-dec[data-v="Yes"]   { border-color:var(--good); color:var(--good); }
 .gr-dec[data-v="Maybe"] { border-color:var(--warn); color:var(--warn); }
 .gr-dec[data-v="No"]    { border-color:var(--danger); color:var(--danger); }
+.gr-choice { display:flex; gap:14px; align-items:center; justify-content:space-between;
+  border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:13px 15px; }
+.gr-choice strong { display:block; font-size:.875rem; }
+.gr-choice em { display:block; font-style:normal; font-size:.79rem; color:var(--text-soft);
+  margin-top:3px; line-height:1.45; }
+.gr-choice.danger { border-color:color-mix(in srgb, var(--danger) 35%, var(--line-strong)); }
+.gr-choice .btn { flex:none; }
+.gr-map { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+.gr-map span { font-size:.74rem; background:var(--bg-sunken); border-radius:999px; padding:3px 9px; }
+.gr-map span b { color:var(--accent); }
+.gr-prevtbl { width:100%; border-collapse:collapse; font-size:.8rem; }
+.gr-prevtbl th, .gr-prevtbl td { padding:6px 9px; border-bottom:1px solid var(--line); text-align:left; }
+.gr-prevtbl th { font-size:.68rem; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--text-faint); font-weight:700; }
+@media (max-width:620px) { .gr-choice { flex-direction:column; align-items:stretch; }
+  .gr-choice .btn { width:100%; } }
 `);
 
 /* ---------------------------------------------------------------- helpers */
@@ -87,6 +104,103 @@ function filtered(list) {
     if (local.group && c.group !== local.group) return false;
     return true;
   });
+}
+
+/* ---------------------------------------------------------------- roster paste
+
+   Pasting straight out of a Google Sheet gives tab-separated text, and any cell
+   containing a comma or a line break arrives wrapped in quotes — the "other campus
+   involvements" answers routinely run to several lines. Splitting on \n would tear
+   those rows in half, so parse quotes properly.
+--------------------------------------------------------------------------------- */
+
+function parseTable(text) {
+  const delim = text.includes('\t') ? '\t' : ',';
+  const rows = [];
+  let row = [], field = '', quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }   // escaped quote
+        else quoted = false;
+      } else field += ch;
+      continue;
+    }
+
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === delim) { row.push(field); field = ''; continue; }
+    if (ch === '\r') continue;
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+    field += ch;
+  }
+  row.push(field);
+  rows.push(row);
+
+  return rows
+    .map(r => r.map(c => c.trim()))
+    .filter(r => r.some(c => c));
+}
+
+/** Which source column feeds which field. Order matters — first match wins. */
+const COLUMN_HINTS = [
+  ['name',  [/full name/i, /^name$/i, /your name/i, /candidate/i]],
+  ['email', [/e-?mail/i]],
+  ['year',  [/year in school/i, /^year$/i, /class standing/i]],
+  ['major', [/major/i, /program of study/i]]
+];
+
+function detectColumns(header) {
+  const found = {};
+  const used = new Set();
+
+  for (const [field, patterns] of COLUMN_HINTS) {
+    for (const re of patterns) {
+      const i = header.findIndex((h, idx) =>
+        !used.has(idx) && re.test(h) && !/graduat/i.test(h));   // "Graduation ... Year" is not their year in school
+      if (i !== -1) { found[field] = i; used.add(i); break; }
+    }
+  }
+  return found;
+}
+
+/**
+ * Turns pasted text into the {name, year, major, email} objects importRoster
+ * wants. Works with a header row in any column order; falls back to positional
+ * Name / Year / Major / Email when there's no recognisable header.
+ */
+function parseRoster(text) {
+  const rows = parseTable(text);
+  if (!rows.length) return { rows: [], mapping: null, header: null, skipped: 0 };
+
+  const header = rows[0];
+  const cols = detectColumns(header);
+  const hasHeader = 'name' in cols;
+
+  const body = hasHeader ? rows.slice(1) : rows;
+  const idx = hasHeader ? cols : { name: 0, year: 1, major: 2, email: 3 };
+
+  const out = [];
+  let skipped = 0;
+  for (const r of body) {
+    const name = (r[idx.name] || '').trim();
+    if (!name) { skipped++; continue; }
+    out.push({
+      name,
+      year:  (idx.year  !== undefined ? r[idx.year]  : '') || '',
+      major: (idx.major !== undefined ? r[idx.major] : '') || '',
+      email: (idx.email !== undefined ? r[idx.email] : '') || ''
+    });
+  }
+
+  return {
+    rows: out,
+    mapping: idx,
+    header: hasHeader ? header : null,
+    skipped
+  };
 }
 
 /* ---------------------------------------------------------------- views */
@@ -207,11 +321,35 @@ function setupView() {
     <div class="panel" style="margin-top:16px">
       <div class="panel-head"><h3>Roster</h3></div>
       <div style="padding:15px;display:grid;gap:13px">
-        <label class="field"><span>Paste candidates — <em class="muted">First, Last, Year, Major, Email</em></span>
-          <textarea id="gr-roster" rows="7" placeholder="Tabs or commas. A header row is detected automatically."></textarea></label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-primary" id="gr-import">Replace roster</button>
-          <button class="btn btn-ghost" id="gr-append">Add to roster</button>
+        <label class="field">
+          <span>Paste candidates</span>
+          <textarea id="gr-roster" rows="7" placeholder="Select the rows in your application-responses sheet, copy, and paste here — headers and all."></textarea>
+        </label>
+        <p class="hint">Paste straight from the Google Form responses sheet. Columns are matched by
+          their headings, in any order, and the ones you don't need (timestamp, PUID, involvements)
+          are ignored. Long multi-line answers won't break the rows.</p>
+
+        <div><button class="btn btn-ghost" id="gr-preview">Check this paste</button></div>
+
+        <div id="gr-prev" hidden></div>
+
+        <div id="gr-import-actions" hidden style="display:grid;gap:9px">
+          <div class="gr-choice">
+            <div>
+              <strong>Add to roster</strong>
+              <em>Keeps everyone already there, appends these on the end. Existing scores are untouched.
+                  Use this when more applications come in mid-cycle.</em>
+            </div>
+            <button class="btn btn-primary" id="gr-append">Add <span id="gr-n-add"></span></button>
+          </div>
+          <div class="gr-choice danger">
+            <div>
+              <strong>Replace roster</strong>
+              <em>Deletes every candidate currently on the roster <u>and every score already given</u>,
+                  then loads these instead. Use this once at the start of a new cycle.</em>
+            </div>
+            <button class="btn btn-danger" id="gr-import">Replace <span id="gr-n-rep"></span></button>
+          </div>
         </div>
       </div>
     </div>
@@ -375,18 +513,78 @@ export default {
         } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
       }
 
+      if (e.target.id === 'gr-preview') {
+        const raw = $('#gr-roster').value.trim();
+        if (!raw) return toast('Paste something first.', 'err');
+
+        const parsed = parseRoster(raw);
+        pending = parsed.rows;
+
+        const box = $('#gr-prev');
+        if (!parsed.rows.length) {
+          box.innerHTML = `<div class="callout"><strong>Nothing usable in that paste.</strong>
+            Make sure the copied range includes the header row and a column with candidates' names.</div>`;
+          box.hidden = false;
+          $('#gr-import-actions').hidden = true;
+          return;
+        }
+
+        const label = { name: 'Name', year: 'Year', major: 'Major', email: 'Email' };
+        const mapped = Object.entries(parsed.mapping)
+          .filter(([, i]) => i !== undefined)
+          .map(([f, i]) => `<span><b>${label[f]}</b> ← ${esc(parsed.header ? parsed.header[i] : 'column ' + (i + 1))}</span>`)
+          .join('');
+        const missing = ['year', 'major', 'email'].filter(f => parsed.mapping[f] === undefined);
+
+        box.innerHTML = `
+          <div class="gr-map">${mapped}</div>
+          ${missing.length ? `<p class="hint" style="margin-bottom:9px">No column matched
+            <strong>${missing.join(', ')}</strong> — those will be left blank.</p>` : ''}
+          ${parsed.skipped ? `<p class="hint" style="margin-bottom:9px">${parsed.skipped}
+            row${parsed.skipped === 1 ? '' : 's'} skipped for having no name.</p>` : ''}
+          <table class="gr-prevtbl">
+            <thead><tr><th>Name</th><th>Year</th><th>Major</th><th>Email</th></tr></thead>
+            <tbody>${parsed.rows.slice(0, 6).map(r => `<tr>
+              <td>${esc(r.name)}</td><td>${esc(r.year)}</td>
+              <td>${esc(r.major)}</td><td>${esc(r.email)}</td></tr>`).join('')}
+            </tbody>
+          </table>
+          <p class="hint" style="margin-top:9px">Showing ${Math.min(6, parsed.rows.length)}
+            of <strong>${parsed.rows.length}</strong> candidates. Looks right? Choose below.</p>`;
+        box.hidden = false;
+
+        $('#gr-n-add').textContent = parsed.rows.length;
+        $('#gr-n-rep').textContent = parsed.rows.length;
+        $('#gr-import-actions').hidden = false;
+        $('#gr-import-actions').scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+      }
+
       if (e.target.id === 'gr-import' || e.target.id === 'gr-append') {
         const replace = e.target.id === 'gr-import';
-        const raw = $('#gr-roster').value.trim();
-        if (!raw) return toast('Paste some candidates first.', 'err');
-        if (replace && !confirm('Replace the whole roster? Every current candidate and score is deleted.')) return;
+        if (!pending.length) return toast('Check the paste first.', 'err');
+
+        if (replace) {
+          const losing = data.candidates.length;
+          const scored = data.candidates.filter(c => Object.keys(c.scores || {}).length).length;
+          const warn = `Replace the roster?\n\n` +
+            `Deletes: ${losing} candidate${losing === 1 ? '' : 's'}` +
+            (scored ? `, including ${scored} with scores already recorded` : '') + `.\n` +
+            `Loads: ${pending.length} from your paste.\n\nThis cannot be undone from here.`;
+          if (!confirm(warn)) return;
+        }
+
         const btn = e.target;
+        const n = pending.length;
         btn.disabled = true;
         try {
-          const list = raw.split('\n').map(l => l.split(/\t|,/).map(x => x.trim())).filter(p => p.some(Boolean));
-          const r = await gr('importRoster', [list, replace]);
-          await refresh(); paint();
-          toast(typeof r === 'object' && r.added ? `Imported ${r.added} candidates.` : 'Roster updated.');
+          await gr('importRoster', [pending, replace]);
+          await refresh();
+          $('#gr-roster').value = '';
+          pending = [];
+          paint();
+          toast(replace
+            ? `Roster replaced — ${n} candidates loaded.`
+            : `Added ${n} candidates. Roster is now ${data.candidates.length}.`);
         } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
       }
 
