@@ -225,7 +225,12 @@ const LOOKS_LIKE = {
               && v.split(/\s+/).length <= 8
 };
 
-/** How often a column's non-empty values match a signature. */
+/**
+ * How often a column's non-empty values match a signature.
+ *
+ * One row is enough to decide. Pasting a single late applicant is a normal thing
+ * to do, and demanding two rows meant that paste matched nothing at all.
+ */
 function columnLooksLike(rows, col, test) {
   let seen = 0, hits = 0;
   for (const r of rows) {
@@ -234,10 +239,10 @@ function columnLooksLike(rows, col, test) {
     seen++;
     if (test(v)) hits++;
   }
-  return seen >= 2 && hits / seen >= 0.7;
+  return seen >= 1 && hits / seen >= 0.7;
 }
 
-function detectColumns(header, body, reserved) {
+function detectColumns(header, body, reserved, skipMajor) {
   const found = {};
   const used = new Set();
   if (reserved !== undefined) used.add(reserved);
@@ -259,7 +264,8 @@ function detectColumns(header, body, reserved) {
   //    Order matters: the distinctive shapes claim their columns first, so major
   //    — the loosest test — only ever sees what's left over.
   if (body && body.length) {
-    for (const field of ['year', 'grad', 'email', 'major']) {
+    const wanted = skipMajor ? ['year', 'grad', 'email'] : ['year', 'grad', 'email', 'major'];
+    for (const field of wanted) {
       if (found[field] !== undefined) continue;
 
       const fits = [];
@@ -305,9 +311,10 @@ function parseRoster(text) {
     body = rows;
     const blank = header.map(() => '');
 
-    // Find the name first — two words, no digits, no @ — so the major hunt below
-    // can't grab the name column instead.
-    const firstPass = detectColumns(blank, body);
+    // Claim only the unmistakable columns first (year, grad, email). Major is held
+    // back deliberately: its test is loose enough to match a person's name, and a
+    // paste of one candidate would otherwise lose the name to it.
+    const firstPass = detectColumns(blank, body, undefined, true);
     const taken = new Set(Object.values(firstPass));
     let nameCol;
     for (let c = 0; c < header.length; c++) {
@@ -472,9 +479,10 @@ function setupView() {
           <span>Paste candidates</span>
           <textarea id="gr-roster" rows="7" placeholder="Select the rows in your application-responses sheet, copy, and paste here — headers and all."></textarea>
         </label>
-        <p class="hint">Paste straight from the Google Form responses sheet. Columns are matched by
-          their headings, in any order, and the ones you don't need (timestamp, PUID, involvements)
-          are ignored. Long multi-line answers won't break the rows.</p>
+        <p class="hint">Paste straight from the Google Form responses sheet — with or without the
+          header row, in any column order, one applicant or all of them. Columns are worked out from
+          their headings and from what they contain, so the ones you don't need (timestamp, PUID,
+          involvements) are ignored. Long multi-line answers won't break the rows.</p>
 
         <div><button class="btn btn-ghost" id="gr-preview">Check this paste</button></div>
 
@@ -833,7 +841,8 @@ export default {
         const box = $('#gr-prev');
         if (!parsed.rows.length) {
           box.innerHTML = `<div class="callout"><strong>Nothing usable in that paste.</strong>
-            Make sure the copied range includes the header row and a column with candidates' names.</div>`;
+            Nothing in it looked like a candidate name. Check you copied the rows themselves —
+            a name column is the one thing that can't be worked out from context.</div>`;
           box.hidden = false;
           $('#gr-import-actions').hidden = true;
           return;
