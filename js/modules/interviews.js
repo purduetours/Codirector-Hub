@@ -22,7 +22,7 @@ const DECISIONS = ['', 'Yes', 'Maybe', 'No'];
 let data = null;                 // { cycle, groups, interviewers, candidates[] }
 let pending = [];                // parsed roster rows awaiting Add/Replace
 const local = { tab: 'checkin', search: '', who: '', group: '', decision: '',
-                target: null, detail: null };
+                decFilter: '__undecided', target: null, detail: null };
 
 injectStyle('gr-css', `
 .gr-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
@@ -84,6 +84,45 @@ injectStyle('gr-css', `
 .gr-sum { background:var(--bg-sunken); border-radius:var(--radius-sm); padding:9px 13px; flex:1; min-width:88px; }
 .gr-sum .n { font-size:1.15rem; font-weight:700; font-variant-numeric:tabular-nums; }
 .gr-sum .l { font-size:.7rem; color:var(--text-soft); }
+.dec-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.dec-chip { font:inherit; font-size:.82rem; font-weight:600; cursor:pointer;
+  border:1px solid var(--line-strong); background:var(--bg-elev); color:var(--text-soft);
+  border-radius:999px; padding:7px 14px; transition:all .13s; }
+.dec-chip b { font-variant-numeric:tabular-nums; margin-left:3px; }
+.dec-chip:hover { border-color:var(--accent); color:var(--text); }
+.dec-chip.on { color:#fff; border-color:transparent; }
+.dec-chip.on.u { background:var(--text-soft); }
+.dec-chip.on.y { background:var(--good); }
+.dec-chip.on.m { background:var(--warn); }
+.dec-chip.on.n { background:var(--danger); }
+.dec-chip.on.a { background:var(--accent); }
+
+.dec-row { display:flex; align-items:center; gap:14px; padding:12px 15px;
+  border-bottom:1px solid var(--line); }
+.dec-row:last-child { border-bottom:0; }
+.dec-row:hover { background:var(--bg-sunken); }
+.dec-score { font-size:1.15rem; font-weight:700; font-variant-numeric:tabular-nums;
+  width:52px; flex:none; text-align:center; color:var(--accent); }
+.dec-score.none { color:var(--text-faint); font-weight:500; }
+.dec-main { flex:1; min-width:0; display:grid; gap:1px; }
+.dec-name { font-size:.94rem; font-weight:650; }
+.dec-raters { font-size:.72rem; color:var(--text-faint); }
+.dec-pick { display:flex; gap:5px; flex:none; }
+.dec-btn { font:inherit; font-size:.8rem; font-weight:600; cursor:pointer; min-width:60px;
+  border:1px solid var(--line-strong); background:var(--bg-elev); color:var(--text-soft);
+  border-radius:var(--radius-sm); padding:8px 10px; transition:all .12s; }
+.dec-btn:hover { border-color:var(--text-soft); color:var(--text); }
+.dec-btn.on { color:#fff; border-color:transparent; }
+.dec-btn.yes.on   { background:var(--good); }
+.dec-btn.maybe.on { background:var(--warn); }
+.dec-btn.no.on    { background:var(--danger); }
+
+@media (max-width:620px) {
+  .dec-row { flex-wrap:wrap; gap:9px; }
+  .dec-main { flex:1 1 60%; }
+  .dec-pick { flex:1 1 100%; }
+  .dec-btn { flex:1; }
+}
 .gr-choice { display:flex; gap:14px; align-items:center; justify-content:space-between;
   border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:13px 15px; }
 .gr-choice strong { display:block; font-size:.875rem; }
@@ -447,6 +486,61 @@ function resultsView() {
     </table></div>`;
 }
 
+function decisionsView() {
+  let rows = filtered(data.candidates).map(c => ({ c, t: averages(c) }));
+
+  const counts = {
+    yes:   data.candidates.filter(c => c.decision === 'Yes').length,
+    maybe: data.candidates.filter(c => c.decision === 'Maybe').length,
+    no:    data.candidates.filter(c => c.decision === 'No').length
+  };
+  counts.undecided = data.candidates.length - counts.yes - counts.maybe - counts.no;
+
+  if (local.decFilter === '__undecided') rows = rows.filter(r => !String(r.c.decision || '').trim());
+  else if (local.decFilter) rows = rows.filter(r => (r.c.decision || '') === local.decFilter);
+
+  // Best-scored first; anyone ungraded drops to the bottom rather than the top.
+  rows.sort((a, b) => (b.t.final ?? -1) - (a.t.final ?? -1));
+
+  const chip = (val, label, n, cls) =>
+    `<button class="dec-chip ${cls} ${local.decFilter === val ? 'on' : ''}" data-filter="${val}">
+       ${label} <b>${n}</b></button>`;
+
+  return `
+    <div class="dec-bar">
+      ${chip('__undecided', 'Undecided', counts.undecided, 'u')}
+      ${chip('Yes', 'Yes', counts.yes, 'y')}
+      ${chip('Maybe', 'Maybe', counts.maybe, 'm')}
+      ${chip('No', 'No', counts.no, 'n')}
+      ${chip('', 'All', data.candidates.length, 'a')}
+    </div>
+
+    <div class="filters" style="margin-bottom:14px">
+      <label class="search">${SEARCH_ICON}<input type="search" id="gr-search"
+        placeholder="Find a candidate…" value="${esc(local.search)}"></label>
+      <button class="btn btn-ghost btn-sm" id="gr-copy">Copy emails (${rows.length})</button>
+    </div>
+
+    ${rows.length ? `<div class="panel">${rows.map(({ c, t }) => `
+      <div class="dec-row">
+        <span class="dec-score ${t.final === null ? 'none' : ''}">${t.final === null ? '—' : t.final.toFixed(2)}</span>
+        <span class="dec-main">
+          <span class="dec-name">${esc(c.name)}</span>
+          <span class="gr-sub">${esc(subLine(c))}${c.group ? (subLine(c) ? ' · ' : '') + groupTag(c.group) : ''}</span>
+          <span class="dec-raters">${t.raters ? t.raters + ' rater' + (t.raters === 1 ? '' : 's') : 'not graded yet'}</span>
+        </span>
+        <span class="dec-pick" data-key="${esc(c.key)}">
+          ${['Yes', 'Maybe', 'No'].map(d =>
+            `<button class="dec-btn ${d.toLowerCase()} ${c.decision === d ? 'on' : ''}"
+                     data-set="${d}" title="Mark ${esc(c.name)} as ${d}">${d}</button>`).join('')}
+        </span>
+      </div>`).join('')}</div>`
+      : `<div class="empty"><div class="empty-mark">${counts.undecided === 0 ? '✅' : '🔍'}</div>
+         <p>${counts.undecided === 0 && !local.decision
+              ? 'Every candidate has a decision.'
+              : 'Nobody matches that filter.'}</p></div>`}`;
+}
+
 function setupView() {
   return `
     <div class="callout"><strong>These write straight through to the Guide Room spreadsheet.</strong>
@@ -646,6 +740,7 @@ function paint() {
   if (local.tab === 'checkin') body.innerHTML = checkinView();
   else if (local.tab === 'grade') body.innerHTML = gradeView();
   else if (local.tab === 'results') body.innerHTML = resultsView();
+  else if (local.tab === 'decisions') body.innerHTML = decisionsView();
   else body.innerHTML = setupView();
 }
 
@@ -672,6 +767,7 @@ export default {
         <button class="tab is-active" data-tab="checkin">Check in</button>
         <button class="tab" data-tab="grade">Grade</button>
         <button class="tab" data-tab="results">Results</button>
+        <button class="tab" data-tab="decisions">Decisions</button>
         ${state.isAdmin ? '<button class="tab" data-tab="setup">Setup</button>' : ''}
       </nav>
       <div id="gr-body"><div class="loading"><div class="spinner"></div><p>Loading interviews…</p></div></div>
@@ -800,9 +896,39 @@ export default {
         return;
       }
 
+      const setBtn = e.target.closest('[data-set]');
+      if (setBtn) {
+        const key = setBtn.closest('[data-key]').dataset.key;
+        const c = data.candidates.find(x => x.key === key);
+        if (!c) return;
+        // Clicking the current answer clears it, so a misclick is one tap to undo.
+        const next = c.decision === setBtn.dataset.set ? '' : setBtn.dataset.set;
+        const prev = c.decision || '';
+
+        c.decision = next;      // optimistic, same as check-in
+        paint();
+        try {
+          await gr('setField', [key, 'decision', next]);
+        } catch (err) {
+          c.decision = prev;
+          paint();
+          toast(`Could not record that decision — ${err.message}`, 'err');
+        }
+        return;
+      }
+
+      const chip = e.target.closest('[data-filter]');
+      if (chip) {
+        local.decFilter = chip.dataset.filter;
+        paint();
+        return;
+      }
+
       if (e.target.id === 'gr-copy') {
         let rows = filtered(data.candidates);
-        if (local.decision) rows = rows.filter(c => (c.decision || '') === local.decision);
+        const f = local.tab === 'decisions' ? local.decFilter : local.decision;
+        if (f === '__undecided') rows = rows.filter(c => !String(c.decision || '').trim());
+        else if (f) rows = rows.filter(c => (c.decision || '') === f);
         const emails = rows.map(c => c.email).filter(Boolean).join(', ');
         try { await navigator.clipboard.writeText(emails); toast(`Copied ${rows.length} email addresses.`); }
         catch { toast('Could not reach the clipboard.', 'err'); }
