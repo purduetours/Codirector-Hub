@@ -142,6 +142,11 @@ function averages(c) {
 }
 
 const fmt = v => (v === null ? '—' : v.toFixed(2));
+
+/** "Sophomore · grad May 2029 · Marketing" — whichever parts we actually have. */
+function subLine(c) {
+  return [c.year, c.grad ? 'grad ' + c.grad : '', c.major].filter(Boolean).join(' · ');
+}
 const isIn = c => String(c.checkin || '').trim().toLowerCase() === 'yes';
 
 function filtered(list) {
@@ -195,19 +200,61 @@ function parseTable(text) {
 const COLUMN_HINTS = [
   ['name',  [/full name/i, /^name$/i, /your name/i, /candidate/i]],
   ['email', [/e-?mail/i]],
-  ['year',  [/year in school/i, /^year$/i, /class standing/i]],
+  ['grad',  [/graduation/i, /grad (date|year|month)/i, /expected graduation/i]],
+  ['year',  [/year in school/i, /^year$/i, /class standing/i, /classification/i]],
   ['major', [/major/i, /program of study/i]]
 ];
 
-function detectColumns(header) {
+/* Content signatures, used when a heading doesn't say what the column holds.
+   The responses sheet has had its "Year in School" heading overwritten with
+   "Column 5" before now, which silently pushed PUIDs into the year field — so
+   don't rely on headings alone. */
+const LOOKS_LIKE = {
+  year:  v => /^(freshman|sophomore|junior|senior|grad(uate)?|1st|2nd|3rd|4th)\b/i.test(v),
+  grad:  v => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*'?\d{2,4}/i.test(v)
+              || /^(spring|fall|summer|winter)\s*'?\d{2,4}/i.test(v),
+  email: v => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(v)
+};
+
+/** How often a column's non-empty values match a signature. */
+function columnLooksLike(rows, col, test) {
+  let seen = 0, hits = 0;
+  for (const r of rows) {
+    const v = (r[col] || '').trim();
+    if (!v) continue;
+    seen++;
+    if (test(v)) hits++;
+  }
+  return seen >= 2 && hits / seen >= 0.7;
+}
+
+function detectColumns(header, body) {
   const found = {};
   const used = new Set();
 
+  // 1. by heading
   for (const [field, patterns] of COLUMN_HINTS) {
     for (const re of patterns) {
-      const i = header.findIndex((h, idx) =>
-        !used.has(idx) && re.test(h) && !/graduat/i.test(h));   // "Graduation ... Year" is not their year in school
+      const i = header.findIndex((h, idx) => {
+        if (used.has(idx) || !re.test(h)) return false;
+        // "Graduation Month and Year" must never be taken for year in school
+        if (field === 'year' && /graduat/i.test(h)) return false;
+        return true;
+      });
       if (i !== -1) { found[field] = i; used.add(i); break; }
+    }
+  }
+
+  // 2. by what the column actually contains, for anything still missing
+  if (body && body.length) {
+    for (const field of ['year', 'grad', 'email']) {
+      if (found[field] !== undefined) continue;
+      for (let c = 0; c < header.length; c++) {
+        if (used.has(c)) continue;
+        if (columnLooksLike(body, c, LOOKS_LIKE[field])) {
+          found[field] = c; used.add(c); break;
+        }
+      }
     }
   }
   return found;
@@ -222,32 +269,41 @@ function parseRoster(text) {
   const rows = parseTable(text);
   if (!rows.length) return { rows: [], mapping: null, header: null, skipped: 0 };
 
-  const header = rows[0];
-  const cols = detectColumns(header);
-  const hasHeader = 'name' in cols;
+  // Try treating row one as headings; if that yields no name column, treat every
+  // row as data and identify columns purely by content.
+  let header = rows[0];
+  let cols = detectColumns(header, rows.slice(1));
+  let hasHeader = cols.name !== undefined;
+  let body = rows.slice(1);
 
-  const body = hasHeader ? rows.slice(1) : rows;
-  const idx = hasHeader ? cols : { name: 0, year: 1, major: 2, email: 3 };
+  if (!hasHeader) {
+    body = rows;
+    cols = detectColumns(header.map(() => ''), body);
+    // A name column is whatever's left: first column that isn't already spoken
+    // for and reads like a person rather than a number.
+    const taken = new Set(Object.values(cols));
+    for (let c = 0; c < header.length; c++) {
+      if (taken.has(c)) continue;
+      if (columnLooksLike(body, c, v => /[A-Za-z]{2,}\s+[A-Za-z]/.test(v) && !/@/.test(v))) {
+        cols.name = c; break;
+      }
+    }
+  }
 
+  const idx = cols;
   const out = [];
   let skipped = 0;
+
+  if (idx.name === undefined) return { rows: [], mapping: idx, header: null, skipped: rows.length };
+
   for (const r of body) {
     const name = (r[idx.name] || '').trim();
     if (!name) { skipped++; continue; }
-    out.push({
-      name,
-      year:  (idx.year  !== undefined ? r[idx.year]  : '') || '',
-      major: (idx.major !== undefined ? r[idx.major] : '') || '',
-      email: (idx.email !== undefined ? r[idx.email] : '') || ''
-    });
+    const pick = f => (idx[f] !== undefined ? r[idx[f]] : '') || '';
+    out.push({ name, year: pick('year'), grad: pick('grad'), major: pick('major'), email: pick('email') });
   }
 
-  return {
-    rows: out,
-    mapping: idx,
-    header: hasHeader ? header : null,
-    skipped
-  };
+  return { rows: out, mapping: idx, header: hasHeader ? header : null, skipped };
 }
 
 /* ---------------------------------------------------------------- views */
@@ -270,8 +326,8 @@ function checkinView() {
         <input type="checkbox" class="gr-in" data-key="${esc(c.key)}" ${isIn(c) ? 'checked' : ''}>
         <span class="gr-main">
           <span class="gr-name">${esc(c.name)}</span>
-          <span class="gr-sub">${esc([c.year, c.major].filter(Boolean).join(' · '))}${
-            c.group ? (c.year || c.major ? ' · ' : '') + groupTag(c.group) : ''}</span>
+          <span class="gr-sub">${esc(subLine(c))}${
+            c.group ? (subLine(c) ? ' · ' : '') + groupTag(c.group) : ''}</span>
         </span>
       </label>`).join('') : '<div class="empty"><div class="empty-mark">🔍</div><p>No candidates match.</p></div>'}
     </div>`;
@@ -305,8 +361,8 @@ function gradeView() {
       return `<button class="gr-cand" data-grade="${esc(c.key)}">
         <span class="gr-main">
           <span class="gr-name">${esc(c.name)}</span>
-          <span class="gr-sub">${esc([c.year, c.major].filter(Boolean).join(' · '))}${
-            c.group ? (c.year || c.major ? ' · ' : '') + groupTag(c.group) : ''}</span>
+          <span class="gr-sub">${esc(subLine(c))}${
+            c.group ? (subLine(c) ? ' · ' : '') + groupTag(c.group) : ''}</span>
         </span>
         <span class="gr-nums">${s
           ? CRIT.map(cr => `<span class="gr-num">${cr.k} ${s[cr.k] ?? '—'}</span>`).join('')
@@ -331,13 +387,14 @@ function resultsView() {
       <button class="btn btn-ghost btn-sm" id="gr-copy">Copy emails (${rows.length})</button>
     </div>
     <div class="gr-wrap"><table class="gr-tbl">
-      <thead><tr><th>Name</th><th>Group</th><th>Year</th><th>Raters</th>
+      <thead><tr><th>Name</th><th>Group</th><th>Year</th><th>Grad</th><th>Raters</th>
         <th>Speak</th><th>Person</th><th>Impress</th><th>Final</th><th>Decision</th></tr></thead>
       <tbody>${rows.length ? rows.map(({ c, t }) => `
         <tr class="gr-clickrow" data-open="${esc(c.key)}">
           <td><strong>${esc(c.name)}</strong><br><span class="gr-sub">${esc(c.major || '')}</span></td>
           <td>${groupTag(c.group)}</td>
           <td>${esc(c.year || '')}</td>
+          <td>${esc(c.grad || '')}</td>
           <td class="num">${t.raters}</td>
           <td class="num">${fmt(t.spk)}</td>
           <td class="num">${fmt(t.per)}</td>
@@ -346,7 +403,7 @@ function resultsView() {
           <td data-noopen><select class="gr-dec" data-dec="${esc(c.key)}" data-v="${esc(c.decision || '')}">
             ${DECISIONS.map(d => `<option value="${d}" ${(c.decision || '') === d ? 'selected' : ''}>${d || '—'}</option>`).join('')}
           </select></td>
-        </tr>`).join('') : '<tr><td colspan="9"><div class="empty"><p>No candidates match.</p></div></td></tr>'}
+        </tr>`).join('') : '<tr><td colspan="10"><div class="empty"><p>No candidates match.</p></div></td></tr>'}
       </tbody>
     </table></div>`;
 }
@@ -510,7 +567,7 @@ function openDetail(c) {
   local.detail = c;
   $('#gr-d-name').textContent = c.name;
   $('#gr-d-sub').innerHTML = [
-    esc([c.year, c.major].filter(Boolean).join(' · ')),
+    esc(subLine(c)),
     c.group ? groupTag(c.group) : ''
   ].filter(Boolean).join(' · ');
   $('#gr-d-body').innerHTML = renderDetail(c);
@@ -523,7 +580,7 @@ function openGrade(c) {
   local.target = c;
   const s = c.scores?.[local.who] || {};
   $('#gr-g-name').textContent = c.name;
-  $('#gr-g-sub').textContent = [c.year, c.major, c.group].filter(Boolean).join(' · ');
+  $('#gr-g-sub').textContent = [subLine(c), c.group].filter(Boolean).join(' · ');
   $('#gr-g-body').innerHTML = CRIT.map(cr => `
     <div class="gr-crit">
       <span>${cr.name}</span>
@@ -750,12 +807,12 @@ export default {
           return;
         }
 
-        const label = { name: 'Name', year: 'Year', major: 'Major', email: 'Email' };
+        const label = { name: 'Name', year: 'Year', grad: 'Grad', major: 'Major', email: 'Email' };
         const mapped = Object.entries(parsed.mapping)
           .filter(([, i]) => i !== undefined)
           .map(([f, i]) => `<span><b>${label[f]}</b> ← ${esc(parsed.header ? parsed.header[i] : 'column ' + (i + 1))}</span>`)
           .join('');
-        const missing = ['year', 'major', 'email'].filter(f => parsed.mapping[f] === undefined);
+        const missing = ['year', 'grad', 'major', 'email'].filter(f => parsed.mapping[f] === undefined);
 
         box.innerHTML = `
           <div class="gr-map">${mapped}</div>
@@ -764,9 +821,9 @@ export default {
           ${parsed.skipped ? `<p class="hint" style="margin-bottom:9px">${parsed.skipped}
             row${parsed.skipped === 1 ? '' : 's'} skipped for having no name.</p>` : ''}
           <table class="gr-prevtbl">
-            <thead><tr><th>Name</th><th>Year</th><th>Major</th><th>Email</th></tr></thead>
+            <thead><tr><th>Name</th><th>Year</th><th>Grad</th><th>Major</th><th>Email</th></tr></thead>
             <tbody>${parsed.rows.slice(0, 6).map(r => `<tr>
-              <td>${esc(r.name)}</td><td>${esc(r.year)}</td>
+              <td>${esc(r.name)}</td><td>${esc(r.year)}</td><td>${esc(r.grad)}</td>
               <td>${esc(r.major)}</td><td>${esc(r.email)}</td></tr>`).join('')}
             </tbody>
           </table>
