@@ -213,7 +213,16 @@ const LOOKS_LIKE = {
   year:  v => /^(freshman|sophomore|junior|senior|grad(uate)?|1st|2nd|3rd|4th)\b/i.test(v),
   grad:  v => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*'?\d{2,4}/i.test(v)
               || /^(spring|fall|summer|winter)\s*'?\d{2,4}/i.test(v),
-  email: v => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(v)
+  email: v => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(v),
+
+  /* Major has no distinctive shape, so it's found by elimination: short prose,
+     no digits, no @. The length ceiling keeps it away from the long
+     "other campus involvements" answers, which otherwise look identical. */
+  major: v => v.length >= 3 && v.length <= 60
+              && /[A-Za-z]/.test(v)
+              && !/\d/.test(v)
+              && !/@/.test(v)
+              && v.split(/\s+/).length <= 8
 };
 
 /** How often a column's non-empty values match a signature. */
@@ -228,9 +237,10 @@ function columnLooksLike(rows, col, test) {
   return seen >= 2 && hits / seen >= 0.7;
 }
 
-function detectColumns(header, body) {
+function detectColumns(header, body, reserved) {
   const found = {};
   const used = new Set();
+  if (reserved !== undefined) used.add(reserved);
 
   // 1. by heading
   for (const [field, patterns] of COLUMN_HINTS) {
@@ -245,16 +255,31 @@ function detectColumns(header, body) {
     }
   }
 
-  // 2. by what the column actually contains, for anything still missing
+  // 2. by what the column actually contains, for anything still missing.
+  //    Order matters: the distinctive shapes claim their columns first, so major
+  //    — the loosest test — only ever sees what's left over.
   if (body && body.length) {
-    for (const field of ['year', 'grad', 'email']) {
+    for (const field of ['year', 'grad', 'email', 'major']) {
       if (found[field] !== undefined) continue;
+
+      const fits = [];
       for (let c = 0; c < header.length; c++) {
         if (used.has(c)) continue;
-        if (columnLooksLike(body, c, LOOKS_LIKE[field])) {
-          found[field] = c; used.add(c); break;
-        }
+        if (columnLooksLike(body, c, LOOKS_LIKE[field])) fits.push(c);
       }
+      if (!fits.length) continue;
+
+      // Several columns can read like a major (name does too). Prefer the one
+      // just after whatever we already identified, which is how these forms run.
+      let pick = fits[0];
+      if (field === 'major') {
+        const anchor = Math.max(
+          found.grad ?? -1, found.year ?? -1, found.email ?? -1, found.name ?? -1);
+        const after = fits.filter(c => c > anchor);
+        pick = after.length ? after[0] : fits[fits.length - 1];
+      }
+      found[field] = pick;
+      used.add(pick);
     }
   }
   return found;
@@ -278,16 +303,23 @@ function parseRoster(text) {
 
   if (!hasHeader) {
     body = rows;
-    cols = detectColumns(header.map(() => ''), body);
-    // A name column is whatever's left: first column that isn't already spoken
-    // for and reads like a person rather than a number.
-    const taken = new Set(Object.values(cols));
+    const blank = header.map(() => '');
+
+    // Find the name first — two words, no digits, no @ — so the major hunt below
+    // can't grab the name column instead.
+    const firstPass = detectColumns(blank, body);
+    const taken = new Set(Object.values(firstPass));
+    let nameCol;
     for (let c = 0; c < header.length; c++) {
       if (taken.has(c)) continue;
-      if (columnLooksLike(body, c, v => /[A-Za-z]{2,}\s+[A-Za-z]/.test(v) && !/@/.test(v))) {
-        cols.name = c; break;
+      if (columnLooksLike(body, c,
+          v => /^[A-Za-z][A-Za-z'.-]*\s+[A-Za-z]/.test(v) && !/@/.test(v) && !/\d/.test(v))) {
+        nameCol = c; break;
       }
     }
+
+    cols = detectColumns(blank, body, nameCol);
+    if (nameCol !== undefined) cols.name = nameCol;
   }
 
   const idx = cols;
