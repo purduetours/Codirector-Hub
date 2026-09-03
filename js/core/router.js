@@ -2,7 +2,7 @@
    Modules register themselves; the router owns which one is mounted. Hash-based
    so it works on GitHub Pages with no server rewrites.
 ============================================================================ */
-import { $, $$ } from './ui.js';
+import { $, $$, closeAllModals } from './ui.js';
 import { state } from './state.js';
 
 const modules = new Map();
@@ -73,6 +73,10 @@ async function renderOnce() {
 
   $('#view-title').textContent = mod.title;
   $('#view-crumb').textContent = mod.crumb || '';
+
+  // Anything still open belongs to the outgoing view and is about to be wiped with
+  // it. Close it properly first, or its scroll lock outlives it.
+  closeAllModals();
 
   const view = $('#view');
   view.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading…</p></div>';

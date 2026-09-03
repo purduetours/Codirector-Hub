@@ -53,7 +53,8 @@ function paint() {
 
 export default {
   id: 'announcements',
-  adminOnly: true,
+  // Everyone signed in can read these — that is the point of posting them. Writing
+  // is admin-only, enforced by the New/Delete buttons below and again on the server.
   title: 'Announcements',
   crumb: 'Notices for the committee',
   icon: '📣',

@@ -30,8 +30,12 @@ export function persistSession() {
 }
 
 export function signOut() {
+  // The code goes too. Leaving it behind means "Switch user" hands the next person
+  // at a shared laptop the admin code, which is the one thing the gate protects.
   localStorage.removeItem(LS_NAME);
+  localStorage.removeItem(LS_CODE);
   state.name = '';
+  state.code = '';
   state.isAdmin = false;
   state.guides = [];
   state.loadedAt = null;

@@ -77,8 +77,20 @@ export function wireModal(root) {
     if (e.target.closest('[data-close]')) closeModal(root);
   });
 }
+
+/**
+ * Closes whatever is open, releasing the body scroll lock with it.
+ *
+ * Modals are markup inside the view, so navigating away deletes them outright and
+ * closeModal never runs — leaving the lock on with no modal left to lift it, and
+ * the page silently stuck unscrollable. The router calls this before it repaints.
+ */
+export function closeAllModals() {
+  $$('.modal-root').forEach(r => { if (!r.hidden) closeModal(r); });
+}
+
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') $$('.modal-root').forEach(r => { if (!r.hidden) closeModal(r); });
+  if (e.key === 'Escape') closeAllModals();
 });
 
 /* --- misc -------------------------------------------------------------- */
