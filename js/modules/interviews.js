@@ -60,7 +60,7 @@ injectStyle('gr-css', `
 .gr-tbl { width:100%; border-collapse:collapse; font-size:.82rem; }
 .gr-tbl th, .gr-tbl td { padding:9px 11px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
 .gr-tbl th { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint);
-  font-weight:700; background:var(--bg-sunken); position:sticky; top:0; cursor:pointer; }
+  font-weight:700; background:var(--bg-sunken); position:sticky; top:0; }
 .gr-tbl td.num { font-variant-numeric:tabular-nums; }
 .gr-tbl tr:hover td { background:var(--bg-sunken); }
 .gr-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--bg-elev); }
@@ -244,6 +244,10 @@ function parseTable(text) {
 
 /** Which source column feeds which field. Order matters — first match wins. */
 const COLUMN_HINTS = [
+  // PUID is matched by heading only, never by content: a ten-digit column could as
+  // easily be a phone number. Claiming it here also keeps it away from the year and
+  // major detectors, which is how PUIDs ended up in the year field once before.
+  ['puid',  [/puid/i, /purdue\s*id/i, /student\s*id/i]],
   ['name',  [/full name/i, /^name$/i, /your name/i, /candidate/i]],
   ['email', [/e-?mail/i]],
   ['grad',  [/graduation/i, /grad (date|year|month)/i, /expected graduation/i]],
@@ -385,7 +389,8 @@ function parseRoster(text) {
     const name = (r[idx.name] || '').trim();
     if (!name) { skipped++; continue; }
     const pick = f => (idx[f] !== undefined ? r[idx[f]] : '') || '';
-    out.push({ name, year: pick('year'), grad: pick('grad'), major: pick('major'), email: pick('email') });
+    out.push({ name, puid: pick('puid'), year: pick('year'), grad: pick('grad'),
+               major: pick('major'), email: pick('email') });
   }
 
   return { rows: out, mapping: idx, header: hasHeader ? header : null, skipped };
@@ -629,8 +634,8 @@ function setupView() {
         </label>
         <p class="hint">Paste straight from the Google Form responses sheet — with or without the
           header row, in any column order, one applicant or all of them. Columns are worked out from
-          their headings and from what they contain, so the ones you don't need (timestamp, PUID,
-          involvements) are ignored. Long multi-line answers won't break the rows.</p>
+          their headings and from what they contain, so the ones you don't need (timestamp,
+          involvements) are ignored. A column headed PUID, Purdue ID or Student ID is picked up. Long multi-line answers won't break the rows.</p>
 
         <div><button class="btn btn-ghost" id="gr-preview">Check this paste</button></div>
 
@@ -724,13 +729,29 @@ async function saveGradeCall(key, who, scores, note) {
 
   // Set each criterion individually. Same end state as saveGrade, four round trips.
   // Spaced out on purpose: firing four at Apps Script back to back is exactly when
-  // it starts dropping them, and a failure here can leave a grade half-written.
+  // it starts dropping them.
+  //
+  // Every part is attempted even after one fails. Stopping at the first error left
+  // the sheet holding, say, a speaking score and nothing else — and a row with one
+  // criterion still counts as a whole rater, so it quietly dragged that candidate's
+  // final average toward a number nobody actually gave them. Pressing Save again
+  // rewrites all four, so the fix is simply to say clearly that it must be pressed.
   const gap = () => new Promise(r => setTimeout(r, 350));
+  const failed = [];
+
   for (const cr of CRIT) {
-    await gr('setScore', [key, who, cr.k, scores[cr.k]]);
+    try { await gr('setScore', [key, who, cr.k, scores[cr.k]]); }
+    catch { failed.push(cr.name.toLowerCase()); }
     await gap();
   }
-  await gr('setNote', [key, who, note]);
+  try { await gr('setNote', [key, who, note]); }
+  catch { failed.push('the note'); }
+
+  if (failed.length) {
+    throw new Error(
+      `Only part of that grade saved — ${failed.join(', ')} did not go through. ` +
+      `Press Save again to rewrite the whole grade.`);
+  }
   return true;
 }
 
@@ -1113,12 +1134,12 @@ export default {
           return;
         }
 
-        const label = { name: 'Name', year: 'Year', grad: 'Grad', major: 'Major', email: 'Email' };
+        const label = { name: 'Name', puid: 'PUID', year: 'Year', grad: 'Grad', major: 'Major', email: 'Email' };
         const mapped = Object.entries(parsed.mapping)
           .filter(([, i]) => i !== undefined)
           .map(([f, i]) => `<span><b>${label[f]}</b> ← ${esc(parsed.header ? parsed.header[i] : 'column ' + (i + 1))}</span>`)
           .join('');
-        const missing = ['year', 'grad', 'major', 'email'].filter(f => parsed.mapping[f] === undefined);
+        const missing = ['puid', 'year', 'grad', 'major', 'email'].filter(f => parsed.mapping[f] === undefined);
 
         box.innerHTML = `
           <div class="gr-map">${mapped}</div>
@@ -1127,9 +1148,9 @@ export default {
           ${parsed.skipped ? `<p class="hint" style="margin-bottom:9px">${parsed.skipped}
             row${parsed.skipped === 1 ? '' : 's'} skipped for having no name.</p>` : ''}
           <table class="gr-prevtbl">
-            <thead><tr><th>Name</th><th>Year</th><th>Grad</th><th>Major</th><th>Email</th></tr></thead>
+            <thead><tr><th>Name</th><th>PUID</th><th>Year</th><th>Grad</th><th>Major</th><th>Email</th></tr></thead>
             <tbody>${parsed.rows.slice(0, 6).map(r => `<tr>
-              <td>${esc(r.name)}</td><td>${esc(r.year)}</td><td>${esc(r.grad)}</td>
+              <td>${esc(r.name)}</td><td>${esc(r.puid)}</td><td>${esc(r.year)}</td><td>${esc(r.grad)}</td>
               <td>${esc(r.major)}</td><td>${esc(r.email)}</td></tr>`).join('')}
             </tbody>
           </table>
