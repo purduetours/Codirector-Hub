@@ -22,8 +22,8 @@ export function grConfigured() {
  * lost to Google's flaky redirect can simply be sent again.
  *
  * Deliberately absent: importRoster (an append would double the roster),
- * clearRoster and clearInterviewers (destructive enough to want a human deciding
- * to repeat them).
+ * removeCandidate, clearRoster and clearInterviewers (destructive enough to want a
+ * human deciding to repeat them).
  */
 const GR_RETRYABLE = new Set([
   'ping', 'getState',        // reads

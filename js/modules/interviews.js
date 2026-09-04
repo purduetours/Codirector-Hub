@@ -545,6 +545,50 @@ function decisionsView() {
               : 'Nobody matches that filter.'}</p></div>`}`;
 }
 
+/**
+ * The whole roster, one row each, with everything held about a person — including
+ * the PUID, which nothing else on screen shows. Admin-only: this is where people
+ * get taken off, and that takes their scores with them.
+ */
+function rosterView() {
+  const rows = filtered(data.candidates);
+  const cell = v => esc(v || '') || '<span class="muted">—</span>';
+
+  return `
+    <div class="gr-bar">
+      <label class="search">${SEARCH_ICON}<input type="search" id="gr-search"
+        placeholder="Search name, major or email…" value="${esc(local.search)}" autocomplete="off"></label>
+      <span class="muted">${rows.length} of ${data.candidates.length} on the roster</span>
+    </div>
+
+    ${rows.length ? `<div class="gr-wrap"><table class="gr-tbl">
+      <thead><tr>
+        <th>Name</th><th>Year</th><th>Major</th><th>PUID</th>
+        <th>Email</th><th>Group</th><th class="num">Ratings</th><th></th>
+      </tr></thead>
+      <tbody>${rows.map(c => {
+        const n = Object.keys(c.scores || {}).length;
+        return `<tr>
+          <td><strong>${esc(c.name)}</strong></td>
+          <td>${cell(c.year)}</td>
+          <td>${cell(c.major)}</td>
+          <td class="num">${cell(c.puid)}</td>
+          <td>${cell(c.email)}</td>
+          <td>${c.group ? groupTag(c.group) : '<span class="muted">—</span>'}</td>
+          <td class="num">${n || '<span class="muted">—</span>'}</td>
+          <td><button class="btn btn-quiet btn-sm" data-remove="${esc(c.key)}"
+                aria-label="Remove ${esc(c.name)} from the roster"
+                title="Remove from the roster">✕</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`
+    : `<div class="empty"><div class="empty-mark">${local.search ? '🔍' : '👥'}</div>
+       <p>${local.search ? 'Nobody matches that search.' : 'Nobody on the roster yet — add people in Setup.'}</p></div>`}
+
+    <p class="hint" style="margin-top:11px">Removing someone deletes their row and every rating
+      already given for them. To add a candidate, use <strong>Setup</strong>.</p>`;
+}
+
 function setupView() {
   return `
     <div class="callout"><strong>These write straight through to the Guide Room spreadsheet.</strong>
@@ -778,6 +822,7 @@ function paint() {
   else if (local.tab === 'grade') body.innerHTML = gradeView();
   else if (local.tab === 'results') body.innerHTML = resultsView();
   else if (local.tab === 'decisions') body.innerHTML = decisionsView();
+  else if (local.tab === 'roster') body.innerHTML = rosterView();
   else body.innerHTML = setupView();
 }
 
@@ -805,6 +850,7 @@ export default {
         <button class="tab" data-tab="grade">Grade</button>
         <button class="tab" data-tab="results">Results</button>
         <button class="tab" data-tab="decisions">Decisions</button>
+        ${state.isAdmin ? '<button class="tab" data-tab="roster">Roster</button>' : ''}
         ${state.isAdmin ? '<button class="tab" data-tab="setup">Setup</button>' : ''}
       </nav>
       <div id="gr-body"><div class="loading"><div class="spinner"></div><p>Loading interviews…</p></div></div>
@@ -969,6 +1015,26 @@ export default {
         const emails = rows.map(c => c.email).filter(Boolean).join(', ');
         try { await navigator.clipboard.writeText(emails); toast(`Copied ${rows.length} email addresses.`); }
         catch { toast('Could not reach the clipboard.', 'err'); }
+        return;
+      }
+
+      const rm = e.target.closest('[data-remove]');
+      if (rm) {
+        const c = data.candidates.find(x => x.key === rm.dataset.remove);
+        if (!c) return;
+        const n = Object.keys(c.scores || {}).length;
+        if (!confirm(
+          `Remove ${c.name} from the roster?` +
+          (n ? `\n\nThis also deletes the ${n} rating${n === 1 ? '' : 's'} already given for them.` : '') +
+          `\n\nThis cannot be undone from here.`)) return;
+
+        rm.disabled = true;
+        try {
+          await gr('removeCandidate', [c.key]);
+          await refresh();
+          paint();
+          toast(`Removed ${c.name}.`);
+        } catch (err) { toast(err.message, 'err'); rm.disabled = false; }
         return;
       }
 
