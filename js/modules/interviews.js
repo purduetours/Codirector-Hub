@@ -26,7 +26,10 @@ const YEARS = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate'];
 let data = null;                 // { cycle, groups, interviewers, candidates[] }
 let pending = [];                // parsed roster rows awaiting Add/Replace
 const local = { tab: 'checkin', search: '', who: '', group: '', decision: '',
-                decFilter: '__undecided', target: null, detail: null };
+                decFilter: '__undecided', target: null, detail: null,
+                // set when refresh() drops a who that no longer exists, so mount
+                // knows not to quietly pick a replacement on their behalf
+                whoDropped: false };
 
 injectStyle('gr-css', `
 .gr-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
@@ -450,7 +453,10 @@ function gradeView() {
           ? CRIT.map(cr => `<span class="gr-num">${cr.k} ${s[cr.k] ?? '—'}</span>`).join('')
           : '<span class="gr-num">not graded</span>'}</span>
       </button>`;
-    }).join('') : '<div class="empty"><div class="empty-mark">✅</div><p>Nobody is checked in yet.</p></div>'}
+    }).join('') : `<div class="empty"><div class="empty-mark">${local.search ? '🔍' : '✅'}</div>
+      <p>${local.search
+        ? 'Nobody checked in matches that search.'
+        : 'Nobody is checked in yet.'}</p></div>`}
     </div>`;
 }
 
@@ -706,12 +712,13 @@ async function saveGradeCall(key, who, scores, note) {
     try {
       return await gr('saveGrade', [key, who, scores, note]);
     } catch (err) {
-      // Any failure here falls back to the original four calls. The obvious case is
-      // an older deployment without saveGrade, but a dropped request is worth the
-      // same treatment — the writes are idempotent, so re-sending them is safe and
-      // a saved grade matters more than saving it the fast way.
-      canBatchGrade = false;
-      console.warn('saveGrade unavailable, using per-field writes:', err.message);
+      // Fall back for THIS save either way — a written grade matters more than a
+      // fast one. But only a deployment that genuinely has no saveGrade should put
+      // the tab on the slow path for good: latching on any error meant one dropped
+      // request tripled every save for the rest of the session and told the
+      // codirector their backend was out of date when it wasn't.
+      if (/unknown function/i.test(err.message || '')) canBatchGrade = false;
+      console.warn('saveGrade failed, using per-field writes:', err.message);
     }
   }
 
@@ -813,6 +820,20 @@ function openGrade(c) {
 
 async function refresh() {
   data = await gr('getState');
+
+  // Settings can change while this tab is open — an interviewer renamed or removed,
+  // a group dropped. A stale local.who files scores under a column that no longer
+  // exists (the save just fails); a stale group quietly filters everyone out with
+  // no hint as to why. Drop either the moment it stops being real.
+  if (local.who && !(data.interviewers || []).includes(local.who)) {
+    // Say so out loud. Silently moving someone onto a different interviewer would
+    // file their next grade under the wrong name, which nothing downstream could
+    // detect — far worse than making them pick again.
+    toast(`${local.who} is no longer on the interviewer list — pick who you are again.`, 'err');
+    local.who = '';
+    local.whoDropped = true;
+  }
+  if (local.group && !(data.groups || []).includes(local.group)) local.group = '';
 }
 
 function paint() {
@@ -887,7 +908,10 @@ export default {
     // Re-entering the tab shouldn't cost another 6-second round trip; the toolbar's
     // Refresh is there when someone wants the sheet re-read.
     if (!data) await refresh();
-    if (!local.who && data.interviewers.includes(state.name)) local.who = state.name;
+    // Default to yourself, but never straight after an interviewer was dropped —
+    // that is exactly when a silent reassignment would go unnoticed.
+    if (local.whoDropped) local.whoDropped = false;
+    else if (!local.who && data.interviewers.includes(state.name)) local.who = state.name;
     paint();
 
     $('#gr-tabs').addEventListener('click', e => {
@@ -916,9 +940,14 @@ export default {
         // and the write is idempotent, so the worst case is a revert.
         const key = t.dataset.key;
         const want = t.checked;
+        const hadFocus = document.activeElement === t;
         const c = data.candidates.find(x => x.key === key);
         if (c) c.checkin = want ? 'Yes' : '';
         paint();
+        // paint() swaps the whole list, so the tick just clicked is a different
+        // element now and focus has gone back to the top of the page. Checking a
+        // queue of people in by keyboard is unusable that way.
+        if (hadFocus) $(`.gr-in[data-key="${key}"]`)?.focus();
 
         try {
           await gr('setField', [key, 'checkin', want ? 'Yes' : '']);
@@ -988,8 +1017,10 @@ export default {
         const next = c.decision === setBtn.dataset.set ? '' : setBtn.dataset.set;
         const prev = c.decision || '';
 
+        const hadFocus = document.activeElement === setBtn;
         c.decision = next;      // optimistic, same as check-in
         paint();
+        if (hadFocus) $(`[data-key="${key}"] [data-set="${setBtn.dataset.set}"]`)?.focus();
         try {
           await gr('setField', [key, 'decision', next]);
         } catch (err) {
@@ -1012,9 +1043,14 @@ export default {
         const f = local.tab === 'decisions' ? local.decFilter : local.decision;
         if (f === '__undecided') rows = rows.filter(c => !String(c.decision || '').trim());
         else if (f) rows = rows.filter(c => (c.decision || '') === f);
-        const emails = rows.map(c => c.email).filter(Boolean).join(', ');
-        try { await navigator.clipboard.writeText(emails); toast(`Copied ${rows.length} email addresses.`); }
-        catch { toast('Could not reach the clipboard.', 'err'); }
+        const emails = rows.map(c => c.email).filter(Boolean);
+        if (!emails.length) return toast('Nobody in that list has an email address on file.', 'err');
+        try {
+          await navigator.clipboard.writeText(emails.join(', '));
+          const missing = rows.length - emails.length;
+          toast(`Copied ${emails.length} email address${emails.length === 1 ? '' : 'es'}.` +
+                (missing ? ` ${missing} had none on file.` : ''));
+        } catch { toast('Could not reach the clipboard.', 'err'); }
         return;
       }
 
