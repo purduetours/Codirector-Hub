@@ -8,7 +8,7 @@
 import { gr, grConfigured } from '../core/guideRoomApi.js';
 import { state } from '../core/state.js';
 import {
-  $, $$, esc, toast, showError, debounce, injectStyle,
+  $, $$, esc, sameName, toast, showError, debounce, injectStyle,
   openModal, closeModal, wireModal, SEARCH_ICON
 } from '../core/ui.js';
 
@@ -18,6 +18,10 @@ const CRIT = [
   { k: 'imp', name: 'Overall impression', labels: ["Wouldn't hire", 'Meh', 'Average', 'Above avg', 'Need to hire'] }
 ];
 const DECISIONS = ['', 'Yes', 'Maybe', 'No'];
+
+/* Spelled to match what the roster parser recognises in a pasted sheet, so a
+   hand-added candidate and an imported one read the same on the sheet. */
+const YEARS = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate'];
 
 let data = null;                 // { cycle, groups, interviewers, candidates[] }
 let pending = [];                // parsed roster rows awaiting Add/Replace
@@ -604,6 +608,39 @@ function setupView() {
     </div>
 
     <div class="panel" style="margin-top:16px">
+      <div class="panel-head"><h3>Add one candidate</h3></div>
+      <div style="padding:15px;display:grid;gap:13px">
+        <p class="hint">For a single late applicant. To load a batch, paste them in above.</p>
+
+        <label class="field"><span>Name</span>
+          <input id="gr-one-name" autocomplete="off" placeholder="First Last"></label>
+
+        <div class="row2">
+          <label class="field"><span>Year in school</span>
+            <select id="gr-one-year">
+              <option value="">—</option>
+              ${YEARS.map(y => `<option>${y}</option>`).join('')}
+            </select></label>
+          <label class="field"><span>Major</span>
+            <input id="gr-one-major" autocomplete="off" placeholder="e.g. Mechanical Engineering"></label>
+        </div>
+
+        <div class="row2">
+          <label class="field"><span>PUID</span>
+            <input id="gr-one-puid" autocomplete="off" inputmode="numeric" placeholder="0012345678"></label>
+          <label class="field"><span>Email</span>
+            <input id="gr-one-email" type="email" autocomplete="off" placeholder="name@purdue.edu"></label>
+        </div>
+
+        <p class="hint">Only the name is required — the rest can be filled in later from
+          the candidate's row. They join the group rotation like any other import.</p>
+        <p class="form-error" id="gr-one-error" hidden></p>
+
+        <div><button class="btn btn-primary" id="gr-one-add">Add candidate</button></div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
       <div class="panel-head"><h3>Danger zone</h3></div>
       <div style="padding:15px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-danger" id="gr-clear-roster">Clear roster</button>
@@ -1031,6 +1068,43 @@ export default {
             ? `Roster replaced — ${n} candidates loaded.`
             : `Added ${n} candidates. Roster is now ${data.candidates.length}.`);
         } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
+      }
+
+      if (e.target.id === 'gr-one-add') {
+        const btn = e.target, err = $('#gr-one-error');
+        const val = sel => $(sel).value.trim();
+        const person = {
+          name:  val('#gr-one-name'),
+          puid:  val('#gr-one-puid'),
+          year:  val('#gr-one-year'),
+          major: val('#gr-one-major'),
+          email: val('#gr-one-email'),
+          grad:  ''
+        };
+
+        err.hidden = true;
+        if (!person.name) return showError(err, 'Give them a name — everything else can wait.');
+        if (person.email && !/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(person.email)) {
+          return showError(err, "That email address doesn't look right.");
+        }
+
+        // Adding is an append and is never retried, so a double-click or a second
+        // go at the same person would quietly sit them on the roster twice.
+        const clash = data.candidates.find(c => sameName(c.name, person.name));
+        if (clash && !confirm(`${clash.name} is already on the roster. Add a second entry anyway?`)) return;
+
+        btn.disabled = true;
+        btn.textContent = 'Adding…';
+        try {
+          await gr('importRoster', [[person], false]);
+          await refresh();
+          paint();                       // rebuilds the tab, which clears the form
+          toast(`Added ${person.name}.`);
+        } catch (e2) {
+          showError(err, e2.message);
+          btn.disabled = false;
+          btn.textContent = 'Add candidate';
+        }
       }
 
       if (e.target.id === 'gr-clear-roster') {

@@ -12,7 +12,7 @@
 fieldset.field { border: 0; margin: 0; padding: 0; }
 
 input[type=text], input[type=password], input[type=search], input[type=date],
-input[type=time], input:not([type]), textarea, select {
+input[type=time], input[type=email], input:not([type]), textarea, select {
   font: inherit; color: var(--text); background: var(--bg-elev);
   border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
   padding: 10px 12px; width: 100%;
