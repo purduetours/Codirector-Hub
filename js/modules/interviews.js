@@ -7,6 +7,7 @@
 ============================================================================ */
 import { select, update, upsert, insert, remove, toCandidate } from '../core/db.js';
 import { state, myName, isAdmin } from '../core/state.js';
+import { shareInterviews } from '../core/vanessa-ui.js';
 import {
   $, $$, esc, sameName, toast, showError, debounce, injectStyle,
   openModal, closeModal, wireModal, SEARCH_ICON
@@ -870,6 +871,9 @@ async function refresh() {
     interviewers: (panel || []).map(m => m.full_name),
     candidates
   };
+  // Vanessa reads what is already here rather than asking the database herself,
+  // so she can never surface something this person was not sent.
+  shareInterviews(data);
 
   if (local.group && !(data.groups || []).includes(local.group)) local.group = '';
 }

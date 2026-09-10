@@ -4,6 +4,7 @@
 ============================================================================ */
 import { loadTours } from '../core/sheets.js';
 import { $, $$, esc, prettyDate, prettyTime, todayISO, debounce, injectStyle, SEARCH_ICON } from '../core/ui.js';
+import { shareData } from '../core/vanessa-ui.js';
 
 let rows = null;                       // cached for the session
 const local = { search: '', from: '', days: 14 };
@@ -88,6 +89,7 @@ function paint() {
 async function prime() {
   if (rows) return;
   rows = await loadTours();
+  shareData('tours', rows);
 }
 
 export default {

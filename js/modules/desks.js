@@ -5,6 +5,7 @@
 ============================================================================ */
 import { loadDesks } from '../core/sheets.js';
 import { $, esc, prettyTime, injectStyle } from '../core/ui.js';
+import { shareData } from '../core/vanessa-ui.js';
 
 let rows = null;
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -57,6 +58,7 @@ function paint() {
 async function prime() {
   if (rows) return;
   rows = await loadDesks();
+  shareData('desks', rows);
 }
 
 export default {

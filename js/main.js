@@ -3,6 +3,7 @@ import { state, myName, isAdmin } from './core/state.js';
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
 import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
 import { $, $$, initials, toast } from './core/ui.js';
+import { initVanessa } from './core/vanessa-ui.js';
 
 import evals, { loadRoster } from './modules/evals.js';
 import interviews    from './modules/interviews.js';
@@ -27,6 +28,7 @@ function paintShell() {
 async function start() {
   paintShell();
   buildNav();
+  initVanessa();
   await render();
   paintShell();
 }
