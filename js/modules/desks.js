@@ -3,7 +3,7 @@
    rather than dated, so this shows a recurring Mon–Fri week and flags any slot
    nobody is covering.
 ============================================================================ */
-import { api } from '../core/api.js';
+import { loadDesks } from '../core/sheets.js';
 import { $, esc, prettyTime, injectStyle } from '../core/ui.js';
 
 let rows = null;
@@ -56,15 +56,14 @@ function paint() {
 /** Loads desk coverage once per session. Safe to call in the background. */
 async function prime() {
   if (rows) return;
-  const data = await api('desks');
-  rows = data.rows || [];
+  rows = await loadDesks();
 }
 
 export default {
   id: 'desks',
   prefetch: prime,
   bust: () => { rows = null; },
-  adminOnly: true,
+  needs: 'training',
   title: 'Desk Coverage',
   crumb: 'Front and Welcome desk shifts',
   icon: '🛎️',
@@ -85,7 +84,7 @@ export default {
     if (!rows.length) {
       $('#desk-body').innerHTML =
         `<div class="empty"><div class="empty-mark">🛎️</div>
-         <p>No desk data. Import <code>data/Desks.csv</code> as a <code>Desks</code> tab in the sheet.</p></div>`;
+         <p>No desk data in the shared workbook.</p></div>`;
       return;
     }
 

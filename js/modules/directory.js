@@ -4,7 +4,7 @@
    for the evals module — no extra network call.
 ============================================================================ */
 import { state } from '../core/state.js';
-import { refreshSession } from '../core/auth.js';
+import { loadRoster } from './evals.js';
 import {
   $, $$, esc, prettyDate, prettyTime, debounce, injectStyle,
   openModal, closeModal, wireModal, SEARCH_ICON
@@ -84,14 +84,14 @@ function profile(g) {
 
 export default {
   id: 'directory',
-  adminOnly: true,
+  needs: 'training',
   title: 'Guide Directory',
   crumb: 'Everyone on the roster, and what we know about them',
   icon: '👥',
   section: 'Tools',
 
   async mount(view) {
-    if (!state.guides.length) await refreshSession();
+    if (!state.guides.length) await loadRoster();
 
     view.innerHTML = `
       <div class="filters" style="margin-bottom:16px">

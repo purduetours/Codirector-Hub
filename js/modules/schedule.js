@@ -2,7 +2,7 @@
    A day-by-day view of the semester schedule. Reads the same `Schedule` tab the
    eval tracker uses, via a `schedule` action that returns it whole.
 ============================================================================ */
-import { api } from '../core/api.js';
+import { loadTours } from '../core/sheets.js';
 import { $, $$, esc, prettyDate, prettyTime, todayISO, debounce, injectStyle, SEARCH_ICON } from '../core/ui.js';
 
 let rows = null;                       // cached for the session
@@ -83,10 +83,11 @@ function paint() {
 }
 
 /** Loads the schedule once per session. Safe to call in the background. */
+/* Read straight out of the shared workbook by the browser. No key, no server,
+   and no Apps Script -- which is the last thing it was still being used for. */
 async function prime() {
   if (rows) return;
-  const data = await api('tourSchedule');
-  rows = data.rows || [];
+  rows = await loadTours();
 }
 
 export default {
@@ -117,7 +118,8 @@ export default {
     if (!rows.length) {
       $('#sch-body').innerHTML =
         `<div class="empty"><div class="empty-mark">📅</div>
-         <p>No schedule data. Import <code>data/Schedule.csv</code> as a <code>Schedule</code> tab in the sheet.</p></div>`;
+         <p>Nothing scheduled from today onward. If that looks wrong, check the
+         term label in <code>config.js</code> matches the workbook's month tabs.</p></div>`;
       return;
     }
 

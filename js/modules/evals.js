@@ -3,9 +3,9 @@
    claim -> schedule -> submit, with completed evals visible only to admins
    (filtered server-side) plus the end-of-semester rollover.
 ============================================================================ */
-import { api } from '../core/api.js';
-import { state } from '../core/state.js';
-import { refreshSession } from '../core/auth.js';
+import { select, update, rpc, toGuide } from '../core/db.js';
+import { loadTours } from '../core/sheets.js';
+import { state, myName, isAdmin } from '../core/state.js';
 import { paintNav } from '../core/router.js';
 import {
   $, $$, esc, sameName, prettyDate, prettyTime, toast, showError,
@@ -18,7 +18,7 @@ const TOUR_PREVIEW = 5;
 
 const local = { tab: 'open', search: '', priority: '', target: null, toursExpanded: false };
 
-const isMine = g => sameName(g.evaluator, state.name);
+const isMine = g => !!g.evaluatorId && g.evaluatorId === state.me?.id;
 
 injectStyle('evals-css', `
 .ev-card { display:flex; flex-direction:column; gap:11px; position:relative; overflow:hidden; }
@@ -75,7 +75,7 @@ injectStyle('evals-css', `
 /* ---------------------------------------------------------------- markup */
 
 function shell() {
-  const admin = state.isAdmin;
+  const admin = isAdmin();
   const ratings = window.CONFIG?.RATING_OPTIONS || ['1', '2', '3', '4', '5'];
   return `
   <section class="stats" style="margin-bottom:16px">
@@ -228,7 +228,7 @@ function visible() {
 
 function card(g) {
   const mine = isMine(g);
-  const admin = state.isAdmin;
+  const admin = isAdmin();
   const when = [prettyDate(g.date), prettyTime(g.time)].filter(Boolean).join(' · ');
 
   const meta = [];
@@ -313,8 +313,130 @@ function paint() {
   paintNav();
 }
 
+/**
+ * The whole roster in one query.
+ *
+ * The old app fetched this from Apps Script, which took three to eight seconds
+ * and shed load when several people asked at once. This is a single indexed
+ * read and comes back in well under a second, so there is no prefetching, no
+ * caching and no retry policy to get wrong.
+ */
+export async function loadRoster() {
+  const rows = await select('eval_roster',
+    'select=*&term_id=eq.fall-2026&order=priority_rank.asc,last_name.asc');
+  state.guides = (rows || []).map(toGuide);
+
+  // Counts cover the WHOLE roster so the progress bar stays truthful even for
+  // somebody who cannot see every card.
+  const c = { open: 0, claimed: 0, submitted: 0, reviewed: 0, skip: 0 };
+  state.guides.forEach(g => { c[g.status] = (c[g.status] || 0) + 1; });
+  state.counts = c;
+  state.neededTotal = state.guides.filter(g => g.status !== 'skip').length;
+  state.loadedAt = new Date();
+
+  attachTours().catch(() => {});   // never block the roster on the workbook
+  return state.guides;
+}
+
+/**
+ * Hangs each guide's upcoming tours off their card, so claiming somebody offers
+ * their real tour times instead of an empty date box.
+ *
+ * The schedule writes people as "Alli S." while the roster says "Alli Serrano",
+ * and it is not as simple as first name plus last initial:
+ *
+ *   "Nick Str."       -> Stromberg, so a surname matches on any prefix
+ *   "Cait G."         -> Caitlin Giordano, so first names do too
+ *   "Allison (Allie)" -> the roster carries the nickname in brackets
+ *   "Saandiya KPS"    -> only the first word of the first name is used
+ *
+ * Ported from the matcher the live hub has been using for a year, including its
+ * refusal to guess: two plausible guides means no match at all, because quietly
+ * hanging a tour on the wrong Ben is worse than hanging it on nobody.
+ */
+/* Only the two the matcher genuinely cannot work out. Note both point at the
+   spelling on the GUIDE roster, which is not always the spelling on the
+   committee list: Myelei is Whitaker as a guide and Capelle as a committee
+   member. Aliasing her to Capelle sent every one of her tours nowhere.
+
+   "Nick Str." deliberately has no entry -- the surname prefix match resolves it
+   to Stromberg on its own, and an alias here would hijack it to Steingraeber. */
+const ALIASES = {
+  'nick s.':   'Nicholas (Nick) Steingraeber',
+  'myelei c.': 'Myelei Whitaker'
+};
+
+let tourCache = null;
+
+function buildNameIndex(guides) {
+  const index = new Map();
+  const add = (key, g) => {
+    key = String(key || '').trim().toLowerCase();
+    if (!key) return;
+    if (!index.has(key)) index.set(key, []);
+    const arr = index.get(key);
+    if (!arr.includes(g)) arr.push(g);
+  };
+  guides.forEach(g => {
+    const first = String(g.first || '').trim();
+    const paren = /^(.*?)\s*\((.*?)\)\s*$/.exec(first);
+    if (paren) { add(paren[1], g); add(paren[2], g); } else { add(first, g); }
+    add(first.split(/\s+/)[0], g);
+  });
+  return index;
+}
+
+function resolveGuide(label, index, byName) {
+  const clean = String(label || '').replace(/[*+`\u00b4']+/g, '').trim();
+  if (!clean) return null;
+
+  const alias = ALIASES[clean.toLowerCase()];
+  if (alias) return byName.get(alias.toLowerCase()) || null;
+
+  const m = /^(.+?)\s+([A-Za-z]+)\.?$/.exec(clean);
+  if (!m) return null;
+  const first = m[1].trim().toLowerCase();
+  const surname = m[2].trim().toLowerCase();
+  const surnameFits = g => String(g.last || '').trim().toLowerCase().startsWith(surname);
+
+  const exact = index.get(first);
+  if (exact && exact.length) {
+    const hits = exact.filter(surnameFits);
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return null;          // genuinely ambiguous
+  }
+
+  // The schedule sometimes shortens a first name the roster spells out. Accept
+  // that only when the surname agrees and exactly one guide fits.
+  const loose = [];
+  for (const [key, group] of index) {
+    if (!key.startsWith(first)) continue;
+    group.forEach(g => { if (surnameFits(g) && !loose.includes(g)) loose.push(g); });
+  }
+  return loose.length === 1 ? loose[0] : null;
+}
+
+async function attachTours() {
+  if (!tourCache) tourCache = await loadTours();
+
+  state.guides.forEach(g => { g.tours = []; });
+  const index = buildNameIndex(state.guides);
+  const byName = new Map(state.guides.map(g => [String(g.name).toLowerCase(), g]));
+
+  const unmatched = new Set();
+  for (const t of tourCache) {
+    const g = resolveGuide(t.guide, index, byName);
+    if (!g) { unmatched.add(t.guide); continue; }
+    g.tours.push({ date: t.date, start: t.start, slot: t.slot });
+  }
+  state.guides.forEach(g => g.tours.sort((a, b) =>
+    a.date === b.date ? a.start.localeCompare(b.start) : a.date.localeCompare(b.date)));
+  state.unmatchedSchedule = [...unmatched];
+  paintNav();
+}
+
 async function reload() {
-  await refreshSession();
+  await loadRoster();
   paint();
 }
 
@@ -384,6 +506,7 @@ function openEval(g) {
 
 export default {
   id: 'evals',
+  needs: 'training',
   title: 'Eval Tracker',
   crumb: 'Claim and submit tour guide evaluations',
   icon: '📋',
@@ -391,7 +514,7 @@ export default {
   badge: () => state.guides.filter(g => isMine(g) && g.status === 'claimed').length || null,
 
   async mount(view) {
-    if (!state.guides.length) await refreshSession();
+    if (!state.guides.length) await loadRoster();
     view.innerHTML = shell();
     $$('.modal-root', view).forEach(wireModal);
     paint();
@@ -407,7 +530,7 @@ export default {
     view.querySelector('.stats').addEventListener('click', e => {
       const s = e.target.closest('.stat');
       if (!s) return;
-      if (s.dataset.jump === 'done' && !state.isAdmin) return;
+      if (s.dataset.jump === 'done' && !isAdmin()) return;
       $$('#ev-tabs .tab').find(t => t.dataset.tab === s.dataset.jump)?.click();
     });
 
@@ -427,13 +550,21 @@ export default {
       if (b.dataset.act === 'unclaim') {
         if (!confirm(`Release ${g.name} back to the open list?`)) return;
         b.disabled = true;
-        try { toast((await api('unclaim', { id: g.id })).message); await reload(); }
-        catch (err) { toast(err.message, 'err'); b.disabled = false; }
+        try {
+          await update('evals', `id=eq.${g.id}`,
+            { evaluator_id: null, claimed_at: null, tour_date: null, tour_time: null });
+          toast(`Released ${g.name}.`);
+          await reload();
+        } catch (err) { toast(err.message, 'err'); b.disabled = false; }
       }
       if (b.dataset.act === 'review') {
         b.disabled = true;
-        try { toast((await api('markReviewed', { id: g.id, value: g.status !== 'reviewed' })).message); await reload(); }
-        catch (err) { toast(err.message, 'err'); b.disabled = false; }
+        const on = g.status !== 'reviewed';
+        try {
+          await update('evals', `id=eq.${g.id}`, { reviewed_at: on ? new Date().toISOString() : null });
+          toast(`${on ? 'Marked' : 'Unmarked'} ${g.name} as reviewed.`);
+          await reload();
+        } catch (err) { toast(err.message, 'err'); b.disabled = false; }
       }
     });
 
@@ -458,14 +589,26 @@ export default {
       const label = go.textContent;
       go.disabled = true; go.textContent = 'Saving…'; err.hidden = true;
       try {
-        const r = await api(mode, {
-          id: local.target.id,
-          date: $('#ev-claim-date').value,
-          time: $('#ev-claim-time').value,
-          notes: $('#ev-claim-notes').value
-        });
+        const patch = {
+          tour_date: $('#ev-claim-date').value || null,
+          tour_time: $('#ev-claim-time').value || null,
+          scheduling_notes: $('#ev-claim-notes').value || null
+        };
+        // Claiming filters on "nobody has it yet", so if two people press the
+        // button at the same instant one gets the row back and the other gets
+        // none. No lock, no queue -- Postgres settles it.
+        let filter = `id=eq.${local.target.id}`;
+        if (mode === 'claim') {
+          patch.evaluator_id = state.me.id;
+          patch.claimed_at = new Date().toISOString();
+          filter += '&evaluator_id=is.null';
+        }
+        const rows = await update('evals', filter, patch);
+        if (mode === 'claim' && (!rows || !rows.length)) {
+          throw new Error(`${local.target.name} was just claimed by somebody else.`);
+        }
         closeModal($('#ev-modal-claim'));
-        toast(r.message);
+        toast(mode === 'claim' ? `You claimed ${local.target.name}.` : 'Schedule updated.');
         await reload();
       } catch (e2) {
         showError(err, e2.message);
@@ -482,23 +625,27 @@ export default {
       const checked = $('#ev-rating input:checked');
       go.disabled = true; go.textContent = 'Submitting…'; err.hidden = true;
       try {
-        const r = await api('submit', {
-          id: local.target.id,
-          date: $('#ev-eval-date').value,
-          time: $('#ev-eval-time').value,
-          rating: checked ? checked.value : '',
-          wentWell: $('#ev-well').value,
-          improve: $('#ev-improve').value,
-          notes: $('#ev-notes').value
+        if ($('#ev-eval-date').value || $('#ev-eval-time').value) {
+          await update('evals', `id=eq.${local.target.id}`, {
+            tour_date: $('#ev-eval-date').value || null,
+            tour_time: $('#ev-eval-time').value || null
+          });
+        }
+        const r = await rpc('submit_eval', {
+          p_eval_id:   local.target.id,
+          p_rating:    checked ? Number(checked.value) : null,
+          p_went_well: $('#ev-well').value,
+          p_improve:   $('#ev-improve').value,
+          p_notes:     $('#ev-notes').value
         });
         closeModal($('#ev-modal-eval'));
-        toast(r.priorityChanged ? `${r.message} Priority moved to ${r.priorityChanged.split(' -> ')[1]}.` : r.message);
+        toast(r?.message || 'Eval submitted.');
         await reload();
       } catch (e2) { showError(err, e2.message); }
       finally { go.disabled = false; go.textContent = 'Submit eval'; }
     });
 
-    if (state.isAdmin) wireRollover();
+    if (isAdmin()) wireRollover();
   },
 
   /** Called by the shell's "End of semester" action. */
@@ -527,13 +674,13 @@ function wireRollover() {
     const err = $('#ev-roll-error');
     this.disabled = true; this.textContent = 'Checking…'; err.hidden = true;
     try {
-      const { summary: s } = await api('rollover', { clearProgress: $('#ev-roll-clear').checked, dryRun: true });
+      const s = await rpc('run_rollover', { p_from_term: 'fall-2026', p_to_term: 'spring-2027', p_dry_run: true });
       const moves = Object.keys(s.moves || {}).sort();
       $('#ev-roll-preview').innerHTML = '<h4>What will happen</h4>' +
         (moves.length
           ? moves.map(k => `<div class="preview-row"><span>${esc(k)}</span><span class="n">${s.moves[k]}</span></div>`).join('')
           : '<div class="preview-row"><span>No priority changes</span><span class="n">0</span></div>') +
-        `<div class="preview-note"><strong>${s.promoted}</strong> moved up · <strong>${s.alreadyTop}</strong> already at First Priority · <strong>${s.untouched}</strong> left alone${s.clearProgress ? ` · <strong>${s.cleared}</strong> records cleared` : ''}</div>`;
+        `<div class="preview-note"><strong>${s.promoted}</strong> moved up · <strong>${s.already_top}</strong> already at First Priority · <strong>${s.untouched}</strong> left alone${false ? ` · <strong>${s.cleared}</strong> records cleared` : ''}</div>`;
       const box = $('#ev-roll-preview');
       box.hidden = false;
       box.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
@@ -552,10 +699,16 @@ function wireRollover() {
     const go = $('#ev-roll-go'), err = $('#ev-roll-error');
     go.disabled = true; go.textContent = 'Running…'; err.hidden = true;
     try {
-      const r = await api('rollover', { clearProgress: clear, dryRun: false });
+      const r = await rpc('run_rollover', { p_from_term: 'fall-2026', p_to_term: 'spring-2027', p_dry_run: false });
       closeModal($('#ev-modal-roll'));
       toast(r.message);
       await reload();
-    } catch (e2) { showError(err, e2.message); go.disabled = false; go.textContent = 'Run rollover'; }
+    } catch (e2) {
+      // Running this twice promotes everyone two tiers. Say so plainly.
+      showError(err, e2.message +
+        ' Check the Tracker before running it again — a rollover that runs twice' +
+        ' moves every guide up two tiers, and there is no undo.');
+      go.disabled = false; go.textContent = 'Run rollover';
+    }
   });
 }

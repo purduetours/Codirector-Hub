@@ -1,0 +1,183 @@
+/* ============================================================ shared workbooks
+   The tour schedule and desk rota live in a workbook other people maintain, and
+   they are not moving into the database. Nobody is going to start editing
+   Postgres to say who is on the Welcome desk on Thursday.
+
+   So the browser reads that workbook directly. No key, no sign-in, no server —
+   the same trick the analytics hub uses. It is the last thing Apps Script was
+   doing, which is what lets it go away entirely.
+============================================================================ */
+
+const SHEET_ID = '1XIfi_T4G1tkc_8D28cQWXUtCgk7Cb-BuyLrEvhfAzno';
+
+/**
+ * Which month tabs belong to the term we are in, and what year they are.
+ *
+ * The workbook keeps every month of the year as a tab and marks the ones that
+ * are not this semester by HIDING them -- January through July still hold last
+ * spring, full of guides who have since graduated. A browser reading the sheet
+ * as CSV cannot see that a tab is hidden, so it has to know which months belong
+ * to the term instead. That also fixes the year: "9/7" is unambiguous once you
+ * know the term, where guessing the nearest year turned last January into next.
+ *
+ * Rolling over to spring is a one-word change in config.js.
+ */
+function termTabs() {
+  const label = String(window.CONFIG?.TERM_LABEL || '');
+  const m = /(spring|summer|fall|autumn)\s*(\d{4})/i.exec(label);
+  const year = m ? Number(m[2]) : new Date().getFullYear();
+  const isFall = !m || /fall|autumn/i.test(m[1]);
+  return isFall
+    ? { tabs: ['August', 'September', 'October', 'November', 'December'], year }
+    : { tabs: ['January', 'February', 'March', 'April', 'MayJune', 'July'], year };
+}
+const DESK_TABS  = ['Front Desk', 'Welcome Desk'];
+
+/** Mon–Fri, three columns of guides each. */
+const GRID_DAYS = [[3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17]];
+
+/** Cells holding a note rather than a person. */
+const NOT_A_GUIDE = /no tour|labor day|holiday|desk|closed|break|tentative|tours this week|❌/i;
+
+/**
+ * "Ben S.+", "Ben S.*" and "Ben S.`" are all just Ben S.
+ *
+ * The marks flag a picked-up or swapped shift. The old backend stripped * and +
+ * but not the backtick, so names like "Alli S.+`" came through with the marks
+ * still attached and never matched anybody on the roster.
+ */
+function cleanGuide(v) {
+  return String(v || '').replace(/[*+`´'\s]+$/, '').trim();
+}
+
+function slotStart(slot) {
+  const m = /^\s*(\d{1,2})(?::(\d{2}))?/.exec(String(slot || ''));
+  if (!m) return '';
+  let h = parseInt(m[1], 10);
+  if (h < 8) h += 12;                       // 1:45 and 2:45 are afternoons
+  return String(h).padStart(2, '0') + ':' + (m[2] || '00');
+}
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * The grid writes dates as "Monday 9/7" with no year. Pick whichever year puts
+ * that date nearest to today, so a December tab read in January still lands on
+ * the right side of the new year.
+ */
+function gridDate(text, year) {
+  const m = /(\d{1,2})\s*\/\s*(\d{1,2})/.exec(String(text || ''));
+  if (!m) return '';
+  return `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+}
+
+/** Minimal CSV reader — quoted fields, embedded commas and newlines. */
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else quoted = false; }
+      else field += ch;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\r') continue;
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+    field += ch;
+  }
+  row.push(field); rows.push(row);
+  return rows;
+}
+
+async function fetchTab(tab) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
+              `?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return parseCSV(await res.text());
+  } catch {
+    return null;              // a missing tab is normal, not an error
+  }
+}
+
+/**
+ * Every week grid, as {date, start, slot, guide}, today onward.
+ *
+ * Slots are found by scanning for a time range in the Time column rather than
+ * by counting rows. The old parser assumed every slot occupied exactly two rows
+ * and so silently skipped any week where one had been resized — which is why
+ * some tours never appeared in the hub at all.
+ */
+export async function loadTours() {
+  const today = todayISO();
+  const out = [], seen = new Set();
+  const { tabs: months, year } = termTabs();
+  const tabs = await Promise.all(months.map(fetchTab));
+
+  tabs.forEach(rows => {
+    if (!rows) return;
+    const headers = [];
+    rows.forEach((r, i) => { if (String(r[2] || '').trim() === 'Time') headers.push(i); });
+
+    headers.forEach((h, hi) => {
+      const stop = hi + 1 < headers.length ? headers[hi + 1] : rows.length;
+
+      const dates = {};
+      GRID_DAYS.forEach((cols, d) => {
+        const iso = gridDate(rows[h][cols[0]], year);
+        if (iso && iso >= today) dates[d] = iso;
+      });
+      if (!Object.keys(dates).length) return;   // whole week is in the past
+
+      let slot = '', start = '';
+      for (let r = h + 1; r < stop; r++) {
+        const label = String(rows[r][2] || '').trim();
+        if (label && label.includes('-')) { slot = label; start = slotStart(label); }
+        if (!slot) continue;
+
+        for (const d in dates) {
+          for (const c of GRID_DAYS[d]) {
+            const guide = cleanGuide(rows[r][c]);
+            if (!guide || NOT_A_GUIDE.test(guide)) continue;
+            const key = `${dates[d]}|${slot}|${guide}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push({ date: dates[d], start, slot, guide });
+          }
+        }
+      }
+    });
+  });
+
+  out.sort((a, b) => a.date === b.date ? a.start.localeCompare(b.start) : a.date.localeCompare(b.date));
+  return out;
+}
+
+/** The desk rota: a recurring Mon–Fri template rather than dated weeks. */
+export async function loadDesks() {
+  const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const PAIRS = [[3, 4], [5, 6], [7, 8], [9, 10], [11, 12]];
+  const out = [];
+  const tabs = await Promise.all(DESK_TABS.map(fetchTab));
+
+  tabs.forEach((rows, t) => {
+    if (!rows) return;
+    rows.forEach(r => {
+      const slot = String(r[2] || '').trim();
+      if (!slot || !slot.includes('-') || !/^\s*\d/.test(slot)) return;
+      const [a, b] = slot.split('-');
+      DAYS.forEach((day, d) => {
+        PAIRS[d].forEach(c => {
+          const person = cleanGuide(r[c]);
+          if (!person || NOT_A_GUIDE.test(person)) return;
+          out.push({ desk: DESK_TABS[t], day, start: slotStart(a), end: slotStart(b), slot, person });
+        });
+      });
+    });
+  });
+  return out;
+}
