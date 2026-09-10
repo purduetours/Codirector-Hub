@@ -6,7 +6,7 @@
    hand: "how do I claim someone", "why can't I see the other evals".
 ============================================================================ */
 export const TOPICS = [
-  { k: ['claim', 'claiming', 'take', 'sign up', 'pick a guide'],
+  { k: ['claim', 'claiming', 'claim someone', 'claim a guide', 'take', 'sign up', 'pick a guide'],
     a: 'Open Eval Tracker, find them on the Available tab and press Claim. If the schedule knows when they are leading a tour you can pick one from the list; otherwise type the date yourself. Claiming is first come first served — if two people go for the same guide at once, one gets them and the other is told.' },
   { k: ['release', 'unclaim', 'give back', 'drop', 'cancel'],
     a: 'On a guide you have claimed, the ✕ button puts them back on the Available list. Codirectors can release anybody\'s claim.' },
@@ -20,7 +20,7 @@ export const TOPICS = [
     a: 'End of semester moves every guide up one priority tier and starts a fresh term. Preview it first — it shows exactly what will change. It cannot be run twice for the same pair of terms, so a stuck connection cannot promote everybody twice.' },
   { k: ['grade', 'grading', 'score', 'scores', 'rubric', 'interview day'],
     a: 'On Interviews, the Grade tab lists everyone checked in. Score each candidate 1 to 5 on speaking, personable and overall impression. You are scoring as whoever you signed in as — there is no name to pick — and nobody can write over your scores.' },
-  { k: ['blank', 'skip', 'leave empty', 'not sure', 'did not judge'],
+  { k: ['blank', 'skip', 'leave empty', 'leave a score blank', 'score blank', 'not sure', 'did not judge', 'ok to leave'],
     a: 'Leaving a score blank is fine. A blank is skipped, never counted as a zero, so it does not drag the candidate down. Their average is worked out from whoever actually scored that criterion.' },
   { k: ['final', 'average', 'how is', 'calculated', 'worked out', 'maths', 'math'],
     a: 'Each of the three criteria is averaged across the interviewers who scored it, and the final is the average of those three numbers. It is deliberately not the average of every individual score — averaging each criterion first stops one person skipping one box from skewing the result.' },

@@ -15,6 +15,7 @@
       on her own could quietly widen that; reading what is here cannot.
 ============================================================================ */
 import { TOPICS } from './vanessa-knowledge.js';
+import { HANDBOOK } from './vanessa-handbook.js';
 import { state, myName, isAdmin, inTraining, inRecruitment } from './state.js';
 import { esc } from './ui.js';
 
@@ -74,7 +75,7 @@ function has(q, ...phrases) {
   });
 }
 
-function topicFor(q) {
+function topicMatch(q) {
   const ws = tokens(q);
   let best = null, bestScore = 0;
   for (const t of TOPICS) {
@@ -86,8 +87,9 @@ function topicFor(q) {
     }
     if (score > bestScore) { bestScore = score; best = t; }
   }
-  return bestScore >= 2 ? best : null;
+  return { topic: bestScore >= 2 ? best : null, score: bestScore };
 }
+const topicFor = q => topicMatch(q).topic;
 
 /* ------------------------------------------------------------ eval answers */
 
@@ -113,6 +115,7 @@ function evalAnswers(q) {
              'no evaluator', 'without an evaluator', 'left to claim')) {
     const open = g.filter(x => x.status === 'open');
     const top = open.filter(x => x.rank <= 2);
+    remember(open.filter(x => x.rank <= 2).map(x => x.name));
     return `${open.length} guides are unclaimed.` +
       (top.length ? ` ${top.length} of them are first or second priority:\n` +
         top.slice(0, 10).map(x => `- ${x.name} (${x.priority})`).join('\n') +
@@ -174,7 +177,10 @@ function interviewAnswers(q) {
   if (has(q, 'discuss', 'talk about', 'disagree', 'split', 'contentious', 'worth')) {
     const flags = discussionFlags(cands).slice(0, 8);
     if (!flags.length) return 'Nothing stands out — the panel broadly agreed on everybody who has been scored.';
-    return `${flags.length} worth talking about:\n` +
+    remember(flags.map(f => f.c.name));
+    return `${vary('These ' + flags.length + ' are worth talking about',
+                   flags.length + ' I would put in front of the room',
+                   flags.length + ' worth a conversation')}:\n` +
       flags.map(f => `- ${f.c.name} — ${f.c.final !== null ? f.c.final.toFixed(2) : 'no score'}: ${f.why.join(', ')}`).join('\n');
   }
 
@@ -183,9 +189,11 @@ function interviewAnswers(q) {
              'nobody graded', 'no one graded', 'not been scored', 'without scores',
              'still ungraded', 'yet to be graded', 'needs grading')) {
     const none = cands.filter(c => c.raters === 0);
+    remember(none.map(c => c.name));
     return none.length
       ? `${none.length} candidates have no scores at all:\n` + none.slice(0, 12).map(c => `- ${c.name}`).join('\n')
-      : 'Everybody has been scored by at least one person.';
+      : vary('Everybody has been scored by at least one person.',
+             'Nobody has been missed — everyone has at least one score.');
   }
 
   if (has(q, 'undecided', 'no decision', 'still deciding')) {
@@ -198,7 +206,8 @@ function interviewAnswers(q) {
 
   if (has(q, 'top', 'highest', 'best', 'strongest', 'top scorer', 'ranked')) {
     const top = cands.filter(c => c.final !== null).sort((a, b) => b.final - a.final).slice(0, 8);
-    return 'Highest scoring so far:\n' + top.map(c =>
+    remember(top.map(c => c.name));
+    return vary('Highest scoring so far', 'Top of the list at the moment', 'Leading the field') + ':\n' + top.map(c =>
       `- ${c.name} — ${c.final.toFixed(2)} from ${c.raters} raters` +
       (c.spread >= 1.5 ? ` (but they disagreed by ${c.spread.toFixed(1)})` : '')).join('\n');
   }
@@ -208,9 +217,18 @@ function interviewAnswers(q) {
     return `${inn} of ${cands.length} candidates are checked in.`;
   }
 
-  const named = cands.find(c => q.toLowerCase().includes(c.name.toLowerCase().split(' ')[0]) &&
-                                q.toLowerCase().includes(c.name.toLowerCase().split(' ').pop()));
+  // Candidates get the same treatment guides do: any part of the name is enough,
+  // and two Neffs means she asks which rather than picking one.
+  const who = findPeople(q, cands, c => c.name);
+  if (who.length > 1) {
+    const names = who.slice(0, 4).map(c => c.name);
+    remember(names);
+    memory.pending = { kind: 'which', options: names };
+    return `Could be ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}. Which one?`;
+  }
+  const named = who[0];
   if (named) {
+    remember(null, named.name);
     const f = discussionFlags([named])[0];
     return `${named.name} — ${named.final !== null ? named.final.toFixed(2) : 'not scored yet'}` +
       (named.raters ? ` from ${named.raters} raters` : '') +
@@ -240,13 +258,26 @@ const prettyClock = t => {
   return `${h % 12 || 12}:${m[2]} ${h >= 12 ? 'pm' : 'am'}`;
 };
 
+/**
+ * Everyone in `list` whose name appears in the question, best match first.
+ *
+ * Scoring matters more than it looks. "Sadie Neff" and "Emma Neff" both contain
+ * "Neff", so a plain contains-check calls every mention ambiguous forever --
+ * including when the person has just told you which one they meant. Counting
+ * how many parts of the name are present means a full name beats a surname and
+ * the ambiguity resolves.
+ */
 function findPeople(q, list, nameOf) {
   const ws = tokens(q);
-  const hits = list.filter(p => {
+  const scored = list.map(p => {
     const parts = tokens(nameOf(p));
-    return parts.some(part => ws.some(w => w === part || near(w, part)));
-  });
-  return hits;
+    const score = parts.filter(part => ws.some(w => w === part || near(w, part))).length;
+    return { p, score };
+  }).filter(x => x.score > 0);
+
+  if (!scored.length) return [];
+  const best = Math.max(...scored.map(x => x.score));
+  return scored.filter(x => x.score === best).map(x => x.p);
 }
 
 function guideAnswers(q) {
@@ -255,11 +286,17 @@ function guideAnswers(q) {
   if (!has(q, 'who', 'when', 'evaluat', 'claim', 'tour', 'lead')) return null;
 
   const hits = findPeople(q, g, x => x.name);
-  if (hits.length !== 1) return hits.length > 1
-    ? `More than one guide matches that — did you mean ${hits.slice(0, 4).map(x => x.name).join(', ')}?`
-    : null;
+  if (hits.length > 1) {
+    // Ask, and remember that we asked, so a bare "the second one" lands.
+    const names = hits.slice(0, 4).map(x => x.name);
+    remember(names);
+    memory.pending = { kind: 'which', options: names };
+    return `Could be ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}. Which one?`;
+  }
+  if (!hits.length) return null;
 
   const x = hits[0];
+  remember(null, x.name);
   const bits = [`${x.name} — ${x.priority || 'no priority set'}.`];
   if (x.skip) bits.push('Marked as not needing an eval this term.');
   else if (x.status === 'open') bits.push('Nobody has claimed them yet.');
@@ -358,11 +395,160 @@ function navigation(q) {
   return null;
 }
 
+/* ------------------------------------------------------------ remembering
+   What makes this feel like a conversation rather than a search box is that she
+   remembers the last couple of turns: who was just named, what list she just
+   read out, and whether she asked you something and is waiting on an answer.
+
+   Deliberately shallow -- a handful of turns, cleared when the subject changes.
+   Anything longer starts guessing at what "her" meant three questions ago.
+-------------------------------------------------------------------------- */
+
+const memory = { list: [], person: null, pending: null, recent: [] };
+
+export function forget() { memory.list = []; memory.person = null; memory.pending = null; }
+
+/** Called by the answers that read out a list, so "the second one" can work. */
+function remember(list, person) {
+  if (list && list.length) memory.list = list.slice(0, 12);
+  if (person) memory.person = person;
+}
+
+const YES = /^\s*(y|ye|yes|yep|yeah|yup|sure|ok|okay|please|do it|go on|go ahead|sounds good)\b/i;
+const NO  = /^\s*(n|no|nope|nah|not now|never ?mind|no thanks|leave it)\b/i;
+
+const ORDINALS = { first: 0, '1st': 0, second: 1, '2nd': 1, third: 2, '3rd': 2,
+                   fourth: 3, '4th': 3, fifth: 4, '5th': 4, last: -1 };
+
+/**
+ * Turns "tell me about the second one" or "what about her" into a question that
+ * names somebody, so everything downstream can stay simple.
+ */
+function resolveReference(q) {
+  for (const word in ORDINALS) {
+    if (new RegExp(`\\b${word}\\b`, 'i').test(q) && memory.list.length) {
+      const i = ORDINALS[word] < 0 ? memory.list.length - 1 : ORDINALS[word];
+      if (memory.list[i]) return { q: `${q} ${memory.list[i]}`, used: memory.list[i] };
+    }
+  }
+  if (/\b(he|him|his|she|her|hers|they|them|their|that one|this one|the other one)\b/i.test(q)
+      && memory.person) {
+    return { q: `${q} ${memory.person}`, used: memory.person };
+  }
+  return { q, used: null };
+}
+
+/** Say the same thing differently each time, so she does not sound like a form. */
+function vary(...options) {
+  const fresh = options.filter(o => !memory.recent.includes(o));
+  const pick = (fresh.length ? fresh : options)[Math.floor(Math.random() * (fresh.length || options.length))];
+  memory.recent = [pick, ...memory.recent].slice(0, 6);
+  return pick;
+}
+
+/* ------------------------------------------------------------- handbook
+   Anything the hub itself cannot answer might still be in the Tour Guide
+   Handbook: what to wear, what earns a strike, how to handle a question you do
+   not know. Scored on word overlap, and she quotes the sentences that actually
+   matched rather than the whole section, with the page so it can be looked up.
+-------------------------------------------------------------------------- */
+
+/* How many sections each word appears in. A word in one section is a strong
+   signal; a word in fifteen tells you nothing. Without this, "can I wear
+   sandals" scored on "wear" and "can" and lost to whichever section was
+   longest, while "sandals" — the only word that mattered — counted once. */
+let DF = null;
+function docFreq() {
+  if (DF) return DF;
+  DF = new Map();
+  for (const sec of HANDBOOK) {
+    for (const w of new Set(tokens(sec.title + ' ' + sec.text))) {
+      DF.set(w, (DF.get(w) || 0) + 1);
+    }
+  }
+  return DF;
+}
+const rarity = w => Math.log(1 + HANDBOOK.length / (1 + (docFreq().get(w) || 0)));
+
+function handbookAnswer(q) {
+  const ws = [...new Set(tokens(q))];
+  // One word is enough if it is a rare one. "What are postcards for" reduces to
+  // just "postcard" once the filler is stripped, and that is the whole question.
+  if (!ws.length || (ws.length < 2 && rarity(ws[0]) < 2)) return null;
+
+  const scored = HANDBOOK.map(sec => {
+    const body = new Set(tokens(sec.text));
+    const title = new Set(tokens(sec.title));
+    let score = 0;
+    for (const w of ws) {
+      const inBody = body.has(w) || [...body].some(b => near(b, w));
+      const inTitle = title.has(w) || [...title].some(t => near(t, w));
+      if (inTitle) score += rarity(w) * 2;
+      else if (inBody) score += rarity(w);
+    }
+    return { sec, score };
+  }).sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  if (!best || best.score < 2.2) return null;
+
+  // Quote the sentences carrying the question's words, not the whole page.
+  const sentences = best.sec.text.split(/(?<=[.!?])\s+/).filter(x => x.length > 20);
+  const ranked = sentences.map(sn => {
+    const t = new Set(tokens(sn));
+    return { sn, n: ws.reduce((acc, w) => acc + ((t.has(w) || [...t].some(x => near(x, w))) ? rarity(w) : 0), 0) };
+  }).sort((a, b) => b.n - a.n).filter(x => x.n > 0);
+
+  const quote = (ranked.length ? ranked.slice(0, 3).map(x => x.sn) : sentences.slice(0, 2)).join(' ');
+  if (!quote) return null;
+  return { score: best.score,
+           text: `${quote}\n\n— Tour Guide Handbook, ${best.sec.title} (page ${best.sec.page})` };
+}
+
+
 /* ------------------------------------------------------------------ ask */
 
+/** Something she can offer to do, that "yes" will then carry out. */
+function offerFor(q, text) {
+  if (has(q, 'discuss', 'worth', 'disagree') && inRecruitment())
+    return { say: 'Want me to open Interviews?', go: 'interviews' };
+  if (has(q, 'ungraded', 'not graded', 'no scores') && inRecruitment())
+    return { say: 'Shall I take you to Grade?', go: 'interviews' };
+  if (has(q, 'unclaimed', 'need an eval', 'up for grabs') && inTraining())
+    return { say: 'Want to see them on the Eval Tracker?', go: 'evals' };
+  if (has(q, 'uncovered', 'gap') )
+    return { say: 'Want me to open Desk Coverage?', go: 'desks' };
+  return null;
+}
+
 export function ask(question) {
-  const q = String(question || '').trim();
-  if (!q) return { text: 'Ask me anything about the hub.' };
+  let q = String(question || '').trim();
+  if (!q) return { text: vary('Ask me anything about the hub.', 'What would you like to know?') };
+
+  /* --- is this an answer to something she just asked? --------------------- */
+  const waiting = memory.pending;
+  memory.pending = null;
+
+  if (waiting && waiting.kind === 'offer') {
+    if (YES.test(q)) return { text: vary('Right you are.', 'On it.', 'Sure.'), go: waiting.go };
+    if (NO.test(q))  return { text: vary('No problem.', 'Fine — anything else?', 'Right you are.') };
+  }
+  // A bare yes or no with nothing outstanding should say so, not go rummaging
+  // through the help topics for something containing the word "no".
+  if (!waiting && (YES.test(q) || NO.test(q)) && q.split(/\s+/).length <= 3) {
+    return { text: vary('Yes to what, sorry? I have lost the thread.',
+                        'I am not sure what that is answering — ask me again?',
+                        'You have lost me — what were we on?') };
+  }
+  if (waiting && waiting.kind === 'which') {
+    const picked = waiting.options.find(n => findPeople(q, [{ n }], x => x.n).length) ||
+                   waiting.options.find(n => q.toLowerCase().includes(n.toLowerCase().split(' ')[0]));
+    if (picked) q = picked;
+  }
+
+  /* --- "the second one", "what about her" -------------------------------- */
+  const ref = resolveReference(q);
+  q = ref.q;
 
   const nav = navigation(q);
   if (nav) return { text: nav.say, go: nav.go };
@@ -390,13 +576,41 @@ export function ask(question) {
     || (interviewy ? (interviewAnswers(q) || evalAnswers(q))
                    : (evalAnswers(q) || interviewAnswers(q)))
     || guideAnswers(q);
-  if (answer) return { text: answer };
 
-  const topic = topicFor(q);
+  if (answer) {
+    // Only offer when she has actually just read out a list worth acting on,
+    // and never twice in a row -- an assistant that ends every answer with a
+    // question is exhausting.
+    const offer = memory.pending ? null : offerFor(q, answer);
+    if (offer && memory.list.length) {
+      memory.pending = { kind: 'offer', go: offer.go };
+      return { text: `${answer}\n\n${offer.say}` };
+    }
+    return { text: answer };
+  }
+
+  /* One rule, rather than a pile of thresholds.
+
+     The topic keywords ARE the definition of "this is a question about the app".
+     So if a topic matches solidly, it is a hub question and the handbook does not
+     get a vote. If the topic match is weak or absent, try the handbook. A weak
+     topic still beats nothing at all.
+
+     This replaced a set of competing score thresholds that kept trading one
+     wrong answer for another: fixing "what should I wear on tour" broke "how is
+     the final score worked out", and fixing that broke it back. */
+  const { topic, score: topicScore } = topicMatch(q);
+
+  if (topic && topicScore >= 4) return { text: topic.a };
+
+  const book = handbookAnswer(q);
+  if (book) return { text: book.text };
   if (topic) return { text: topic.a };
 
-  return { text: "I did not follow that. I can tell you who still needs an eval, who is worth discussing, " +
-                 "how the scoring works, or take you to a tab — try \"who still needs an eval\" or \"open interviews\"." };
+  return { text: vary(
+    'I did not follow that one.', 'Sorry — not sure what you mean there.', 'That one is beyond me.') +
+    ' I can tell you who still needs an eval, who is worth discussing, how the scoring works, ' +
+    'or take you to a tab. Try "who still needs an eval" or "open interviews".' };
 }
 
 export const greeting = () => `Hi ${myName().split(' ')[0] || 'there'}, I'm Vanessa. How can I help?`;

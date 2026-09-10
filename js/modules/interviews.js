@@ -878,7 +878,24 @@ async function refresh() {
   if (local.group && !(data.groups || []).includes(local.group)) local.group = '';
 }
 
+/**
+ * Redraws the current tab.
+ *
+ * Everything on the tab is rebuilt, INCLUDING the search box, so whatever you
+ * were typing in is thrown away and replaced mid-keystroke. Left alone that
+ * makes search unusable: you type one letter, the box you are typing in
+ * vanishes, and the second letter goes nowhere.
+ *
+ * So note what had focus and where the cursor was, and put it back afterwards.
+ */
 function paint() {
+  const active = document.activeElement;
+  const keep = active && active.id && $('#gr-body')?.contains(active)
+    ? { id: active.id,
+        start: active.selectionStart ?? null,
+        end: active.selectionEnd ?? null }
+    : null;
+
   $$('#gr-tabs .tab').forEach(t => t.classList.toggle('is-active', t.dataset.tab === local.tab));
   const body = $('#gr-body');
   if (local.tab === 'checkin') body.innerHTML = checkinView();
@@ -887,6 +904,18 @@ function paint() {
   else if (local.tab === 'decisions') body.innerHTML = decisionsView();
   else if (local.tab === 'roster') body.innerHTML = rosterView();
   else body.innerHTML = setupView();
+
+  if (keep) {
+    const el = document.getElementById(keep.id);
+    if (el) {
+      el.focus();
+      // Text inputs keep the caret where it was, so typing carries on mid-word
+      // instead of jumping to the end.
+      if (keep.start !== null && el.setSelectionRange) {
+        try { el.setSelectionRange(keep.start, keep.end); } catch { /* not a text field */ }
+      }
+    }
+  }
 }
 
 export default {
