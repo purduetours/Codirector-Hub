@@ -4,7 +4,9 @@ import { modelStatus, onModelChange, checkAvailability, enableModel, cancelModel
 import { state as appState, inTraining, inRecruitment } from './state.js';
 import { $, esc, injectStyle } from './ui.js';
 import { go } from './router.js';
-import { handleEvalMessage, evalDraft, resetEvalFlow, editEvalDraft } from './vanessa-eval.js';
+import { handleEvalMessage, evalDraft, resetEvalFlow, editEvalDraft, savedEvalSummary, bufferEvalDraft } from './vanessa-eval.js';
+import { voiceSupported, voiceState, onVoiceChange, startVoice, stopVoice, resetVoice, setVoiceText } from './vanessa-voice.js';
+let voiceDraftRef=null;
 export { shareInterviews };
 export const shareData = (kind, rows) => shareOther(kind, rows);
 injectStyle('vanessa-css', `
@@ -39,6 +41,10 @@ injectStyle('vanessa-css', `
 .v-eval-fields label { display:grid; gap:4px; }
 .v-eval-fields textarea { width:100%; min-height:50px; resize:vertical; }
 .v-eval-fields .row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.v-voice-body { padding:10px 14px;display:grid;gap:8px;font-size:.875rem; }
+#v-voice { max-height:240px;overflow:auto;flex-shrink:1; }
+#v-voice textarea { width:100%;min-height:70px; }
+.v-saved { padding:8px 14px;font-size:.8rem;border-bottom:1px solid var(--line); }
 .v-eval-actions { display:flex; gap:6px; flex-wrap:wrap; }
 .v-panel > details { max-height:45%; overflow-y:auto; flex-shrink:0; }
 .v-panel > .v-chips { max-height:100px; overflow-y:auto; flex-shrink:0; }
@@ -98,6 +104,7 @@ function paintEvalDraft() {
   if (!panel) return;
   const old = $('#v-eval-draft'); old?.remove();
   const draft = evalDraft();
+  paintSavedDraft();
   const suggestions = $('[data-suggestions]', panel);
   if (suggestions) suggestions.hidden = !!draft;
   if (!draft?.evalId) return;
@@ -105,7 +112,7 @@ function paintEvalDraft() {
   root.id='v-eval-draft'; root.open=true;
   root.dataset.draftId=String(draft.draftId); root.dataset.revision=String(draft.revision);
   root.innerHTML=`<summary style="padding:8px 14px;cursor:pointer;font-size:.8rem">Eval draft: ${esc(draft.name)}</summary>
-    <div class="v-eval-fields"><p style="margin:0">${draft.phase==='submitting'?'Submitting…':'Not submitted — review your feedback below.'}</p>
+    <div class="v-eval-fields"><p style="margin:0">${draft.phase==='submitting'?'Submitting…':draft.saved?'Draft saved on this browser. Not submitted.':'Draft not saved to browser storage. Keep this tab open.'}</p>
     <fieldset ${draft.phase==='submitting'?'disabled':''} style="border:0;padding:0;margin:0;display:grid;gap:8px">
       <div class="row2"><label>Tour date<input type="date" data-eval-field="date" value="${esc(draft.date)}"></label>
       <label>Tour time<input type="time" data-eval-field="time" value="${esc(draft.time)}"></label></div>
@@ -119,6 +126,49 @@ function paintEvalDraft() {
     </fieldset></div>`;
   panel.insertBefore(root, $('#v-form'));
 }
+function paintSavedDraft(){
+  const banner=$('#v-saved');if(!banner)return;
+  const saved=inTraining()?savedEvalSummary():null;
+  banner.hidden=!saved || !!evalDraft();
+  banner.innerHTML=saved?`Saved draft: ${esc(saved.name)} <button type="button" class="linkish" data-question="continue my eval">Continue</button> · <button type="button" class="linkish" data-question="discard saved draft">Discard</button>`:'';
+}
+function paintVoice(){
+  const root=$('#v-voice-body');if(!root || !appState.me)return;
+  const status=voiceState(),busy=['recording','stopping'].includes(status.phase);
+  const text=root.querySelector('textarea');
+  // Do not recreate the textarea: preserve cursor and edits while status changes.
+  if(text && document.activeElement!==text)text.value=status.text;
+  if(text)text.disabled=busy;
+  const message=$('#v-voice-status');if(message)message.textContent=status.message;
+  const start=$('#v-voice-start'),stop=$('#v-voice-stop'),use=$('#v-voice-use');
+  if(start)start.disabled=busy || !voiceSupported();
+  if(stop)stop.disabled=status.phase!=='recording';
+  if(use)use.disabled=busy || !status.text.trim();
+}
+onVoiceChange(paintVoice);
+function useTranscript(){
+  if(['recording','stopping'].includes(voiceState().phase))return;
+  const transcript=$('#v-transcript')?.value.trim();if(!transcript)return;
+  setVoiceText(transcript);
+  const target=$('#v-voice-target').value;
+  if(target==='chat'){
+    // Copy only. Even a transcript saying "submit it" needs a separate Ask click.
+    $('#v-input').value=[$('#v-input').value.trim(),transcript].filter(Boolean).join(' ');
+    $('#v-input').focus();
+    $('#v-voice-status').textContent='Transcript copied to the message box. Review it, then press Ask.';
+  }else{
+    const draft=evalDraft();
+    if(!draft || !voiceDraftRef || draft.draftId!==voiceDraftRef.id || draft.revision!==voiceDraftRef.revision){
+      $('#v-voice-status').textContent='The draft changed while you were dictating. Copy the transcript into the current field after reviewing it.';return;
+    }
+    const result=editEvalDraft(draft.draftId,draft.revision,{[target]:[draft[target],transcript].filter(Boolean).join('\n')});
+    say('her',result.text);paintEvalDraft();
+    $('#v-voice-status').textContent='Transcript added to the draft. Nothing was submitted.';
+    voiceDraftRef=null;
+  }
+  $('#v-voice-use').disabled=true;
+}
+
 function readEvalEdits(all=false) {
   const draft=evalDraft(), root=$('#v-eval-draft');
   if(!draft || !root)return null;
@@ -169,7 +219,7 @@ function send(question) {
 }
 
 export function resetVanessa() {
-  resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); sendQueue = Promise.resolve(); open = false;
+  resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
   $('#v-launch')?.remove(); $('#v-panel')?.remove();
 }
 export function initVanessa() {
@@ -183,34 +233,64 @@ export function initVanessa() {
   const suggestions = [
     ...(inTraining() ? ['Help me write an eval', 'What are my evals?'] : []),
     ...(inRecruitment() ? ['Who is worth discussing?', 'Who has not checked in?'] : []),
-    'Who is leading tours tomorrow?', 'What should I wear on tour?'
+    ...(inTraining()?['Who needs an eval and has a tour tomorrow?']:['Who is leading tours tomorrow?']), 'What should I wear on tour?'
   ];
   panel.innerHTML = `<div class="v-head"><span><strong>Vanessa</strong><span class="sub">Answers from your loaded hub data</span></span>
     <button type="button" class="icon-btn" id="v-close" aria-label="Close">✕</button></div>
+    <div id="v-saved" class="v-saved" hidden></div>
     <div class="v-log" id="v-log" role="log" aria-live="polite"></div>
     <div class="v-chips" data-suggestions>${suggestions.map(s => `<button type="button" class="v-chip" data-question="${esc(s)}">${esc(s)}</button>`).join('')}</div>
     <details><summary style="padding:8px 14px;cursor:pointer;font-size:.8rem">Optional model</summary><div class="v-chips" id="v-model"></div></details>
+    <details id="v-voice"><summary style="padding:8px 14px;cursor:pointer;font-size:.875rem">Voice notes</summary>
+    <div id="v-voice-body" class="v-voice-body"><p style="margin:0">Your browser may send audio to its speech service. Review the transcript before using it.</p>
+      <p id="v-voice-status" role="status" style="margin:0"></p>
+      <div class="v-eval-actions"><button type="button" class="btn btn-sm" id="v-voice-start">Start microphone</button><button type="button" class="btn btn-sm" id="v-voice-stop" disabled>Stop</button></div>
+      <label for="v-transcript">Review transcript</label><textarea id="v-transcript" rows="3" maxlength="12000"></textarea>
+      <label for="v-voice-target">Use transcript in</label><select id="v-voice-target"><option value="chat">Chat message</option><option value="wentWell">What went well</option><option value="improve">Areas to improve</option><option value="notes">Other notes</option></select>
+      <button type="button" class="btn btn-sm" id="v-voice-use" disabled>Use transcript</button>
+    </div></details>
     <form class="v-ask" id="v-form"><input id="v-input" aria-label="Question for Vanessa" placeholder="Ask about the hub…" autocomplete="off">
     <button class="btn btn-primary btn-sm" type="submit">Ask</button></form>`;
   document.body.appendChild(panel);
   const ticket = epoch;
-  paintModelRow();
+  paintModelRow();paintSavedDraft();paintVoice();
+  if(!voiceSupported())$('#v-voice-status').textContent='Dictation is not supported in this browser. You can still type.';
   checkAvailability().then(() => { if (ticket === epoch && appState.me) resumeIfEnabled(); });
-  const close = () => { open = false; panel.hidden = true; launch.setAttribute('aria-expanded','false'); };
+  const close = () => { readEvalEdits(); resetVoice(); voiceDraftRef=null; open = false; panel.hidden = true; launch.setAttribute('aria-expanded','false'); };
   launch.addEventListener('click', async () => {
     if (!appState.me) return;
+    if(open){close();return;}
     open = !open; panel.hidden = !open; launch.setAttribute('aria-expanded', String(open));
     if (open) {
       $('#v-input')?.focus();
       await warmUp();
       if (ticket !== epoch || !open) return;
+      paintSavedDraft();
       if (!$('#v-log').children.length) say('her', greeting());
     }
   });
   $('#v-close').addEventListener('click', close);
   $('#v-form').addEventListener('submit', e => { e.preventDefault(); send($('#v-input').value); });
   panel.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); launch.focus(); } });
+  panel.addEventListener('input', e=>{
+    if(e.target.id==='v-transcript'){setVoiceText(e.target.value);$('#v-voice-use').disabled=!e.target.value.trim();return;}
+    const node=e.target.closest('[data-eval-field]');
+    if(node){
+      const root=$('#v-eval-draft'),key=node.dataset.evalField;
+      const value=key==='rating'?(node.value?Number(node.value):null):node.value;
+      if(bufferEvalDraft(Number(root.dataset.draftId),Number(root.dataset.revision),{[key]:value})){
+        const draft=evalDraft();root.dataset.revision=String(draft.revision);
+        root.querySelector('.v-eval-fields > p').textContent=draft.saved?'Draft saved on this browser. Not submitted.':'Draft could not be saved. Keep this tab open.';
+      }
+    }
+  });
   panel.addEventListener('click', e => {
+    if(e.target.id==='v-voice-start'){
+      readEvalEdits();const draft=evalDraft();voiceDraftRef=draft?{id:draft.draftId,revision:draft.revision}:null;
+      startVoice();return;
+    }
+    if(e.target.id==='v-voice-stop'){stopVoice();return;}
+    if(e.target.id==='v-voice-use'){useTranscript();return;}
     const action=e.target.closest('[data-eval-action]');
     if(action) {
       if(action.dataset.evalAction==='cancel') {send('cancel draft');return;}

@@ -81,8 +81,9 @@ export const SMALLTALK = [
                'who sees this','who can see','do you store','do you save my','are you spying','can you see my data','can you see my evals',
                'are you tracking','does this go to the cloud','does anything leave','do you send my'],
     replies: [
-      "Only what is already on your screen. I never make my own request to the database, which means I cannot show you something it decided to withhold from you — if you are not allowed to see an eval, neither am I.\n\nNothing you type to me leaves this browser.",
-      "Just what the hub has already loaded for you, and nothing more. I do not fetch anything on my own, and nothing you ask me is sent anywhere or stored."
+      "I use hub data your account can access. Unfinished eval drafts are saved on this browser for your account, and submitting an eval sends that feedback to the hub database.\n\nIf you use voice notes, your browser may send audio to its speech provider. You review the transcript before using it.",
+      "Drafts stay on this browser until you discard or submit them. They do not sync to another device. Sign-out clears the chat; your account can resume its saved draft after signing in again."
+
     ]
   },
   {

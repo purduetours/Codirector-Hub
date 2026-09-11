@@ -1,13 +1,16 @@
 /* Conversational form entry. Feedback remains the user's own words. */
 import { state, inTraining } from './state.js';
+import { loadSavedDraft, storeDraft, removeSavedDraft } from './vanessa-draft-store.js';
 import { validateEvalDraft } from './vanessa-eval-submit.js';
 let actions = {}, flow = null, sequence = 0, loading = null;
 export function registerEvalActions(value) { actions = value; }
 export function resetEvalFlow() { sequence++; flow = null; loading = null; }
 export function evalDraft() {
   if (!flow || flow.owner !== state.me?.id || flow.version !== state.sessionVersion) return null;
-  return { ...flow.draft, phase: flow.phase, revision: flow.revision, draftId: flow.id };
+  return { ...flow.draft, saved: !!flow.saved, phase: flow.phase, revision: flow.revision, draftId: flow.id };
 }
+export const savedEvalSummary = () => { const d=loadSavedDraft(); return d ? {name:d.draft.name,savedAt:d.savedAt} : null; };
+function saveFlow(){if(flow?.draft.evalId)flow.saved=storeDraft(flow);}
 export const hasEvalFlow = () => !!evalDraft();
 const trim = value => String(value || '').trim();
 const skip = value => /^(?:skip|none|no|nothing|nope|n\/a|leave (?:it )?blank)[.!]?$/i.test(trim(value));
@@ -40,7 +43,9 @@ function fieldsFrom(text) {
   return fields;
 }
 function setField(key, value) {
-  const text = trim(value);
+  let text = trim(value);
+  if(text.length>12000)return 'Keep each feedback field under 12,000 characters.';
+  if(key==='rating'){const words={one:'1',two:'2',three:'3',four:'4',five:'5'};text=words[text.toLowerCase().replace(/[.!]$/,'')]||text;}
   if (key === 'rating') {
     const m = /^(?:rating\s*(?:of|is|to)?\s*)?([1-5])(?:\s*(?:\/|out of)\s*5)?[.!]?$/i.exec(text);
     if (!m && !skip(text)) return 'What number should I use for the rating: 1, 2, 3, 4, or 5? You can also say skip.';
@@ -75,15 +80,38 @@ function choose(guide) {
   flow.phase='rating'; flow.revision++;
 }
 export async function handleEvalMessage(question) {
+  try { return await handleMessage(question); } finally { saveFlow(); }
+}
+async function handleMessage(question) {
   const q=trim(question);
-  if (!flow && !wantsEvalFlow(q)) return null;
+  const resume=/^(?:resume|continue|finish)(?: my| the)? (?:eval|evaluation|draft)[.!]?$/i.test(q);
+  const discard=/^discard (?:my |the )?saved draft[.!]?$/i.test(q);
+  if (!flow && !wantsEvalFlow(q) && !resume && !discard) return null;
   if (!state.me || !inTraining()) return {text:'Evaluation submission is available to signed-in training members.'};
   if (flow && (flow.owner !== state.me.id || flow.version !== state.sessionVersion)) resetEvalFlow();
   if (flow?.phase === 'submitting') return {text:'Submission has started. Please wait for the server result; it cannot be cancelled now.',evalDraft:true};
+  if(discard){
+    if(!removeSavedDraft())return {text:'I could not remove the saved draft from this browser. Try again.',evalDraft:true};
+    resetEvalFlow();return {text:'Saved draft removed. Nothing was submitted.',evalDraft:true};
+  }
+  if(resume && flow)return next();
+  if(!flow && loadSavedDraft()) {
+    const saved=loadSavedDraft();
+    if(!resume)return {text:`You have a saved draft for ${saved.draft.name}. Say “continue my eval” to resume it, or “discard saved draft” to start over.`,evalDraft:true};
+    const ticket=sequence,owner=state.me.id,version=state.sessionVersion;
+    try{await actions.load?.();}catch{return {text:'I could not check your current claims. Your saved draft is still on this browser. Try continuing again.'};}
+    if(ticket!==sequence || owner!==state.me?.id || version!==state.sessionVersion)return {text:'Your account changed. Resume the draft after signing in.'};
+    const guide=ownClaims().find(g=>g.id===saved.draft.evalId);
+    if(!guide)return {text:'That saved evaluation is no longer claimed by you or is already submitted. Check Eval Tracker. The saved draft has been retained; say “discard saved draft” to remove it.',evalDraft:true};
+    flow={id:++sequence,owner,version,choices:[guide],phase:'review',answered:new Set(saved.answered.filter(k=>['rating','wentWell','improve','notes','date','time'].includes(k))),revision:0,draft:{...saved.draft,name:guide.name,owner},saved:true};
+    const reply=next();return {...reply,text:`Resumed your draft for ${guide.name}.\n\n${reply.text}`};
+  }
+  if(resume && !flow)return {text:'There is no saved draft for your account on this browser. Say “help me write an eval” to start one.'};
   if (/^(?:cancel|cancel (?:this |the )?(?:eval|draft)|discard (?:this |the )?draft|stop)[.!]?$/i.test(q)) {
+    if(!removeSavedDraft())return {text:'I could not remove the saved draft. Please try again.',evalDraft:true};
     resetEvalFlow(); return {text:'Draft discarded. Nothing was submitted.',evalDraft:true};
   }
-  if (/^(?:who|when|how do i|what are my|open|go to)\b/i.test(q)) return null;
+  if (/^(?:who|which|when|find|how do i|what are my|open|go to)\b/i.test(q)) return null;
   if (flow && /^(?:submit|submit it|submit (?:this|the|my) eval|submit evaluation|confirm submission)[.!]?$/i.test(q)) {
     if (flow.phase==='review') return submitEvalDraft(flow.id, flow.revision);
     return {text:'Finish the missing fields and review the draft before submitting. Your feedback has not been changed.',evalDraft:true};
@@ -143,7 +171,12 @@ export function editEvalDraft(id, revision, patch) {
     const err=setField(key,key==='rating' && patch[key]===null?'skip':patch[key]);
     if(err)return {text:err,evalDraft:true};
   }
-  return next();
+  const reply=next();saveFlow();return reply;
+}
+export function bufferEvalDraft(id,revision,patch){
+  if(!flow || !evalDraft() || id!==flow.id || revision!==flow.revision || flow.phase==='submitting')return false;
+  for(const key of ['rating','wentWell','improve','notes','date','time'])if(key in patch)setField(key,patch[key]===null?'skip':patch[key]);
+  saveFlow();return true;
 }
 export async function submitEvalDraft(id,revision) {
   if (!flow || id!==flow.id || revision!==flow.revision || !evalDraft()) return {text:'This draft changed. Please review it again.',evalDraft:true};
@@ -156,6 +189,7 @@ export async function submitEvalDraft(id,revision) {
   try {
     const result=await actions.submit({...current.draft});
     if(flow!==current || !evalDraft())return {text:'Your account changed. Check Eval Tracker for the submission status.'};
+    const removed=removeSavedDraft(current.owner);
     resetEvalFlow();
     // Mark the loaded card immediately; refresh failure must never turn a saved
     // evaluation into a reported submission failure.
@@ -163,7 +197,7 @@ export async function submitEvalDraft(id,revision) {
     if(guide){guide.status='submitted';guide.submitted=true;}
     let refreshed=true;
     try{await actions.load?.();}catch{refreshed=false;}
-    return {text:`${result?.already ? 'Already saved' : 'Submitted'}: ${current.draft.name}’s evaluation.${refreshed?'':' The tracker could not refresh; use Refresh to update it.'}`,evalDraft:true};
+    return {text:`${result?.already ? 'Already saved' : 'Submitted'}: ${current.draft.name}’s evaluation.${refreshed?'':' The tracker could not refresh; use Refresh to update it.'}${removed?'':' The saved draft could not be removed from this browser; it cannot be resubmitted as a new eval.'}`,evalDraft:true};
   } catch(err) {
     if(flow===current)flow.phase='review';
     return {text:`I could not confirm submission: ${err.message} Your draft is still here. Check Eval Tracker before retrying if the connection dropped.`,evalDraft:true};

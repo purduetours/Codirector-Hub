@@ -19,6 +19,7 @@ import { smallTalk, smallTalkStrong, peel } from './vanessa-chat.js';
 import { HANDBOOK } from './vanessa-handbook.js';
 import { state, myName, isAdmin, inTraining, inRecruitment } from './state.js';
 import { esc } from './ui.js';
+import { matchEvalTours } from './vanessa-tour-match.js';
 import { dateRange, dayISO, DAY_NAMES } from './vanessa-dates.js';
 
 /* --------------------------------------------------------------- matching
@@ -667,6 +668,8 @@ export function ask(question) {
     if (inTraining() && inRecruitment() && !/\bevals?\b/i.test(q)) return { text: 'Do you mean guides needing an eval, or candidates needing interview scores?', stuck: false };
     q = inTraining() ? 'who still needs an eval' : 'who is ungraded';
   }
+  const tourMatch=matchEvalTours(q);
+  if(tourMatch){if(tourMatch.names)remember(tourMatch.names);return {text:tourMatch.text};}
   const nav = navigation(q);
   if (nav) return { text: nav.say, go: nav.go };
 
