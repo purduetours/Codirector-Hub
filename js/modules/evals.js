@@ -16,11 +16,36 @@ const STATUS_LABEL = { open: 'Open', claimed: 'Claimed', submitted: 'Submitted',
 const TONE = { open: 'tone-open', claimed: 'tone-warn', submitted: 'tone-good', reviewed: 'tone-info', skip: 'tone-mute' };
 const TOUR_PREVIEW = 5;
 
-const local = { tab: 'open', search: '', priority: '', days: 14, target: null, toursExpanded: false };
+const local = { tab: 'open', search: '', priority: '', month: null, day: null, target: null, toursExpanded: false };
 
 const isMine = g => !!g.evaluatorId && g.evaluatorId === state.me?.id;
 
 injectStyle('evals-css', `
+.ev-cal { border:1px solid var(--line); border-radius:var(--radius); background:var(--bg-elev);
+  padding:12px; margin-bottom:18px; }
+.ev-cal-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.ev-cal-head strong { flex:1; font-size:.95rem; letter-spacing:-.01em; }
+.ev-cal-nav { font:inherit; cursor:pointer; border:1px solid var(--line-strong); background:var(--bg);
+  color:var(--text); border-radius:8px; width:28px; height:28px; line-height:1; flex:none; }
+.ev-cal-nav:hover { border-color:var(--accent); }
+.ev-cal-today { font:inherit; font-size:.74rem; cursor:pointer; padding:5px 10px; border-radius:999px;
+  border:1px solid var(--line-strong); background:var(--bg); color:var(--text-soft); flex:none; }
+.ev-cal-today:hover { border-color:var(--accent); color:var(--text); }
+.ev-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+.ev-cal-dow { text-align:center; font-size:.68rem; font-weight:600; color:var(--text-faint);
+  padding-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
+.ev-cal-day { font:inherit; color:var(--text); cursor:pointer; aspect-ratio:1; min-height:38px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  border:1px solid transparent; border-radius:9px; background:transparent; padding:2px; }
+.ev-cal-day .d { font-size:.82rem; font-variant-numeric:tabular-nums; }
+.ev-cal-day .n { font-size:.62rem; font-weight:700; color:var(--accent); line-height:1; }
+.ev-cal-day.has { background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 22%, transparent); }
+.ev-cal-day.none { color:var(--text-faint); cursor:default; }
+.ev-cal-day.off { visibility:hidden; }
+.ev-cal-day.today { border-color:var(--accent); }
+.ev-cal-day.sel { background:var(--accent); border-color:var(--accent); color:#fff; }
+.ev-cal-day.sel .n { color:#fff; }
+.ev-cal-day:not(.none):not(.sel):hover { border-color:var(--accent); }
 .ev-day { margin-bottom:18px; }
 .ev-day-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
   padding:0 2px 7px; border-bottom:1px solid var(--line); margin-bottom:8px; position:sticky; top:0;
@@ -122,12 +147,6 @@ function shell() {
   <div class="filters" style="margin-bottom:16px">
     <label class="search">${SEARCH_ICON}<input type="search" id="ev-search" placeholder="Search a guide's name…" autocomplete="off"></label>
     <select id="ev-priority" class="select" aria-label="Filter by priority"><option value="">All priorities</option></select>
-    <select id="ev-days" class="select" aria-label="How far ahead to show" hidden>
-      <option value="7">Next 7 days</option>
-      <option value="14" selected>Next 14 days</option>
-      <option value="30">Next 30 days</option>
-      <option value="0">Rest of term</option>
-    </select>
   </div>
 
   <div id="ev-banner" class="callout" style="margin-bottom:14px" hidden></div>
@@ -326,63 +345,108 @@ function dayGroups() {
     });
   });
 
-  /* The workbook holds the whole term, which is 55 days and several hundred
-     tours -- useful to nobody as one scroll. Two weeks is the horizon people
-     actually plan an eval over; the rest is one click away. */
-  let cutoff = '';
-  if (local.days) {
-    const d = new Date();
-    d.setDate(d.getDate() + Number(local.days));
-    cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return new Map([...byDate.entries()].map(([date, rows]) => [date, {
+    rows: rows.sort((a, b) =>
+      a.t.start.localeCompare(b.t.start) || a.g.name.localeCompare(b.g.name)),
+    free: rows.filter(r => r.g.status === 'open').length
+  }]));
+}
+
+const isoOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/* The month grid. Seven columns, because Saturday tours are real -- they live
+   on their own tab in the workbook and were invisible to the hub until now. */
+function calendar(groups) {
+  const today = todayISO();
+  if (!local.month) local.month = today.slice(0, 7);
+
+  const [y, m] = local.month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const lead = first.getDay();                       // Sunday = 0
+  const days = new Date(y, m, 0).getDate();
+
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push('<span class="ev-cal-day off"></span>');
+
+  for (let d = 1; d <= days; d++) {
+    const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const g = groups.get(iso);
+    const free = g ? g.free : 0;
+    const cls = [
+      'ev-cal-day',
+      g ? 'has' : 'none',
+      iso === today ? 'today' : '',
+      iso === local.day ? 'sel' : ''
+    ].filter(Boolean).join(' ');
+
+    cells.push(g
+      ? `<button class="${cls}" data-day="${iso}" title="${free} to claim">
+           <span class="d">${d}</span>${free ? `<span class="n">${free}</span>` : ''}</button>`
+      : `<span class="${cls}"><span class="d">${d}</span></span>`);
   }
 
-  return [...byDate.entries()]
-    .filter(([date]) => !cutoff || date <= cutoff)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, rows]) => ({
-      date,
-      rows: rows.sort((a, b) =>
-        a.t.start.localeCompare(b.t.start) || a.g.name.localeCompare(b.g.name)),
-      free: rows.filter(r => r.g.status === 'open').length
-    }));
+  const label = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  return `<div class="ev-cal">
+    <div class="ev-cal-head">
+      <strong>${esc(label)}</strong>
+      <button class="ev-cal-today" data-cal="today">Today</button>
+      <button class="ev-cal-nav" data-cal="prev" aria-label="Previous month">‹</button>
+      <button class="ev-cal-nav" data-cal="next" aria-label="Next month">›</button>
+    </div>
+    <div class="ev-cal-grid">
+      ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<span class="ev-cal-dow">${d}</span>`).join('')}
+      ${cells.join('')}
+    </div>
+  </div>`;
 }
 
 function dayView() {
   const groups = dayGroups();
-  if (!groups.length) return '';
-
   const today = todayISO();
-  const tomorrow = (() => {
-    const d = new Date(); d.setDate(d.getDate() + 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  })();
 
-  return groups.map(({ date, rows, free }) => {
-    const label = date === today ? 'Today' : date === tomorrow ? 'Tomorrow' : '';
-    const full = prettyDate(date, { weekday: 'long', month: 'long', day: 'numeric' });
+  /* Land on a day that has something on it. Opening the tab on an empty
+     Sunday, with the answer two squares away, is a poor first impression. */
+  if (!local.day || !groups.has(local.day)) {
+    local.day = groups.has(today)
+      ? today
+      : [...groups.keys()].sort().find(d => d >= today) || [...groups.keys()].sort().pop() || today;
+    local.month = local.day.slice(0, 7);
+  }
 
-    return `<section class="ev-day">
-      <div class="ev-day-head">
-        <span class="ev-day-name">${label ? `<span class="soon">${label}</span> · ` : ''}${esc(full)}</span>
-        <span class="ev-day-count">${free ? `${free} to claim` : 'all claimed'}</span>
-      </div>
-      ${rows.map(({ g, t }) => {
-        const mine = isMine(g);
-        const taken = g.status !== 'open';
-        const who = taken
-          ? (mine ? 'Claimed by you' : g.evaluator ? `Claimed by ${g.evaluator}` : 'Already claimed')
-          : (g.priority || '');
-        return `<div class="ev-slot ${taken ? 'taken' : ''}">
-          <span class="ev-slot-time">${esc(t.slot || prettyTime(t.start))}</span>
-          <span class="ev-slot-who"><b>${esc(g.name)}</b><em>${esc(who)}</em></span>
-          ${taken
-            ? ''
-            : `<button class="btn btn-primary btn-sm" data-act="claim" data-id="${esc(g.id)}"
-                  data-date="${esc(t.date)}" data-start="${esc(t.start)}">Claim</button>`}
-        </div>`;
-      }).join('')}
-    </section>`;
-  }).join('');
+  const cal = calendar(groups);
+  const picked = groups.get(local.day);
+
+  if (!picked) {
+    return cal + `<div class="ev-day"><div class="ev-day-head">
+      <span class="ev-day-name">${esc(prettyDate(local.day, { weekday: 'long', month: 'long', day: 'numeric' }))}</span>
+      </div><p class="muted" style="padding:6px 2px">No tours that day.</p></div>`;
+  }
+
+  const { rows, free } = picked;
+  const label = local.day === today ? 'Today' : '';
+  const full = prettyDate(local.day, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  return cal + `<section class="ev-day">
+    <div class="ev-day-head">
+      <span class="ev-day-name">${label ? `<span class="soon">${label}</span> · ` : ''}${esc(full)}</span>
+      <span class="ev-day-count">${free ? `${free} to claim` : 'all claimed'}</span>
+    </div>
+    ${rows.map(({ g, t }) => {
+      const mine = isMine(g);
+      const taken = g.status !== 'open';
+      const who = taken
+        ? (mine ? 'Claimed by you' : g.evaluator ? `Claimed by ${g.evaluator}` : 'Already claimed')
+        : (g.priority || '');
+      return `<div class="ev-slot ${taken ? 'taken' : ''}">
+        <span class="ev-slot-time">${esc(t.slot || prettyTime(t.start))}</span>
+        <span class="ev-slot-who"><b>${esc(g.name)}</b><em>${esc(who)}</em></span>
+        ${taken
+          ? ''
+          : `<button class="btn btn-primary btn-sm" data-act="claim" data-id="${esc(g.id)}"
+                data-date="${esc(t.date)}" data-start="${esc(t.start)}">Claim</button>`}
+      </div>`;
+    }).join('')}
+  </section>`;
 }
 
 function paint() {
@@ -421,11 +485,11 @@ function paint() {
   const list = $('#ev-list');
 
   if (local.tab === 'days') {
-    const html = dayView();
+    const empty = !dayGroups().size;
     list.classList.remove('grid');
-    list.innerHTML = html;
-    $('#ev-empty').hidden = !!html;
-    if (!html) {
+    list.innerHTML = empty ? '' : dayView();
+    $('#ev-empty').hidden = !empty;
+    if (empty) {
       $('#ev-empty-text').textContent = (local.search || local.priority)
         ? 'No guides match those filters on any upcoming day.'
         : 'Nobody who still needs an eval has a tour on the schedule yet. Tours are read from the shared workbook, so they appear here as soon as they are put in.';
@@ -657,7 +721,6 @@ export default {
     if (!state.guides.length) await loadRoster();
     view.innerHTML = shell();
     $$('.modal-root', view).forEach(wireModal);
-    $('#ev-days').hidden = local.tab !== 'days';
     paint();
 
     $('#ev-tabs').addEventListener('click', e => {
@@ -665,7 +728,6 @@ export default {
       if (!t) return;
       local.tab = t.dataset.tab;
       $$('#ev-tabs .tab').forEach(x => x.classList.toggle('is-active', x === t));
-      $('#ev-days').hidden = local.tab !== 'days';
       paint();
     });
 
@@ -678,9 +740,23 @@ export default {
 
     $('#ev-search').addEventListener('input', debounce(e => { local.search = e.target.value; paint(); }));
     $('#ev-priority').addEventListener('change', e => { local.priority = e.target.value; paint(); });
-    $('#ev-days').addEventListener('change', e => { local.days = Number(e.target.value); paint(); });
 
     $('#ev-list').addEventListener('click', async e => {
+      const day = e.target.closest('[data-day]');
+      if (day) { local.day = day.dataset.day; local.month = local.day.slice(0, 7); return paint(); }
+
+      const nav = e.target.closest('[data-cal]');
+      if (nav) {
+        if (nav.dataset.cal === 'today') {
+          local.day = todayISO(); local.month = local.day.slice(0, 7);
+        } else {
+          const [y, m] = local.month.split('-').map(Number);
+          const d = new Date(y, m - 1 + (nav.dataset.cal === 'next' ? 1 : -1), 1);
+          local.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        }
+        return paint();
+      }
+
       const b = e.target.closest('button[data-act]');
       if (!b) return;
       const g = state.guides.find(x => x.id === b.dataset.id);

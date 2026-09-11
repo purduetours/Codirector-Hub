@@ -32,6 +32,10 @@ function termTabs() {
     : { tabs: ['January', 'February', 'March', 'April', 'MayJune', 'July'], year };
 }
 const DESK_TABS  = ['Front Desk', 'Welcome Desk'];
+const SAT_TAB    = 'Saturdays';
+
+const MONTHS = ['january','february','march','april','may','june',
+                'july','august','september','october','november','december'];
 
 /** Mon–Fri, three columns of guides each. */
 const GRID_DAYS = [[3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17]];
@@ -187,7 +191,80 @@ export async function loadTours() {
     });
   });
 
+  // Saturdays come from a separate tab in a different shape; same fields out.
+  (await loadSaturdays()).forEach(t => {
+    const key = `${t.date}|${t.slot}|${t.guide}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(t);
+  });
+
   out.sort((a, b) => a.date === b.date ? a.start.localeCompare(b.start) : a.date.localeCompare(b.date));
+  return out;
+}
+
+/**
+ * Saturday tours, which live on their own tab and in their own shape.
+ *
+ * This was missing entirely. The month grids only run Monday to Friday, so
+ * every Saturday tour the programme has ever run was invisible to the hub --
+ * not shown on the schedule, and never offered when claiming an eval, which
+ * meant a guide who only ever led on Saturdays could not be evaluated from
+ * their schedule at all.
+ *
+ * The tab is laid out sideways compared with the month grids: one column per
+ * Saturday, the date in the second row as "September 12" rather than "9/12",
+ * and the guides listed straight down underneath. Times are fixed and written
+ * in the footnote rather than in a column -- guides arrive at 8:30 and the
+ * tour itself runs 9:45 to 11:15.
+ *
+ * The footnote also says one of the bolded guides stays back and does not give
+ * the tour. Bold does not survive the export to CSV, so everybody listed is
+ * treated as scheduled; better to offer one tour too many than to silently
+ * drop somebody who did lead.
+ */
+const SAT_SLOT = '9:45-11:15';
+
+function longDate(text, year) {
+  const m = /([a-z]+)\s+(\d{1,2})/i.exec(String(text || ''));
+  if (!m) return '';
+  const mi = MONTHS.indexOf(m[1].toLowerCase());
+  if (mi < 0) return '';
+  return `${year}-${String(mi + 1).padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+}
+
+async function loadSaturdays() {
+  const rows = await fetchTab(SAT_TAB);
+  if (!rows || rows.length < 3) return [];
+
+  const { year } = termTabs();
+  const today = todayISO();
+
+  // The row carrying the dates: the first one where more than one cell parses
+  // as a date. Found rather than hard-coded, so an added title row does not
+  // silently empty the whole tab.
+  let dateRow = -1;
+  for (let i = 0; i < Math.min(rows.length, 6); i++) {
+    const hits = rows[i].filter(c => longDate(c, year)).length;
+    if (hits >= 2) { dateRow = i; break; }
+  }
+  if (dateRow < 0) return [];
+
+  const out = [], seen = new Set();
+  rows[dateRow].forEach((cell, col) => {
+    const date = longDate(cell, year);
+    if (!date || date < today) return;
+
+    for (let r = dateRow + 1; r < rows.length; r++) {
+      const guide = cleanGuide(rows[r][col]);
+      if (!guide || NOT_A_GUIDE.test(guide)) continue;
+      if (guide.split(/\s+/).length > 4) continue;      // the footnote, not a name
+      const key = `${date}|${SAT_SLOT}|${guide}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ date, start: slotStart(SAT_SLOT), slot: SAT_SLOT, guide });
+    }
+  });
   return out;
 }
 
