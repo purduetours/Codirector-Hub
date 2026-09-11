@@ -103,16 +103,39 @@ function parseCSV(text) {
   return rows;
 }
 
-async function fetchTab(tab) {
+/* One trip per tab, per session.
+
+   The same month grid is wanted by the Schedule tab, the Today screen, the
+   guide roster and Vanessa's warm-up, and every one of them was fetching it
+   from Google again -- a quarter of a second each, repeated four or five times
+   for no new information. Holding the parsed rows removes all of that.
+
+   The promise is what gets held, not the result, so two screens asking at the
+   same moment share one request rather than racing. A tab that fails is not
+   kept, so a dropped connection does not poison the rest of the session, and
+   Refresh empties the lot. */
+const tabCache = new Map();
+
+/** Forget everything read from the workbook; the next ask goes to Google. */
+export const bustSheets = () => tabCache.clear();
+
+function fetchTab(tab) {
+  if (tabCache.has(tab)) return tabCache.get(tab);
+
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
               `?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    return parseCSV(await res.text());
-  } catch {
-    return null;              // a missing tab is normal, not an error
-  }
+
+  const pending = fetch(url)
+    .then(res => (res.ok ? res.text() : null))
+    .then(text => (text === null ? null : parseCSV(text)))
+    .catch(() => null)          // a missing tab is normal, not an error
+    .then(rows => {
+      if (rows === null) tabCache.delete(tab);   // let a later try succeed
+      return rows;
+    });
+
+  tabCache.set(tab, pending);
+  return pending;
 }
 
 /**

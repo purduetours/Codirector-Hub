@@ -3,7 +3,8 @@ import { state, myName, isAdmin } from './core/state.js';
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
 import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
 import { $, $$, initials, toast } from './core/ui.js';
-import { initVanessa, registerWarmers } from './core/vanessa-ui.js';
+import { bustSheets } from './core/sheets.js';
+import { initVanessa, registerWarmers, prewarm } from './core/vanessa-ui.js';
 
 import evals, { loadRoster } from './modules/evals.js';
 import interviews    from './modules/interviews.js';
@@ -41,6 +42,11 @@ async function start() {
   initVanessa();
   await render();
   paintShell();
+
+  /* Load what Vanessa needs now, in the background, rather than when somebody
+     clicks her and waits. The screen is already painted at this point, so this
+     costs the user nothing and saves them a pause later. */
+  prewarm();
 }
 
 /* --- shell chrome ------------------------------------------------------ */
@@ -48,6 +54,7 @@ $('#btn-refresh').addEventListener('click', async function () {
   this.classList.add('is-busy');
   try {
     list().forEach(m => m.bust?.());
+    bustSheets();
     await loadRoster();
     paintShell(); paintNav(); await render();
     toast('Up to date.');

@@ -89,7 +89,11 @@ export async function resumeIfEnabled() {
   if (!wasEnabled() || !LM()) return false;
   try {
     const a = await LM().availability();
-    if (a !== 'available') return false;      // still needs a gesture; leave it
+    /* 'available' means it is on this machine already. 'downloading' means a
+       previous visit started the fetch and it is still running -- Chrome does
+       not want a second click for that, so join it rather than making the
+       person press the button again to finish what they already began. */
+    if (a !== 'available' && a !== 'downloading') return false;
     return await enableModel();
   } catch { return false; }
 }
@@ -99,28 +103,47 @@ export async function enableModel(onProgress) {
   if (!api) { state = 'unavailable'; throw new Error('This browser has no built-in model. Chrome or Edge on a laptop can do this; phones cannot yet.'); }
 
   state = 'loading';
+
+  /* Remember the intent now, not when it finishes. The download can run for
+     ten minutes and Chrome keeps going even after the tab is shut -- but this
+     flag used to be written only on success, so anyone who closed the hub
+     partway through came back to the same button and no sign of the gigabytes
+     already on their machine. Written up front, the next visit picks the
+     download back up on its own. */
+  try { localStorage.setItem(REMEMBER, '1'); } catch { /* private window */ }
+
   try {
     session = await api.create({
+      /* The list lives here rather than in every question. A system prompt is
+         read once when the session is made; anything sent with the question is
+         read again, word by word, on every single ask. Same instructions, a
+         fraction of the work per answer. */
       initialPrompts: [{
         role: 'system',
         content:
-          'You match a question to the closest item in a list. ' +
+          'You match a question to the closest item in this list:\n' +
+          CANONICAL.map(c => `- ${c}`).join('\n') + '\n\n' +
           'Reply with the matching item copied EXACTLY, and nothing else. ' +
           'If a person is named, reply with the item and put their name in place of NAME. ' +
           'If nothing in the list fits, reply exactly: NONE'
       }],
       monitor(m) {
         m.addEventListener('downloadprogress', e => {
-          if (onProgress) onProgress(e.loaded ?? 0);
+          if (!onProgress) return;
+          /* Chrome reports this as 0..1; older builds reported bytes out of a
+             total. Read both, so the panel never shows "Downloading 41773000%". */
+          const raw = e.total ? e.loaded / e.total : (e.loaded ?? 0);
+          onProgress(Math.max(0, Math.min(1, raw)));
         });
       }
     });
     state = 'ready';
-    try { localStorage.setItem(REMEMBER, '1'); } catch { /* private window */ }
     return true;
   } catch (err) {
     state = 'failed';
     session = null;
+    // It did not work; do not keep trying it silently on every future visit.
+    try { localStorage.removeItem(REMEMBER); } catch { /* ignore */ }
     throw new Error(err.message || 'The model could not be started.');
   }
 }
@@ -138,10 +161,17 @@ export function disableModel() {
  */
 export async function interpret(question) {
   if (!session || state !== 'ready') return null;
+
+  /* Every ask starts from the same clean slate. Re-using one session makes it
+     re-read the whole conversation each time, so the tenth question is slower
+     than the first and an earlier wrong guess can colour the next answer.
+     A clone carries the system prompt and nothing else, and is thrown away. */
+  let turn = session, temp = null;
+  try { if (session.clone) turn = temp = await session.clone(); } catch { /* reuse */ }
+
   try {
-    const reply = (await session.prompt(
-      `List:\n${CANONICAL.map(c => `- ${c}`).join('\n')}\n\nQuestion: ${question}\n\nMatching item:`
-    )).trim().replace(/^[-•*]\s*/, '').replace(/^["']|["']$/g, '');
+    const reply = (await turn.prompt(`Question: ${question}\n\nMatching item:`))
+      .trim().replace(/^[-•*]\s*/, '').replace(/^["']|["']$/g, '');
 
     if (!reply || /^none$/i.test(reply)) return null;
 
@@ -159,5 +189,7 @@ export async function interpret(question) {
     return null;
   } catch {
     return null;
+  } finally {
+    try { temp?.destroy?.(); } catch { /* already gone */ }
   }
 }

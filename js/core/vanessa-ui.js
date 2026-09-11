@@ -49,7 +49,8 @@ const SUGGESTIONS = [
 
 let open = false;
 let warmers = [];
-let warmed = false;
+let warming = null;      // the in-flight warm-up, so nobody starts a second one
+let warmDone = false;
 
 /**
  * What Vanessa needs loaded before she can answer.
@@ -57,23 +58,42 @@ let warmed = false;
  * She reads only what the app already holds, which is the right rule -- it means
  * she can never surface something the database withheld. The flaw was that
  * nothing loaded the data until you visited that tab, so asking "who still
- * needs an eval" from the Interviews screen got a shrug. Now opening her warms
- * whatever your role entitles you to, using the modules' own loaders, so it is
- * the same query the tab itself would run.
+ * needs an eval" from the Interviews screen got a shrug. So she warms whatever
+ * your role entitles you to, using the modules' own loaders -- the same query
+ * the tab itself would run.
+ *
+ * This used to happen when you clicked her, which meant sitting through
+ * "One moment, getting up to speed" every single time before you could ask
+ * anything. It now runs quietly once the app has finished painting, so by the
+ * time anyone reaches for her it is already done. Clicking her during those
+ * first couple of seconds waits on the same work rather than starting it again.
  */
 export function registerWarmers(list) { warmers = list; }
 
-async function warmUp() {
-  if (warmed) return;
-  warmed = true;
+export function warmUp() {
+  if (warming) return warming;
+
   const allowed = warmers.filter(w =>
     w.needs === 'training' ? inTraining()
     : w.needs === 'recruitment' ? inRecruitment()
     : true);
-  if (!allowed.length) return;
 
+  warming = (allowed.length ? Promise.allSettled(allowed.map(w => w.load())) : Promise.resolve())
+    .then(() => { warmDone = true; });
+  return warming;
+}
+
+/** Start the warm-up when the browser is next idle, without blocking startup. */
+export function prewarm() {
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 400));
+  idle(() => warmUp().catch(() => {}), { timeout: 3000 });
+}
+
+/** Only shown if she is genuinely not ready yet. */
+async function warmForPanel() {
+  if (warmDone) return;
   const note = say('her', 'One moment, getting up to speed…');
-  await Promise.allSettled(allowed.map(w => w.load()));
+  await warmUp();
   note.remove();
 }
 
@@ -107,6 +127,7 @@ async function send(q) {
   say('you', q);
   $('#v-input').value = '';
 
+  await warmUp();          // resolved already in all but the first second
   const r = ask(q);
 
   /* The model only gets a turn when the keyword matcher has already failed.
@@ -174,7 +195,7 @@ export function initVanessa() {
       paintModelRow();
       if (!$('#v-log').children.length) say('her', greeting());
       setTimeout(() => $('#v-input').focus(), 60);
-      await warmUp();
+      await warmForPanel();
     }
   });
   $('#v-close').addEventListener('click', () => { open = false; panel.hidden = true; });
