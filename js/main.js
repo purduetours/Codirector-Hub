@@ -11,8 +11,9 @@ import schedule      from './modules/schedule.js';
 import directory     from './modules/directory.js';
 import desks         from './modules/desks.js';
 import announcements from './modules/announcements.js';
+import today         from './modules/today.js';
 
-[announcements, evals, interviews, schedule, directory, desks].forEach(register);
+[today, announcements, evals, interviews, schedule, directory, desks].forEach(register);
 
 /* The modules already know how to fetch their own data; Vanessa just asks them
    to, rather than reaching past them into the database herself. */

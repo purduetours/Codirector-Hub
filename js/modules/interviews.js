@@ -25,6 +25,9 @@ const DECISIONS = ['', 'Yes', 'Maybe', 'No'];
 const YEARS = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate'];
 
 let data = null;                 // { cycle, groups, interviewers, candidates[] }
+
+/** What this tab has loaded, for the Today screen. Null until it has run. */
+export const interviewData = () => data;
 let nameOf = new Map();          // member id -> full name
 let pending = [];                // parsed roster rows awaiting Add/Replace
 /* No `who` any more. The old app made each interviewer pick their own name from
