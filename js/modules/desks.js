@@ -1,3 +1,4 @@
+import { state } from '../core/state.js';
 /* ============================================================ Desk Coverage
    Front Desk and Welcome Desk shifts. The source grid is a weekly template
    rather than dated, so this shows a recurring Mon–Fri week and flags any slot
@@ -35,7 +36,7 @@ function paint() {
   let gaps = 0;
   const body = slots.map(slot => {
     const cells = DAYS.map(day => {
-      const people = mine.filter(r => r.slot === slot && r.day === day).map(r => r.person);
+      const people = mine.filter(r => r.slot === slot && r.day === day && r.person).map(r => r.person);
       if (!people.length) { gaps++; return '<td><span class="desk-gap">⚠ uncovered</span></td>'; }
       return `<td>${people.map(p => `<span class="desk-person">${esc(p)}</span>`).join('')}</td>`;
     }).join('');
@@ -57,14 +58,17 @@ function paint() {
 /** Loads desk coverage once per session. Safe to call in the background. */
 async function prime() {
   if (rows) return;
-  rows = await loadDesks();
+  const version = state.sessionVersion;
+  const result = await loadDesks();
+  if (version !== state.sessionVersion) return;
+  rows = result;
   shareData('desks', rows);
 }
 
 export default {
   id: 'desks',
   prefetch: prime,
-  bust: () => { rows = null; },
+  bust: () => { rows = null; shareData('desks', null); },
   needs: 'training',
   title: 'Desk Coverage',
   crumb: 'Front and Welcome desk shifts',

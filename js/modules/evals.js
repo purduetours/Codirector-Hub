@@ -518,6 +518,7 @@ function paint() {
  * caching and no retry policy to get wrong.
  */
 export async function loadRoster() {
+  const version = state.sessionVersion;
   const rows = await select('eval_roster',
     'select=*&term_id=eq.fall-2026&order=priority_rank.asc,last_name.asc');
   state.guides = (rows || []).map(toGuide);
@@ -530,7 +531,8 @@ export async function loadRoster() {
   state.neededTotal = state.guides.filter(g => g.status !== 'skip').length;
   state.loadedAt = new Date();
 
-  attachTours().catch(() => {});   // never block the roster on the workbook
+  state.guideToursLoaded = false;
+  await attachTours().then(() => { if (version === state.sessionVersion) state.guideToursLoaded = true; }).catch(() => {});   // never block the roster on the workbook
   return state.guides;
 }
 
@@ -613,7 +615,12 @@ function resolveGuide(label, index, byName) {
 }
 
 async function attachTours() {
-  if (!tourCache) tourCache = await loadTours();
+  const version = state.sessionVersion;
+  if (!tourCache) {
+    const loaded = await loadTours();
+    if (version !== state.sessionVersion) return;
+    tourCache = loaded;
+  }
 
   state.guides.forEach(g => { g.tours = []; });
   const index = buildNameIndex(state.guides);
@@ -710,6 +717,7 @@ function openEval(g) {
 
 export default {
   id: 'evals',
+  bust: () => { tourCache = null; },
   needs: 'training',
   title: 'Eval Tracker',
   crumb: 'Claim and submit tour guide evaluations',

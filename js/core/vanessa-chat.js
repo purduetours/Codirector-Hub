@@ -66,7 +66,7 @@ export const SMALLTALK = [
                'introduce yourself','who is vanessa','what is vanessa','who made you','who built you',
                'what model are you','how do you work'],
     replies: [
-      "I'm Vanessa. I live in this hub and answer questions about what is in it — evals, interviews, the tour schedule, the desk rota, and the handbook.\n\nEverything I tell you is counted from the same data your screen is showing, so I cannot be quietly wrong about a number. I also only see what you are allowed to see.",
+      "I'm Vanessa. I live in this hub and answer questions about what is in it — evals, interviews, the tour schedule, the desk rota, and the handbook.\n\nEverything I tell you is counted from the same data your screen is showing, so the answer depends on what has loaded and which records you can see. I also only see what you are allowed to see.",
       "Vanessa. Think of me as the hub with a mouth. I add up what is in front of you, point you at the right tab, and quote the handbook when the answer is in there."
     ]
   },
@@ -102,7 +102,7 @@ export const SMALLTALK = [
                'this is broken','doesnt work','does not work','not working'],
     replies: [
       "Fair enough, and probably deserved. Tell me what you actually wanted and I'll have another go.",
-      "Noted. Say what I got wrong and I'll not repeat it — or ask it in different words and I'll aim better."
+      "Noted. Say what I got wrong and I'll try again — or ask it in different words and I'll aim better."
     ]
   },
   {

@@ -4,6 +4,7 @@
 const LS_SESSION = 'hub2.session';
 
 export const state = {
+  sessionVersion: 0,
   token: '',
   refreshToken: '',
   expiresAt: 0,
@@ -50,12 +51,19 @@ export function loadSession() {
   } catch { return false; }
 }
 
+const sessionListeners = new Set();
+export function onSessionReset(fn) { sessionListeners.add(fn); return () => sessionListeners.delete(fn); }
+
 export function clearSession() {
+  state.sessionVersion++;
   state.token = state.refreshToken = '';
   state.expiresAt = 0;
   state.me = state.role = null;
   state.guides = [];
   state.loadedAt = null;
+  state.guideToursLoaded = false;
+  state.counts = {}; state.neededTotal = 0; state.unmatchedSchedule = [];
+  sessionListeners.forEach(fn => fn());
   try { localStorage.removeItem(LS_SESSION); } catch { /* ignore */ }
 }
 

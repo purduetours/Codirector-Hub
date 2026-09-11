@@ -1,3 +1,4 @@
+import { state } from '../core/state.js';
 /* ============================================================ Tour Schedule
    A day-by-day view of the semester schedule. Reads the same `Schedule` tab the
    eval tracker uses, via a `schedule` action that returns it whole.
@@ -88,14 +89,17 @@ function paint() {
    and no Apps Script -- which is the last thing it was still being used for. */
 async function prime() {
   if (rows) return;
-  rows = await loadTours();
+  const version = state.sessionVersion;
+  const result = await loadTours();
+  if (version !== state.sessionVersion) return;
+  rows = result;
   shareData('tours', rows);
 }
 
 export default {
   id: 'schedule',
   prefetch: prime,
-  bust: () => { rows = null; },
+  bust: () => { rows = null; shareData('tours', null); },
   title: 'Tour Schedule',
   crumb: 'Who is leading which tour, and when',
   icon: '📅',

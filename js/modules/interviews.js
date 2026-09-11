@@ -925,7 +925,7 @@ export default {
   id: 'interviews',
   needs: 'recruitment',
   prefetch: async () => { if (!data) await refresh(); },
-  bust: () => { data = null; },
+  bust: () => { data = null; shareInterviews(null); },
   title: 'Interviews',
   crumb: 'Check-in, grading and results',
   icon: '🎤',

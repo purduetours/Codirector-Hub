@@ -19,6 +19,7 @@ import { smallTalk, smallTalkStrong, peel } from './vanessa-chat.js';
 import { HANDBOOK } from './vanessa-handbook.js';
 import { state, myName, isAdmin, inTraining, inRecruitment } from './state.js';
 import { esc } from './ui.js';
+import { dateRange, dayISO, DAY_NAMES } from './vanessa-dates.js';
 
 /* --------------------------------------------------------------- matching
    People do not type the phrase you thought of. "who hasnt been graded",
@@ -67,12 +68,16 @@ function near(a, b) {
 
 /** Does the question contain any of these ideas? Typos and word endings allowed. */
 function has(q, ...phrases) {
-  const ws = tokens(q);
-  const raw = String(q || '').toLowerCase();
+  // Keep phrase words, including prepositions and negation. "tours on" must
+  // never collapse to "tour" and claim every question mentioning a tour.
+  const words = text => String(text || '').toLowerCase().replace(/[’']/g, '').match(/[a-z0-9]+/g) || [];
+  const ws = words(q);
   return phrases.some(p => {
-    if (raw.includes(p)) return true;
-    const parts = tokens(p);
-    return parts.length > 0 && parts.every(part => ws.some(w => w === part || near(w, part)));
+    const parts = words(p);
+    return parts.length && ws.some((_, i) => parts.every((part, j) => {
+      const w = ws[i+j];
+      return w && (w === part || stem(w) === stem(part) || near(w, part));
+    }));
   });
 }
 
@@ -96,8 +101,9 @@ const topicFor = q => topicMatch(q).topic;
 
 function evalAnswers(q) {
   const g = state.guides || [];
-  if (!g.length || !inTraining()) return null;
+  if (!inTraining()) return null;
 
+  if (!state.loadedAt && !g.length) return has(q, 'eval', 'evals', 'claimed') ? 'Evaluations have not loaded yet. Try Refresh.' : null;
   const mine = g.filter(x => x.evaluatorId === state.me?.id);
 
   const firstPerson = /\bmy\b|\bmine\b|\bi(?:'ve| have)? claimed\b/i.test(q);
@@ -111,19 +117,20 @@ function evalAnswers(q) {
       (undated.length ? `\n\n${undated.length} of them still need a tour date.` : '');
   }
 
-  if (has(q, 'need an eval', 'needs eval', 'still need', 'unclaimed', 'up for grabs',
+  if (has(q, 'need an eval', 'needs eval', 'unclaimed', 'up for grabs',
              'available', 'nobody claimed', 'not claimed', 'hasnt been claimed',
-             'no evaluator', 'without an evaluator', 'left to claim')) {
+             'no evaluator', 'without an evaluator', 'left to claim', 'who needs an eval', 'who still needs an eval')) {
     const open = g.filter(x => x.status === 'open');
     const top = open.filter(x => x.rank <= 2);
     remember(open.filter(x => x.rank <= 2).map(x => x.name));
-    return `${open.length} guides are unclaimed.` +
+    return `${open.length} guide${open.length === 1 ? ' is' : 's are'} unclaimed.` +
       (top.length ? ` ${top.length} of them are first or second priority:\n` +
         top.slice(0, 10).map(x => `- ${x.name} (${x.priority})`).join('\n') +
         (top.length > 10 ? `\n…and ${top.length - 10} more.` : '') : '');
   }
 
-  if (has(q, 'no tour', 'without a tour', 'not scheduled', 'no date')) {
+  if (has(q, 'no tour', 'no scheduled tours', 'without a tour', 'not scheduled', 'no date')) {
+    if (state.guideToursLoaded === false) return 'The guide schedule could not be loaded. Try Refresh before checking who has no tours.';
     const none = g.filter(x => !x.skip && !x.tours.length);
     return `${none.length} guides who need an eval have no scheduled tours to pick from, so they have to be scheduled by hand:\n` +
       none.slice(0, 12).map(x => `- ${x.name}`).join('\n') + (none.length > 12 ? `\n…and ${none.length - 12} more.` : '');
@@ -171,9 +178,10 @@ function discussionFlags(cands) {
 
 function interviewAnswers(q) {
   const d = interviewData;
-  if (!d || !inRecruitment()) return null;
+  if (!inRecruitment()) return null;
+  if (!d) return has(q, 'candidate', 'candidates', 'interview', 'ungraded', 'checked in') ? 'Interviews have not loaded yet. Try Refresh.' : null;
   const cands = d.candidates || [];
-  if (!cands.length) return null;
+
 
   if (has(q, 'discuss', 'talk about', 'disagree', 'split', 'contentious', 'worth')) {
     const flags = discussionFlags(cands).slice(0, 8);
@@ -213,6 +221,12 @@ function interviewAnswers(q) {
       (c.spread >= 1.5 ? ` (but they disagreed by ${c.spread.toFixed(1)})` : '')).join('\n');
   }
 
+  if (/\b(?:not|never|hasnt|havent|hasn't|haven't)\b.*\b(?:checked|check|arrived)\b|\b(?:missing|absent) candidates\b/i.test(q)) {
+    const missing = cands.filter(c => c.checkin !== 'Yes');
+    remember(missing.map(c => c.name));
+    return missing.length ? `${missing.length} candidates have not checked in:\n` + missing.slice(0,12).map(c => `- ${c.name}`).join('\n') : 'Every candidate has checked in.';
+  }
+
   if (has(q, 'checked in', 'check in', 'arrived', 'here')) {
     const inn = cands.filter(c => c.checkin === 'Yes').length;
     return `${inn} of ${cands.length} candidates are checked in.`;
@@ -230,7 +244,7 @@ function interviewAnswers(q) {
   const named = who[0];
   if (named) {
     remember(null, named.name);
-    const f = discussionFlags([named])[0];
+    const f = discussionFlags(cands).find(f => f.c === named);
     return `${named.name} — ${named.final !== null ? named.final.toFixed(2) : 'not scored yet'}` +
       (named.raters ? ` from ${named.raters} raters` : '') +
       (named.group ? `, group ${named.group}` : '') +
@@ -283,8 +297,8 @@ function findPeople(q, list, nameOf) {
 
 function guideAnswers(q) {
   const g = state.guides || [];
-  if (!g.length || !inTraining()) return null;
-  if (!has(q, 'who', 'when', 'evaluat', 'claim', 'tour', 'lead')) return null;
+  if (!inTraining()) return null;
+
 
   const hits = findPeople(q, g, x => x.name);
   if (hits.length > 1) {
@@ -306,12 +320,16 @@ function guideAnswers(q) {
     (x.date ? `, on ${prettyDay(x.date)}${x.time ? ' at ' + prettyClock(x.time) : ''}.` : ', no tour date set yet.') +
     (x.status === 'submitted' ? ' Eval submitted.' : x.status === 'reviewed' ? ' Eval submitted and reviewed.' : ''));
 
-  if (x.tours && x.tours.length) {
-    const next = x.tours.slice(0, 3);
+  const range = dateRange(q.replace(new RegExp(x.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ''));
+  if (range?.error) return range.error;
+  const tours = (x.tours || []).filter(t => !range || (t.date >= range.from && t.date <= range.to));
+  if (state.guideToursLoaded === false) bits.push('Tour times have not loaded. Try Refresh.');
+  else if (tours.length) {
+    const next = tours.slice(0, 3);
     bits.push(`\nUpcoming tours:\n` + next.map(t => `- ${prettyDay(t.date)} at ${prettyClock(t.start)}`).join('\n') +
-      (x.tours.length > 3 ? `\n…and ${x.tours.length - 3} more.` : ''));
+      (tours.length > 3 ? `\n…and ${tours.length - 3} more.` : ''));
   } else if (!x.skip) {
-    bits.push('\nNo scheduled tours to pick from, so their eval has to be dated by hand.');
+    bits.push(range ? `\nNo tours listed from ${range.from} through ${range.to}.` : '\nNo scheduled tours to pick from, so their eval has to be dated by hand.');
   }
   return bits.join(' ');
 }
@@ -319,60 +337,59 @@ function guideAnswers(q) {
 /* ------------------------------------------------------- tours and desks --- */
 
 function scheduleAnswers(q) {
+  if (!has(q, 'tour', 'tours', 'schedule', 'leading')) return null;
+  if (has(q, 'no tour', 'no scheduled tours', 'without a tour', 'not scheduled', 'no date')) return null;
+  if ((state.guides || []).length && inTraining() && findPeople(q, state.guides, x => x.name).length) return null;
   const tours = shared.tours;
-  if (!tours || !tours.length) return null;
-
-  // "when is Noah Cash leading a tour" is a question about Noah, not about
-  // today, so step aside and let the guide answer take it.
-  if ((state.guides || []).length &&
-      findPeople(q, state.guides, x => x.name).length === 1) return null;
-
-  if (has(q, 'tomorrow', 'today', 'this week', 'tours on', 'leading today', 'who is leading')) {
-    const today = new Date();
-    if (has(q, 'tomorrow')) today.setDate(today.getDate() + 1);
-    const iso = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-    const day = tours.filter(t => t.date === iso);
-    if (!day.length) return `No tours ${has(q,'tomorrow') ? 'tomorrow' : 'today'} (${prettyDay(iso)}).`;
-    const bySlot = {};
-    day.forEach(t => (bySlot[t.slot] ||= []).push(t.guide));
-    return `${day.length} guides leading on ${prettyDay(iso)}:\n` +
-      Object.entries(bySlot).map(([slot, who]) => `- ${slot}: ${who.join(', ')}`).join('\n');
-  }
-  return null;
+  if (!tours) return 'The tour schedule has not loaded yet. Try Refresh before checking tour times.';
+  const range = dateRange(q);
+  if (range?.error) return range.error;
+  if (!range && !/\b(who|when|list|show)\b/i.test(q)) return null;
+  const dates = range || dateRange('today');
+  const day = tours.filter(t => t.date >= dates.from && t.date <= dates.to);
+  const label = dates.from === dates.to ? prettyDay(dates.from) : `${prettyDay(dates.from)} through ${prettyDay(dates.to)}`;
+  if (!day.length) return `No tours are listed in the loaded schedule for ${label}.`;
+  const bySlot = {};
+  day.forEach(t => (bySlot[`${t.date}|${t.slot || t.start}`] ||= []).push(t.guide));
+  return `${day.length} guide assignment${day.length === 1 ? '' : 's'} for ${label}:\n` +
+    Object.entries(bySlot).map(([key, who]) => {
+      const [date, slot] = key.split('|');
+      return `- ${dates.from !== dates.to ? prettyDay(date) + ', ' : ''}${slot}: ${who.join(', ')}`;
+    }).join('\n');
 }
 
 function deskAnswers(q) {
+  if (!has(q, 'desk', 'desks', 'coverage', 'uncovered desk')) return null;
+  if (!inTraining()) return 'Desk Coverage is available to the training team. Your current role does not include it.';
   const desks = shared.desks;
-  if (!desks || !desks.length) return null;
-  if (!has(q, 'desk', 'welcome desk', 'front desk', 'cover', 'uncovered', 'gap')) return null;
-
-  const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-  const day = DAYS.find(d => q.toLowerCase().includes(d.toLowerCase()));
+  if (!desks) return 'Desk coverage has not loaded yet. Try Refresh before checking coverage.';
+  const range = dateRange(q);
+  if (range?.error) return range.error;
+  const days = [];
+  if (range) {
+    const d = new Date(range.start);
+    while (d <= range.end) { days.push(DAY_NAMES[d.getDay()]); d.setDate(d.getDate()+1); }
+  } else days.push('Monday','Tuesday','Wednesday','Thursday','Friday');
   const which = /welcome/i.test(q) ? 'Welcome Desk' : /front/i.test(q) ? 'Front Desk' : null;
-
+  const source = desks.filter(r => !which || r.desk === which);
+  const rows = source.filter(r => days.includes(r.day));
+  const label = `${which || 'Desk'} coverage for ${days.join(', ')} (recurring weekly template)`;
   if (has(q, 'uncovered', 'gap', 'nobody', 'empty', 'missing')) {
-    const slots = [...new Set(desks.map(d => `${d.desk}|${d.slot}`))];
+    const slots = [...new Set(source.map(d => `${d.desk}|${d.slot}`))];
+    if (!slots.length) return 'No desk slots are loaded, so I cannot determine which slots are uncovered.';
     const gaps = [];
-    slots.forEach(key => {
-      const [dk, slot] = key.split('|');
-      DAYS.forEach(d => {
-        if (!desks.some(x => x.desk === dk && x.slot === slot && x.day === d)) gaps.push(`${dk}, ${d} ${slot}`);
-      });
-    });
-    return gaps.length
-      ? `${gaps.length} uncovered desk slots:\n` + gaps.slice(0, 12).map(g => `- ${g}`).join('\n') +
-        (gaps.length > 12 ? `\n…and ${gaps.length - 12} more.` : '')
-      : 'Every desk slot is covered this week.';
+    for (const key of slots) {
+      const [desk, slot] = key.split('|');
+      for (const day of days.filter(d => d !== 'Saturday' && d !== 'Sunday')) {
+        if (!rows.some(x => x.desk === desk && x.slot === slot && x.day === day && x.person)) gaps.push(`${desk}, ${day} ${slot}`);
+      }
+    }
+    if (days.every(d => d === 'Saturday' || d === 'Sunday')) return 'The desk template only covers Monday through Friday.';
+    return `${label}:\n` + (gaps.length ? `${gaps.length} uncovered slots:\n` + gaps.slice(0,12).map(g => `- ${g}`).join('\n') : 'All loaded slots are covered.');
   }
-
-  let rows = desks;
-  if (day) rows = rows.filter(r => r.day === day);
-  if (which) rows = rows.filter(r => r.desk === which);
-  if (!rows.length) return `Nobody is on the ${which || 'desk'}${day ? ' on ' + day : ''}.`;
-  const bySlot = {};
-  rows.forEach(r => (bySlot[`${r.desk} ${r.slot}`] ||= []).push(r.person));
-  return `${which || 'Desk'} cover${day ? ' on ' + day : ''}:\n` +
-    Object.entries(bySlot).slice(0, 14).map(([k, who]) => `- ${k}: ${who.join(', ')}`).join('\n');
+  const filled = rows.filter(r => r.person);
+  if (!filled.length) return `${label}: no assignments are listed.`;
+  return `${label}:\n` + filled.slice(0,30).map(r => `- ${r.day}, ${r.slot}: ${r.person}`).join('\n');
 }
 
 /* ------------------------------------------------------------- navigation */
@@ -387,9 +404,11 @@ const DESTINATIONS = [
 ];
 
 function navigation(q) {
-  if (!has(q, 'show', 'open', 'go to', 'take me', 'jump')) return null;
+  // 'Show me ungraded candidates' asks for an answer, not a tab change.
+  if (!/^(?:please\s+)?(?:open|go to|take me to|jump to|navigate to)\b/i.test(q)) return null;
   for (const d of DESTINATIONS) {
     if (d.k.some(k => q.toLowerCase().includes(k))) {
+      if ((['evals','desks','directory'].includes(d.to) && !inTraining()) || (d.to === 'interviews' && !inRecruitment())) return { say: 'Your current role does not include that tool.' };
       return { go: d.to, say: `Opening ${d.to === 'evals' ? 'Eval Tracker' : d.to}.` };
     }
   }
@@ -407,11 +426,14 @@ function navigation(q) {
 
 const memory = { list: [], person: null, pending: null, recent: [] };
 
-export function forget() { memory.list = []; memory.person = null; memory.pending = null; }
+export function forget() { memory.list = []; memory.person = null; memory.pending = null; memory.recent = []; }
+export function resetVanessaData() {
+  forget(); greeted = false; interviewData = null; shared.tours = shared.desks = null;
+}
 
 /** Called by the answers that read out a list, so "the second one" can work. */
 function remember(list, person) {
-  if (list && list.length) memory.list = list.slice(0, 12);
+  if (Array.isArray(list)) memory.list = list.slice(0, 12);
   if (person) memory.person = person;
 }
 
@@ -595,12 +617,15 @@ function offerFor(q, text) {
 
 export function ask(question) {
   let q = String(question || '').trim();
+  if (!state.me) return { text: 'Sign in to use Vanessa.' };
   if (!q) return { text: vary('Ask me anything about the hub.', 'What would you like to know?') };
 
   /* --- is this an answer to something she just asked? --------------------- */
   const waiting = memory.pending;
   memory.pending = null;
 
+  if (waiting && waiting.kind === 'details' && YES.test(q)) q = waiting.question;
+  if (waiting && waiting.kind === 'details' && NO.test(q)) return { text: 'Okay. What else would you like to know?' };
   if (waiting && waiting.kind === 'offer') {
     if (YES.test(q)) return { text: vary('Right you are.', 'On it.', 'Sure.'), go: waiting.go };
     if (NO.test(q))  return { text: vary('No problem.', 'Fine — anything else?', 'Right you are.') };
@@ -613,9 +638,9 @@ export function ask(question) {
                         'You have lost me — what were we on?') };
   }
   if (waiting && waiting.kind === 'which') {
-    const picked = waiting.options.find(n => findPeople(q, [{ n }], x => x.n).length) ||
-                   waiting.options.find(n => q.toLowerCase().includes(n.toLowerCase().split(' ')[0]));
-    if (picked) q = picked;
+    const matches = findPeople(q, waiting.options.map(name => ({ name })), x => x.name);
+    if (matches.length === 1) q = `tell me about ${matches[0].name}`;
+
   }
 
   /* --- is this just somebody saying hello? -------------------------------
@@ -634,6 +659,14 @@ export function ask(question) {
   const ref = resolveReference(q);
   q = ref.q;
 
+  // Specific handbook/how-to topics win before operational data matching.
+  const earlyTopic = topicMatch(q).topic;
+  const handbookTopic = earlyTopic && TOPICS.indexOf(earlyTopic) >= 15 && TOPICS.indexOf(earlyTopic) < TOPICS.length - 1;
+  if (handbookTopic) return { text: earlyTopic.a };
+  if (/\bwho\b.*\b(?:still|gotta)\b.*\b(?:look|evaluate|eval)\b/i.test(q)) {
+    if (inTraining() && inRecruitment() && !/\bevals?\b/i.test(q)) return { text: 'Do you mean guides needing an eval, or candidates needing interview scores?', stuck: false };
+    q = inTraining() ? 'who still needs an eval' : 'who is ungraded';
+  }
   const nav = navigation(q);
   if (nav) return { text: nav.say, go: nav.go };
 
@@ -654,6 +687,14 @@ export function ask(question) {
   const namesOne = (state.guides || []).length &&
                    findPeople(q, state.guides, x => x.name).length === 1;
 
+  if (/^(?:tell me about|what about|who is)\s+/i.test(q)) {
+    const guideHits = inTraining() ? findPeople(q, state.guides || [], x => x.name) : [];
+    const candidateHits = inRecruitment() ? findPeople(q, interviewData?.candidates || [], x => x.name) : [];
+    if (guideHits.length && candidateHits.length && !/\b(tour|eval|interview|candidate)\b/i.test(q)) return { text: 'Do you mean the guide or the interview candidate? Include tour or interview in your question.' };
+    if (guideHits.length && !/\b(interview|candidate)\b/i.test(q)) return { text: guideAnswers(q) };
+    if (candidateHits.length) return { text: interviewAnswers(q) };
+    if (/^tell me about\s+/i.test(q) && !earlyTopic) return { text: 'I could not identify that person in your loaded hub data. Try their full name.' };
+  }
   const answer = deskAnswers(q)
     || scheduleAnswers(q)
     || (namesOne ? guideAnswers(q) : null)
@@ -769,6 +810,9 @@ function greetText() {
   }
   greeted = true;
 
+  if (waiting) {
+    memory.pending = { kind: 'details', question: inTraining() && (state.guides || []).some(g => g.evaluatorId === state.me?.id && g.status === 'claimed') ? 'what are my evals' : inRecruitment() && interviewData?.candidates?.length ? 'who is ungraded' : 'who still needs an eval' };
+  }
   return waiting
     ? `${when}${name ? ', ' + name : ''}. ${waiting} Want the details, or is it something else?`
     : vary(`${when}${name ? ', ' + name : ''}. What do you need?`,
@@ -780,12 +824,13 @@ function capabilityText() {
   const can = [];
   if (inTraining())     can.push('• Evals — who still needs one, what you have claimed, how far along we are, who has no tour scheduled');
   if (inRecruitment())  can.push('• Interviews — who is ungraded, who is worth discussing, the top candidates, how many are undecided');
-  can.push('• The schedule and desks — who is leading tours today, which desk slots nobody has covered');
+  can.push('• The schedule — who is leading tours today, tomorrow, or this week');
+  if (inTraining()) can.push('• Desks — weekly coverage and uncovered slots');
   can.push('• The handbook — what to wear, what earns a strike, the absence rules, what to do when you do not know an answer');
   can.push('• Getting about — say "open interviews" or "take me to the schedule" and I will');
 
   return 'Quite a lot, as long as it is about this hub:\n\n' + can.join('\n') +
-         '\n\nAsk in whatever words you like — I do not need you to phrase it properly. ' +
+         '\n\nAsk about a person or task; include a date when it matters. ' +
          'A good first one is "who is worth discussing".';
 }
 

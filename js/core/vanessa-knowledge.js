@@ -12,7 +12,7 @@ export const TOPICS = [
     a: 'On a guide you have claimed, the ✕ button puts them back on the Available list. Codirectors can release anybody\'s claim.' },
   { k: ['submit', 'submitting', 'feedback', 'form', 'write up'],
     a: 'Press Submit eval on a guide you have claimed. You need at least something in "what went well" or "areas to improve". Once submitted it cannot be edited from here — ask a codirector.' },
-  { k: ['see', 'cannot see', 'hidden', 'others', 'other people', 'why can', 'missing evals'],
+  { k: ['cannot see', 'hidden', 'others', 'other people', 'why can', 'missing evals'],
     a: 'Committee members see evals that are open or claimed, plus their own submitted ones. Somebody else\'s completed eval is invisible, and that is enforced by the database rather than by the app hiding it. Codirectors see everything.' },
   { k: ['priority', 'first priority', 'last priority', 'order', 'rank'],
     a: 'Priority is how urgently a guide needs evaluating, first through last. Guides marked "No Need to Eval" or "Not Needed to be Evaled" are out of rotation this term. The roster sorts by priority so the most urgent are at the top.' },
@@ -22,7 +22,7 @@ export const TOPICS = [
     a: 'On Interviews, the Grade tab lists everyone checked in. Score each candidate 1 to 5 on speaking, personable and overall impression. You are scoring as whoever you signed in as — there is no name to pick — and nobody can write over your scores.' },
   { k: ['blank', 'skip', 'leave empty', 'leave a score blank', 'score blank', 'not sure', 'did not judge', 'ok to leave'],
     a: 'Leaving a score blank is fine. A blank is skipped, never counted as a zero, so it does not drag the candidate down. Their average is worked out from whoever actually scored that criterion.' },
-  { k: ['final', 'average', 'how is', 'calculated', 'worked out', 'maths', 'math'],
+  { k: ['final', 'average', 'calculated', 'worked out', 'maths', 'math'],
     a: 'Each of the three criteria is averaged across the interviewers who scored it, and the final is the average of those three numbers. It is deliberately not the average of every individual score — averaging each criterion first stops one person skipping one box from skewing the result.' },
   { k: ['check in', 'checkin', 'arrive', 'front desk', 'door'],
     a: 'On Interviews, the Check in tab has a tick next to every candidate. Tick them as they arrive; only checked-in candidates appear on the Grade tab.' },
@@ -33,7 +33,7 @@ export const TOPICS = [
   { k: ['desk', 'desks', 'welcome desk', 'coverage', 'uncovered'],
     a: 'Desk Coverage shows the recurring weekly grid for the Front and Welcome desks, read live from the shared schedule workbook. Slots nobody is covering are flagged.' },
   { k: ['schedule', 'tour', 'tours', 'when', 'leading'],
-    a: 'Tour Schedule is read straight out of the shared workbook, so it is never a stale copy. It shows from today onward.' },
+    a: 'Tour Schedule is read straight out of the shared workbook, and cached until Refresh. It shows from today onward.' },
   { k: ['password', 'sign in', 'login', 'log in', 'account', 'cannot get in'],
     a: 'Sign in with your Purdue email and password. If you have no account, a codirector adds you — there is no shared code any more.' },
   /* Written out by hand, unlike everything else she quotes.
@@ -105,6 +105,6 @@ export const TOPICS = [
        '- Say acronyms out in full — PMO, WALC, BGR, CODO — or families think we have a secret language\n\n' +
        'On a large group, check they can hear you: ask the people at the back for a thumbs up whenever you get outside. (Handbook, Make It Personal / Don\u2019t Be A Hater / Keep It.)' },
 
-  { k: ['who', 'what are you', 'vanessa', 'help', 'what can you do'],
+  { k: ['what are you', 'vanessa', 'help', 'what can you do'],
     a: 'I am Vanessa. I can answer questions about how the hub works, count things up for you, point out candidates worth discussing, and jump you to the right tab. Try "who still needs an eval", "who is worth discussing" or "show me ungraded".' }
 ];

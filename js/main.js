@@ -1,10 +1,10 @@
 /* ============================================================ hub entry point */
-import { state, myName, isAdmin } from './core/state.js';
+import { state, myName, isAdmin, inTraining, onSessionReset } from './core/state.js';
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
 import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
 import { $, $$, initials, toast } from './core/ui.js';
 import { bustSheets } from './core/sheets.js';
-import { initVanessa, registerWarmers, prewarm } from './core/vanessa-ui.js';
+import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup } from './core/vanessa-ui.js';
 
 import evals, { loadRoster } from './modules/evals.js';
 import interviews    from './modules/interviews.js';
@@ -20,11 +20,16 @@ import people        from './modules/people.js';
 /* The modules already know how to fetch their own data; Vanessa just asks them
    to, rather than reaching past them into the database herself. */
 registerWarmers([
-  { needs: 'training',    load: () => (state.guides.length ? null : loadRoster()) },
-  { needs: 'recruitment', load: () => interviews.prefetch?.() },
-  { needs: 'any',         load: () => schedule.prefetch?.() },
-  { needs: 'any',         load: () => desks.prefetch?.() }
+  { needs: 'training', label: 'evaluations', load: () => (state.guides.length ? null : loadRoster()) },
+  { needs: 'recruitment', label: 'interviews', load: () => interviews.prefetch?.() },
+  { needs: 'any', label: 'tour schedule', load: () => schedule.prefetch?.() },
+  { needs: 'training', label: 'desk coverage', load: () => desks.prefetch?.() }
 ]);
+
+onSessionReset(() => {
+  list().forEach(m => m.bust?.()); bustSheets(); resetVanessa();
+  $('#view').replaceChildren();
+});
 
 function paintShell() {
   $('#who-name').textContent = myName();
@@ -55,9 +60,10 @@ $('#btn-refresh').addEventListener('click', async function () {
   this.classList.add('is-busy');
   try {
     list().forEach(m => m.bust?.());
-    bustSheets();
-    await loadRoster();
+    bustSheets(); resetWarmup();
+    if (inTraining()) await loadRoster();
     paintShell(); paintNav(); await render();
+    prewarm();
     toast('Up to date.');
   } catch (err) {
     toast(err.message, 'err');

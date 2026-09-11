@@ -21,6 +21,7 @@ const cfg = () => window.CONFIG || {};
 
 /** Raw REST call against PostgREST. */
 async function rest(path, opts = {}) {
+  const sessionVersion = state.sessionVersion;
   const { SUPABASE_URL: url, SUPABASE_KEY: key } = cfg();
   if (!url || !key) throw new Error('config.js is missing the database address or key.');
 
@@ -39,12 +40,14 @@ async function rest(path, opts = {}) {
     throw new Error('Could not reach the server. Check your connection.');
   }
 
+  if (sessionVersion !== state.sessionVersion) throw new Error('The signed-in account changed.');
   if (res.status === 204) return null;
 
   const text = await res.text();
   let data = null;
   if (text) { try { data = JSON.parse(text); } catch { data = null; } }
 
+  if (sessionVersion !== state.sessionVersion) throw new Error('The signed-in account changed.');
   if (!res.ok) {
     // Postgres speaks in constraint names; turn the ones people will actually
     // hit into something a committee member can act on.

@@ -129,14 +129,22 @@ function fetchTab(tab) {
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
               `?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
 
-  const pending = fetch(url)
-    .then(res => (res.ok ? res.text() : null))
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  const pending = fetch(url, { signal: controller.signal })
+    .then(res => {
+      if (res.status === 400 || res.status === 404) return null; // optional tab missing
+      if (!res.ok) throw new Error('Could not load the schedule workbook. Check sharing and your connection.');
+      return res.text();
+    })
     .then(text => (text === null ? null : parseCSV(text)))
-    .catch(() => null)          // a missing tab is normal, not an error
     .then(rows => {
-      if (rows === null) tabCache.delete(tab);   // let a later try succeed
+      if (rows === null && tabCache.get(tab) === pending) tabCache.delete(tab);
       return rows;
-    });
+    }).catch(err => {
+      if (tabCache.get(tab) === pending) tabCache.delete(tab);
+      throw err;
+    }).finally(() => clearTimeout(timer));
 
   tabCache.set(tab, pending);
   return pending;
@@ -155,6 +163,7 @@ export async function loadTours() {
   const out = [], seen = new Set();
   const { tabs: months, year } = termTabs();
   const tabs = await Promise.all(months.map(fetchTab));
+  if (tabs.every(rows => !rows)) throw new Error('No semester tabs could be loaded from the schedule workbook.');
 
   tabs.forEach(rows => {
     if (!rows) return;
@@ -274,6 +283,7 @@ export async function loadDesks() {
   const PAIRS = [[3, 4], [5, 6], [7, 8], [9, 10], [11, 12]];
   const out = [];
   const tabs = await Promise.all(DESK_TABS.map(fetchTab));
+  if (tabs.some(rows => !rows)) throw new Error('The desk workbook tabs could not all be loaded.');
 
   tabs.forEach((rows, t) => {
     if (!rows) return;
@@ -282,11 +292,14 @@ export async function loadDesks() {
       if (!slot || !slot.includes('-') || !/^\s*\d/.test(slot)) return;
       const [a, b] = slot.split('-');
       DAYS.forEach((day, d) => {
+        let filled = false;
         PAIRS[d].forEach(c => {
           const person = cleanGuide(r[c]);
           if (!person || NOT_A_GUIDE.test(person)) return;
+          filled = true;
           out.push({ desk: DESK_TABS[t], day, start: slotStart(a), end: slotStart(b), slot, person });
         });
+        if (!filled) out.push({ desk: DESK_TABS[t], day, start: slotStart(a), end: slotStart(b), slot, person: '' });
       });
     });
   });
