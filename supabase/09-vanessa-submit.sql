@@ -30,9 +30,10 @@ begin
     raise exception 'Keep each feedback field under 12000 characters.';
   end if;
 
-  -- The lock protects against another tab releasing/reassigning this claim
-  -- between verification and submission, including when the caller is an admin.
-  select * into v_eval from public.evals where id = p_eval_id for update;
+  -- Read without FOR UPDATE so exact retries also work with the existing
+  -- policy that forbids updating submitted rows. The conditional UPDATE below
+  -- takes the row lock and rechecks ownership before any new submission.
+  select * into v_eval from public.evals where id = p_eval_id;
   if not found or v_eval.evaluator_id is distinct from auth.uid() then
     raise exception 'This evaluation is no longer claimed by you.';
   end if;
@@ -47,7 +48,7 @@ begin
       and coalesce(v_saved.notes,'') = coalesce(p_notes,'')
       and v_eval.tour_date is not distinct from p_tour_date
       and v_eval.tour_time is not distinct from p_tour_time then
-      return jsonb_build_object('eval_id',p_eval_id,'already',true,'message','This evaluation was already saved.');
+      return jsonb_build_object('eval_id',p_eval_id,'already',true,'message','This evaluation was already saved.','receipt',to_jsonb(v_saved) || jsonb_build_object('tour_date',v_eval.tour_date,'tour_time',v_eval.tour_time));
     end if;
     raise exception 'An evaluation is already saved for this guide. This draft was not used; review Eval Tracker.';
   end if;
@@ -59,7 +60,9 @@ begin
   end if;
   -- Existing audit log and submission behavior execute in the same transaction.
   -- If anything fails, the date/time update rolls back as well.
-  return public.submit_eval(p_eval_id,p_rating,p_went_well,p_improve,p_notes);
+  perform public.submit_eval(p_eval_id,p_rating,p_went_well,p_improve,p_notes);
+  select * into v_saved from public.eval_submissions where eval_id=p_eval_id;
+  return jsonb_build_object('eval_id',p_eval_id,'already',false,'receipt',to_jsonb(v_saved) || jsonb_build_object('tour_date',p_tour_date,'tour_time',p_tour_time));
 end;
 $$;
 

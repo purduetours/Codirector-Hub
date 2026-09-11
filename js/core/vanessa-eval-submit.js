@@ -42,6 +42,11 @@ export async function submitReviewedEval(draft) {
   }
   stillCurrent();
   if (!result || result.eval_id !== draft.evalId) throw new Error('The server did not confirm the save. Check Eval Tracker or retry this same draft.');
-  if (result.already) return { message:'This evaluation was already saved.', already:true };
-  return { message: 'Eval submitted.', already: false };
+  let receipt='';
+  const saved=result.receipt;
+  if(saved && saved.eval_id===draft.evalId && saved.submitted_by===owner){
+    receipt=`Receipt: ${saved.id}\nSaved: ${saved.created_at}\nTour: ${saved.tour_date||'Not set'} ${saved.tour_time||''} (Purdue local time)\nRating: ${saved.rating??'Not rated'}\nWhat went well: ${saved.went_well||'None'}\nAreas to improve: ${saved.improve||'None'}\nOther notes: ${saved.notes||'None'}`;
+  }else receipt='Detailed receipt unavailable with the current server setup. Your evaluation was confirmed saved; view it in Eval Tracker.';
+  if (result.already) return { message:'This evaluation was already saved.', already:true, receipt };
+  return { message: 'Eval submitted.', already: false, receipt };
 }

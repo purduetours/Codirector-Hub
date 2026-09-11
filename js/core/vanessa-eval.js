@@ -94,7 +94,7 @@ async function handleMessage(question) {
     if(!removeSavedDraft())return {text:'I could not remove the saved draft from this browser. Try again.',evalDraft:true};
     resetEvalFlow();return {text:'Saved draft removed. Nothing was submitted.',evalDraft:true};
   }
-  if(resume && flow)return next();
+  if(resume && flow){delete flow.clarify;return next();}
   if(!flow && loadSavedDraft()) {
     const saved=loadSavedDraft();
     if(!resume)return {text:`You have a saved draft for ${saved.draft.name}. Say “continue my eval” to resume it, or “discard saved draft” to start over.`,evalDraft:true};
@@ -111,7 +111,7 @@ async function handleMessage(question) {
     if(!removeSavedDraft())return {text:'I could not remove the saved draft. Please try again.',evalDraft:true};
     resetEvalFlow(); return {text:'Draft discarded. Nothing was submitted.',evalDraft:true};
   }
-  if (/^(?:who|which|when|find|how do i|what are my|open|go to)\b/i.test(q)) return null;
+  if (/^(?:who|which|when|find|how do i|what do i need|what should i|my tasks|my to.?do|task summary|what are my|open|go to)\b/i.test(q)) return null;
   if (flow && /^(?:submit|submit it|submit (?:this|the|my) eval|submit evaluation|confirm submission)[.!]?$/i.test(q)) {
     if (flow.phase==='review') return submitEvalDraft(flow.id, flow.revision);
     return {text:'Finish the missing fields and review the draft before submitting. Your feedback has not been changed.',evalDraft:true};
@@ -150,13 +150,27 @@ async function handleMessage(question) {
   }
   const fields=fieldsFrom(q);
   if (Object.keys(fields).length) {
+    delete flow.clarify;
     for(const [key,value] of Object.entries(fields)) {const err=setField(key,value);if(err)return {text:err,evalDraft:true};}
     return next();
   }
   const change=/^(?:change|set|replace)\s+(rating|strengths|what went well|improvements|areas to improve|notes|date|time)\s+(?:to|with)\s+([\s\S]+)$/i.exec(q);
-  if(change){const err=setField(labels[change[1].toLowerCase()],change[2]);return err ? {text:err,evalDraft:true} : next();}
+  if(change){delete flow.clarify;const err=setField(labels[change[1].toLowerCase()],change[2]);return err ? {text:err,evalDraft:true} : next();}
   if(flow.phase==='review') return {text:'To change a field, say “change rating to 4” or “notes: your comments”, or edit the draft below. Say “submit it” when it is ready, or “cancel draft”.',evalDraft:true};
+  if(flow.clarify){
+    const key=flow.clarify;delete flow.clarify;
+    if(!/^(?:keep (?:it|that)|skip)[.!]?$/i.test(q)){
+      const err=setField(key,[flow.draft[key],q].filter(Boolean).join('\n'));
+      if(err){flow.clarify=key;return {text:err,evalDraft:true};}
+    }
+    return next();
+  }
+  const feedbackKey=flow.phase;
   const err=setField(flow.phase,q);
+  if(!err && ['wentWell','improve'].includes(feedbackKey) && !skip(q) && /^(?:(?:it|they|the tour) (?:was|were) )?(?:good|great|fine|bad|okay|quiet|too quiet|good,? but quiet)[.!]?$/i.test(q)){
+    flow.clarify=feedbackKey;
+    return {text:`I kept “${q}”. ${/quiet/i.test(q)?'Was their voice hard to hear, or do you mean something else?':feedbackKey==='wentWell'?'What is one example of what they did well?':'What is one specific thing they could do differently?'} Say “keep it” to use your original wording without adding detail.`,evalDraft:true};
+  }
   if (err && flow.phase==='rating' && q.split(/\s+/).length>=3 && !/\d/.test(q)) {
     flow.draft.notes=[flow.draft.notes,q].filter(Boolean).join('\n');
     flow.answered.add('notes');flow.revision++;
@@ -166,6 +180,7 @@ async function handleMessage(question) {
 }
 export function editEvalDraft(id, revision, patch) {
   if (!flow || id!==flow.id || revision!==flow.revision || flow.phase==='submitting' || !evalDraft()) return {text:'This draft changed. Review the current draft before continuing.',evalDraft:true};
+  delete flow.clarify;
   for(const key of ['rating','wentWell','improve','notes','date','time']) {
     if(!(key in patch))continue;
     const err=setField(key,key==='rating' && patch[key]===null?'skip':patch[key]);
@@ -197,7 +212,7 @@ export async function submitEvalDraft(id,revision) {
     if(guide){guide.status='submitted';guide.submitted=true;}
     let refreshed=true;
     try{await actions.load?.();}catch{refreshed=false;}
-    return {text:`${result?.already ? 'Already saved' : 'Submitted'}: ${current.draft.name}’s evaluation.${refreshed?'':' The tracker could not refresh; use Refresh to update it.'}${removed?'':' The saved draft could not be removed from this browser; it cannot be resubmitted as a new eval.'}`,evalDraft:true};
+    return {text:`${result?.already ? 'Already saved' : 'Submitted'}: ${current.draft.name}’s evaluation.${result?.receipt ? '\n\n'+result.receipt : ''}${refreshed?'':' The tracker could not refresh; use Refresh to update it.'}${removed?'':' The saved draft could not be removed from this browser; it cannot be resubmitted as a new eval.'}`,evalDraft:true};
   } catch(err) {
     if(flow===current)flow.phase='review';
     return {text:`I could not confirm submission: ${err.message} Your draft is still here. Check Eval Tracker before retrying if the connection dropped.`,evalDraft:true};

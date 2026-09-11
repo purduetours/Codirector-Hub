@@ -1,4 +1,5 @@
 /* ============================================================ hub entry point */
+import { initPresence, resetPresence } from './core/presence.js';
 import { state, myName, isAdmin, inTraining, onSessionReset } from './core/state.js';
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
 import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
@@ -29,7 +30,7 @@ registerWarmers([
 ]);
 
 onSessionReset(() => {
-  list().forEach(m => m.bust?.()); bustSheets(); resetVanessa();
+  list().forEach(m => m.bust?.()); bustSheets(); resetVanessa(); resetPresence();
   $('#view').replaceChildren();
 });
 
@@ -50,6 +51,7 @@ async function start() {
   paintShell();
   buildNav();
   initVanessa();
+  initPresence();
   await render();
   paintShell();
 

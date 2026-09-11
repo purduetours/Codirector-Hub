@@ -231,7 +231,7 @@ export function initVanessa() {
   const panel = document.createElement('div');
   panel.id = 'v-panel'; panel.className = 'v-panel'; panel.hidden = true;
   const suggestions = [
-    ...(inTraining() ? ['Help me write an eval', 'What are my evals?'] : []),
+    ...(inTraining() ? ['Help me write an eval', 'What do I need to do?'] : []),
     ...(inRecruitment() ? ['Who is worth discussing?', 'Who has not checked in?'] : []),
     ...(inTraining()?['Who needs an eval and has a tour tomorrow?']:['Who is leading tours tomorrow?']), 'What should I wear on tour?'
   ];
