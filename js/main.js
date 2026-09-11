@@ -4,6 +4,8 @@ import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/au
 import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
 import { $, $$, initials, toast } from './core/ui.js';
 import { bustSheets } from './core/sheets.js';
+import { registerEvalActions } from './core/vanessa-eval.js';
+import { submitReviewedEval } from './core/vanessa-eval-submit.js';
 import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup } from './core/vanessa-ui.js';
 
 import evals, { loadRoster } from './modules/evals.js';
@@ -30,6 +32,8 @@ onSessionReset(() => {
   list().forEach(m => m.bust?.()); bustSheets(); resetVanessa();
   $('#view').replaceChildren();
 });
+
+registerEvalActions({ load: loadRoster, submit: submitReviewedEval });
 
 function paintShell() {
   $('#who-name').textContent = myName();
