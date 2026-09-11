@@ -36,6 +36,75 @@ export const TOPICS = [
     a: 'Tour Schedule is read straight out of the shared workbook, so it is never a stale copy. It shows from today onward.' },
   { k: ['password', 'sign in', 'login', 'log in', 'account', 'cannot get in'],
     a: 'Sign in with your Purdue email and password. If you have no account, a codirector adds you — there is no shared code any more.' },
+  /* Written out by hand, unlike everything else she quotes.
+
+     The handbook's do's-and-don'ts page is a two-column graphic, and the PDF
+     extractor flattens it into one run of words with the "Do's:" and "Don'ts:"
+     headings stranded on a different page entirely. Quoted raw it reads as a
+     single list, so a guide would be told a name tag and flip flops are the
+     same kind of thing. This is the same content, put back in the right order. */
+  { k: ['wear', 'dress', 'dress code', 'attire', 'outfit', 'what to wear', 'clothes',
+        'clothing', 'uniform', 'polo', 'jeans', 'shorts', 'shoes', 'sandals', 'flip flops',
+        'sunglasses', 'look book', 'can i wear'],
+    a: 'On tour, wear:\n' +
+       '- Your name tag\n' +
+       '- Your Admissions polo\n' +
+       '- Jeans or khakis, no holes — or jean/khaki shorts, or a tennis skirt\n' +
+       '- Close-toed shoes\n\n' +
+       'Not allowed:\n' +
+       '- Flip flops or sandals\n' +
+       '- Athletic or leisure clothing\n' +
+       '- Other university gear or merch\n' +
+       '- Sunglasses\n' +
+       '- Chewing gum or food\n\n' +
+       'Turning up without a name tag or in the wrong clothes is a strike. (Handbook, Boilermaker Look Book, p. 10–11.)' },
+
+  /* The rest of the handbook answers she advertises but could not reliably
+     find. Each one is a straight rendering of the handbook page named at the
+     end -- nothing here is invented. They live as topics rather than as
+     retrieval hits because the extracted PDF text runs headings, tables and
+     unrelated pages together, so the right paragraph regularly lost to the
+     wrong one. Keywords are deliberately specific: a bare 'sub' would match
+     'submitted', and a bare 'miss' would match 'dismiss'. */
+  { k: ['absence', 'absences', 'absent', 'cant make', 'cannot make', 'miss my tour',
+        'miss a tour', 'find a sub', 'tour sub', 'drop my tour', 'drop a tour',
+        'call in sick', 'if i am sick', 'if im sick', 'cover my tour', 'swap my tour'],
+    a: 'Tell them as early as you possibly can. If you know you cannot give a tour, drop it as soon as you know — and if nobody picks it up, message Todd or Amanda directly to be safe.\n\n' +
+       'What it costs you if you do not:\n' +
+       '- Failing to find a sub for an unexcused absence — 1 strike\n' +
+       '- Not showing up without telling Amanda or Todd beforehand — 2 strikes\n\n' +
+       'Excused absences go through Todd or Amanda. Strikes reset at the end of each academic year; 2 gets you a written warning, 3 or more and you are reviewed for termination. (Handbook, Absences and Expectations, p. 12.)' },
+
+  { k: ['postcard', 'postcards', 'post card', 'thank you card', 'when are postcards due'],
+    a: 'Postcards go to the families you toured, and they are due one week after your tour slot — a Monday tour means postcards by the following Monday.\n\n' +
+       '- Make it personal: mention a moment from the tour, or a decent joke\n' +
+       '- Keep it professional: check the spelling of the student\u2019s name, write legibly, keep the tone welcoming\n' +
+       '- Point them at the admissions email for anything they still want to ask\n\n' +
+       'They are one of the things that sets Purdue apart from other schools, which is why the deadline is taken seriously. (Handbook, Postcard Etiquette, p. 15.)' },
+
+  { k: ['dont know an answer', 'do not know an answer', 'dont know the answer',
+        'if i dont know', 'if i do not know', 'asked something i dont know',
+        'myth', 'myths', 'legend has it', 'not sure on tour', 'unsure on tour',
+        'make something up'],
+    a: 'Do not make it up. Stick to the facts, and if you are not certain, say so plainly in the conversation — make clear it is a myth or that we are not positive it is true.\n\n' +
+       '"Legend has it…" is the handbook\u2019s own phrasing for this. Myths are fun, but never let one be heard as fact.\n\n' +
+       'For anything you genuinely cannot answer, give them the admissions email and let the office follow it up. (Handbook, Myth Busters, and About the Role.)' },
+
+  { k: ['webclock', 'web clock', 'clock in', 'clock out', 'clocking in', 'timesheet',
+        'forgot to clock', 'my hours', 'get paid', 'timekeeping'],
+    a: 'WebClock lives at one.purdue.edu under "WebClock Timekeeping System". Sign in with your Purdue Career account and press the big circle to clock in; the same circle says Clock Out when you are done.\n\n' +
+       'Forgot to clock in or out? Go to the History tab, click the time you need to change, pick a reason for the correction, adjust it and submit. (Handbook, Navigating WebClock.)' },
+
+  { k: ['make it personal', 'personal story', 'personal stories', 'tour personal',
+        'make my tour better', 'better tour', 'more interesting tour', 'trash talk',
+        'other schools', 'acronym', 'acronyms'],
+    a: 'Personal stories are what make a tour worth taking. Use your own, or borrow one from another Ambassador — do not be afraid to get personal.\n\n' +
+       'Three things to avoid:\n' +
+       '- The only school you mention is Purdue. Trash talking anywhere else is a bad look, however funny the joke\n' +
+       '- Do not get into the weeds\n' +
+       '- Say acronyms out in full — PMO, WALC, BGR, CODO — or families think we have a secret language\n\n' +
+       'On a large group, check they can hear you: ask the people at the back for a thumbs up whenever you get outside. (Handbook, Make It Personal / Don\u2019t Be A Hater / Keep It.)' },
+
   { k: ['who', 'what are you', 'vanessa', 'help', 'what can you do'],
     a: 'I am Vanessa. I can answer questions about how the hub works, count things up for you, point out candidates worth discussing, and jump you to the right tab. Try "who still needs an eval", "who is worth discussing" or "show me ungraded".' }
 ];

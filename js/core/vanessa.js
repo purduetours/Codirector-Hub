@@ -15,6 +15,7 @@
       on her own could quietly widen that; reading what is here cannot.
 ============================================================================ */
 import { TOPICS } from './vanessa-knowledge.js';
+import { smallTalk, smallTalkStrong, peel } from './vanessa-chat.js';
 import { HANDBOOK } from './vanessa-handbook.js';
 import { state, myName, isAdmin, inTraining, inRecruitment } from './state.js';
 import { esc } from './ui.js';
@@ -470,11 +471,52 @@ function docFreq() {
 }
 const rarity = w => Math.log(1 + HANDBOOK.length / (1 + (docFreq().get(w) || 0)));
 
+/* People and handbooks use different words for the same thing. The handbook
+   says "outfit"; every guide alive says "wear". It says "sub"; they say
+   "cover". Without this the dress code -- one of the most asked questions
+   there is -- was unfindable, because not one word of "what should I wear on
+   tour" appears in the section that answers it.
+
+   Expansion happens on the question only, so a question reaches the section
+   that answers it without the handbook text being altered. */
+const SYNONYMS = {
+  wear: ['outfit', 'attire', 'clothing', 'dress'],
+  dress: ['outfit', 'attire', 'clothing'],
+  clothes: ['outfit', 'attire', 'clothing'],
+  outfit: ['attire', 'clothing'],
+  uniform: ['polo', 'outfit', 'attire'],
+  shoes: ['sandal', 'flip', 'toed'],
+  sandals: ['sandal', 'flip'],
+  cover: ['sub', 'substitute'],
+  sub: ['substitute', 'cover'],
+  miss: ['absence', 'absent'],
+  skip: ['absence', 'absent'],
+  sick: ['absence', 'absent', 'excuse'],
+  late: ['tardy', 'absence'],
+  punish: ['strike'],
+  trouble: ['strike'],
+  pay: ['webclock', 'clock', 'hour'],
+  paid: ['webclock', 'clock', 'hour'],
+  timesheet: ['webclock', 'clock'],
+  phone: ['cell'],
+  rain: ['weather', 'inclement'],
+  question: ['faq', 'answer'],
+  boss: ['todd', 'amanda', 'coordinator']
+};
+
+function expand(words) {
+  const out = new Set(words);
+  for (const w of words) (SYNONYMS[w] || []).forEach(x => out.add(stem(x)));
+  return [...out];
+}
+
 function handbookAnswer(q) {
-  const ws = [...new Set(tokens(q))];
+  const base = [...new Set(tokens(q))];
   // One word is enough if it is a rare one. "What are postcards for" reduces to
   // just "postcard" once the filler is stripped, and that is the whole question.
-  if (!ws.length || (ws.length < 2 && rarity(ws[0]) < 2)) return null;
+  // Judged on what was actually typed, before synonyms pad it out.
+  if (!base.length || (base.length < 2 && rarity(base[0]) < 2)) return null;
+  const ws = expand(base);
 
   const scored = HANDBOOK.map(sec => {
     const body = new Set(tokens(sec.text));
@@ -576,6 +618,18 @@ export function ask(question) {
     if (picked) q = picked;
   }
 
+  /* --- is this just somebody saying hello? -------------------------------
+     Peel off the greeting and the address. If nothing is left, there was no
+     question underneath and she should simply be friendly. If something IS
+     left, answer that and let the "hi bro" cost nothing. */
+  const peeled = peel(q);
+  if (peeled.social) {
+    const chat = smallTalk(q);
+    if (chat) return { text: socialReply(chat) };
+  } else if (peeled.stripped) {
+    q = peeled.rest;              // "hey bro who needs an eval" -> "who needs an eval"
+  }
+
   /* --- "the second one", "what about her" -------------------------------- */
   const ref = resolveReference(q);
   q = ref.q;
@@ -619,6 +673,15 @@ export function ask(question) {
     return { text: answer };
   }
 
+  /* Nothing computable, and the message is almost entirely social -- "thanks",
+     "who are you", "im tired". This has to come BEFORE the handbook, which will
+     happily answer anything: ask it about "thanks" and it returns a genuine
+     sentence about thanking families on tour, which is worse than useless
+     because it looks like a real answer. Coverage decides it, so a question
+     that merely contains a social phrase is untouched. */
+  const strongChat = smallTalkStrong(q);
+  if (strongChat) return { text: socialReply(strongChat) };
+
   /* One rule, rather than a pile of thresholds.
 
      The topic keywords ARE the definition of "this is a question about the app".
@@ -637,6 +700,13 @@ export function ask(question) {
   if (book) return { text: book.text };
   if (topic) return { text: topic.a };
 
+  /* Nothing computed, no topic, no handbook. Before shrugging, see whether it
+     was conversational all along -- "are you sure", "this is broken", "what
+     can you do" carry real content words, so they never reached the social
+     check at the top, and every one of them deserves better than a shrug. */
+  const chat = smallTalk(q);
+  if (chat) return { text: socialReply(chat) };
+
   // `stuck` tells the caller the keyword matcher gave up. That is the only
   // moment the model tier is allowed to have an opinion.
   return { stuck: true, text: vary(
@@ -645,4 +715,89 @@ export function ask(question) {
     'or take you to a tab. Try "who still needs an eval" or "open interviews".' };
 }
 
-export const greeting = () => `Hi ${myName().split(' ')[0] || 'there'}, I'm Vanessa. How can I help?`;
+/* ------------------------------------------------------------ small talk
+   "hi bro" is the first thing a lot of people type, and answering it with
+   "I did not follow that one" makes her look broken before she has had a
+   chance. The replies live in vanessa-chat.js; the two that need live numbers
+   are built here, because a hello is worth a great deal more when it also
+   tells you what is sitting waiting for you.
+-------------------------------------------------------------------------- */
+
+/** The single most pressing thing for this person right now, in a few words. */
+function whatIsWaiting() {
+  const g = state.guides || [];
+  const me = state.me?.id;
+
+  if (inTraining() && g.length) {
+    const mine = g.filter(x => x.evaluatorId === me && x.status === 'claimed');
+    if (mine.length) return `You have ${mine.length} eval${mine.length === 1 ? '' : 's'} claimed and not submitted.`;
+  }
+
+  if (inRecruitment() && interviewData?.candidates?.length) {
+    const here = interviewData.candidates.filter(c => c.checkin === 'Yes' && !c.scores?.[myName()]);
+    if (here.length) return `${here.length} checked-in candidate${here.length === 1 ? ' is' : 's are'} waiting on a score from you.`;
+  }
+
+  if (inTraining() && g.length) {
+    const urgent = g.filter(x => x.status === 'open' && x.rank <= 2);
+    if (urgent.length) return `${urgent.length} guides at first or second priority are still unclaimed.`;
+  }
+
+  if (inRecruitment() && interviewData?.candidates?.length) {
+    const none = interviewData.candidates.filter(c => c.raters === 0);
+    if (none.length) return `${none.length} candidates have not been graded by anyone yet.`;
+  }
+  return null;
+}
+
+/* Said once. Her opening line IS a greeting, so somebody typing "hi" straight
+   afterwards got the identical sentence back, which looks like a stuck record.
+   The headline goes out the first time; after that she just acknowledges. */
+let greeted = false;
+
+function greetText() {
+  const hour = new Date().getHours();
+  const when = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
+  const name = myName().split(' ')[0] || '';
+  const waiting = whatIsWaiting();
+
+  if (greeted) {
+    return vary('Still here. What do you need?',
+                'Hello again — what can I get you?',
+                `Hi${name ? ', ' + name : ''}. Ask away.`,
+                'Go on then, what are we looking at?');
+  }
+  greeted = true;
+
+  return waiting
+    ? `${when}${name ? ', ' + name : ''}. ${waiting} Want the details, or is it something else?`
+    : vary(`${when}${name ? ', ' + name : ''}. What do you need?`,
+           `Hello${name ? ', ' + name : ''}. What are you working on?`,
+           `${when}. Nothing is shouting for you at the moment — what can I get you?`);
+}
+
+function capabilityText() {
+  const can = [];
+  if (inTraining())     can.push('• Evals — who still needs one, what you have claimed, how far along we are, who has no tour scheduled');
+  if (inRecruitment())  can.push('• Interviews — who is ungraded, who is worth discussing, the top candidates, how many are undecided');
+  can.push('• The schedule and desks — who is leading tours today, which desk slots nobody has covered');
+  can.push('• The handbook — what to wear, what earns a strike, the absence rules, what to do when you do not know an answer');
+  can.push('• Getting about — say "open interviews" or "take me to the schedule" and I will');
+
+  return 'Quite a lot, as long as it is about this hub:\n\n' + can.join('\n') +
+         '\n\nAsk in whatever words you like — I do not need you to phrase it properly. ' +
+         'A good first one is "who is worth discussing".';
+}
+
+/** A social reply, with the live ones filled in. */
+function socialReply(item) {
+  const pick = vary(...item.replies);
+  if (pick === '__GREET__') return greetText();
+  if (pick === '__CAPABILITIES__') return capabilityText();
+  return pick;
+}
+
+/* The first thing anyone sees. Same rule as a hello: say what is actually
+   waiting, rather than announcing herself and leaving them to think of
+   something. */
+export const greeting = () => greetText();
