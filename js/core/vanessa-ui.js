@@ -3,6 +3,8 @@
    tokens so it looks like part of the app rather than a bolted-on widget.
 ============================================================================ */
 import { ask, greeting, shareInterviews, shareOther } from './vanessa.js';
+import { modelSupported, modelState, checkAvailability, enableModel, disableModel, interpret } from './vanessa-model.js';
+import { state as appState } from './state.js';
 import { $, esc, injectStyle } from './ui.js';
 import { go } from './router.js';
 
@@ -32,6 +34,7 @@ injectStyle('vanessa-css', `
 .v-chip { font:inherit; font-size:.74rem; cursor:pointer; padding:5px 10px; border-radius:999px;
   border:1px solid var(--line-strong); background:var(--bg-elev); color:var(--text-soft); }
 .v-chip:hover { border-color:var(--accent); color:var(--text); }
+.v-model-on { font-size:.74rem; color:var(--good); align-self:center; }
 .v-ask { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line); }
 .v-ask input { flex:1; }
 @media (max-width:520px){ .v-panel { right:10px; left:10px; width:auto; bottom:76px; } }
@@ -53,13 +56,48 @@ function say(who, text) {
   el.textContent = text;
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
+  return el;
 }
 
-function send(q) {
+/* Only the Developer sees this while we find out whether it is actually better
+   than the keyword matcher. */
+const canSeeModelToggle = () => appState.role?.name === 'Developer' && modelSupported();
+
+async function paintModelRow() {
+  const row = $('#v-model');
+  if (!row) return;
+  if (!canSeeModelToggle()) { row.hidden = true; return; }
+  row.hidden = false;
+  const on = modelState() === 'ready';
+  row.innerHTML = on
+    ? `<span class="v-model-on">Smarter answers on</span> <button class="v-chip" id="v-model-off">turn off</button>`
+    : `<button class="v-chip" id="v-model-on">Try smarter answers</button>`;
+}
+
+async function send(q) {
   if (!q.trim()) return;
   say('you', q);
   $('#v-input').value = '';
+
   const r = ask(q);
+
+  /* The model only gets a turn when the keyword matcher has already failed.
+     It cannot replace a good answer with a bad one — only an "I did not follow
+     that" with something. If it also has no idea, the original reply stands. */
+  if (r.stuck && modelState() === 'ready') {
+    const thinking = say('her', 'Let me think about that…');
+    const canonical = await interpret(q);
+    thinking?.remove();
+    if (canonical) {
+      const second = ask(canonical);
+      if (!second.stuck) {
+        say('her', second.text);
+        if (second.go) setTimeout(() => go(second.go), 400);
+        return;
+      }
+    }
+  }
+
   say('her', r.text);
   if (r.go) setTimeout(() => go(r.go), 400);
 }
@@ -86,23 +124,42 @@ export function initVanessa() {
     </div>
     <div class="v-log" id="v-log"></div>
     <div class="v-chips">${SUGGESTIONS.map(s => `<button class="v-chip">${esc(s)}</button>`).join('')}</div>
+    <div class="v-chips" id="v-model" hidden></div>
     <form class="v-ask" id="v-form">
       <input id="v-input" placeholder="Ask about the hub…" autocomplete="off">
       <button class="btn btn-primary btn-sm" type="submit">Ask</button>
     </form>`;
   document.body.appendChild(panel);
 
+  checkAvailability().then(paintModelRow);
+
   launch.addEventListener('click', () => {
     open = !open;
     panel.hidden = !open;
     if (open) {
+      paintModelRow();
       if (!$('#v-log').children.length) say('her', greeting());
       setTimeout(() => $('#v-input').focus(), 60);
     }
   });
   $('#v-close').addEventListener('click', () => { open = false; panel.hidden = true; });
   $('#v-form').addEventListener('submit', e => { e.preventDefault(); send($('#v-input').value); });
-  panel.addEventListener('click', e => {
+  panel.addEventListener('click', async e => {
+    if (e.target.id === 'v-model-on') {
+      const btn = e.target;
+      btn.textContent = 'Starting…'; btn.disabled = true;
+      try {
+        // Must happen inside this click: Chrome will not start the download
+        // from a script that was not triggered by a person.
+        await enableModel(p => { btn.textContent = `Downloading ${Math.round(p * 100)}%`; });
+        say('her', 'Smarter answers are on. Ask me something in your own words and I will try harder to work out what you mean.');
+      } catch (err) {
+        say('her', err.message);
+      }
+      paintModelRow();
+      return;
+    }
+    if (e.target.id === 'v-model-off') { disableModel(); paintModelRow(); return; }
     const chip = e.target.closest('.v-chip');
     if (chip) send(chip.textContent);
   });

@@ -479,18 +479,48 @@ function handbookAnswer(q) {
   const scored = HANDBOOK.map(sec => {
     const body = new Set(tokens(sec.text));
     const title = new Set(tokens(sec.title));
-    let score = 0;
+    let score = 0, matched = 0, rarest = 0;
     for (const w of ws) {
       const inBody = body.has(w) || [...body].some(b => near(b, w));
       const inTitle = title.has(w) || [...title].some(t => near(t, w));
-      if (inTitle) score += rarity(w) * 2;
-      else if (inBody) score += rarity(w);
+      if (!inBody && !inTitle) continue;
+      matched++;
+      rarest = Math.max(rarest, rarity(w));
+      score += inTitle ? rarity(w) * 2 : rarity(w);
     }
-    return { sec, score };
+    return { sec, score, matched, rarest };
   }).sort((a, b) => b.score - a.score);
 
   const best = scored[0];
-  if (!best || best.score < 2.2) return null;
+  if (!best) return null;
+
+  /* The handbook has to EARN the answer, because it is the last thing tried and
+     will otherwise swallow every question. Left at a low bar it told somebody
+     asking "who do we still gotta look at" about Purdue's astronauts, and
+     "how many people showed up" got the strikes policy — confidently wrong,
+     which is worse than admitting to not following, and it also meant nothing
+     ever reached the model tier.
+
+     Three things have to hold: enough of the question actually appears; at
+     least one of those words is distinctive rather than filler; and this
+     section is a clear winner rather than one of twenty equally vague matches. */
+  /* Deliberately cautious, and here is the evidence for why.
+     
+     Scoring both a set of real handbook questions and a set of hub questions
+     phrased casually, the two overlap completely:
+     
+       "what are postcards for"        score 3.98  matched 1  rarest 1.99
+       "who do we still gotta look at" score 3.98  matched 2  rarest 1.99
+     
+     Identical on every signal. "look", "people" and "put on" really are in the
+     handbook, so counting words cannot tell the two apart -- the difference is
+     meaning. Left permissive it told somebody asking who still needed an eval
+     about Purdue's astronauts, which is worse than not answering.
+     
+     So this now answers only when a genuinely distinctive word is present, and
+     stays quiet otherwise. The questions it turns away fall through to the
+     model tier, which can actually read them. */
+  if (best.rarest < 2.3 || best.matched < 1 || best.score < 2.3) return null;
 
   // Quote the sentences carrying the question's words, not the whole page.
   const sentences = best.sec.text.split(/(?<=[.!?])\s+/).filter(x => x.length > 20);
@@ -607,7 +637,9 @@ export function ask(question) {
   if (book) return { text: book.text };
   if (topic) return { text: topic.a };
 
-  return { text: vary(
+  // `stuck` tells the caller the keyword matcher gave up. That is the only
+  // moment the model tier is allowed to have an opinion.
+  return { stuck: true, text: vary(
     'I did not follow that one.', 'Sorry — not sure what you mean there.', 'That one is beyond me.') +
     ' I can tell you who still needs an eval, who is worth discussing, how the scoring works, ' +
     'or take you to a tab. Try "who still needs an eval" or "open interviews".' };
