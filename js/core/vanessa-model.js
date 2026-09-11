@@ -70,6 +70,30 @@ export async function checkAvailability() {
  * Must be called from a click: Chrome refuses to start the download otherwise.
  * `onProgress` gets 0..1 while the model is fetched.
  */
+const REMEMBER = 'hub2.vanessa.model';
+
+/** Has this person turned it on before on this device? */
+export const wasEnabled = () => {
+  try { return localStorage.getItem(REMEMBER) === '1'; } catch { return false; }
+};
+
+/**
+ * Quietly restore on a later visit.
+ *
+ * The download only happens once -- Chrome keeps the model, not the site -- so
+ * on every visit after the first this needs no click and no waiting, which is
+ * what "runs when you open the app" actually looks like once the first time is
+ * out of the way.
+ */
+export async function resumeIfEnabled() {
+  if (!wasEnabled() || !LM()) return false;
+  try {
+    const a = await LM().availability();
+    if (a !== 'available') return false;      // still needs a gesture; leave it
+    return await enableModel();
+  } catch { return false; }
+}
+
 export async function enableModel(onProgress) {
   const api = LM();
   if (!api) { state = 'unavailable'; throw new Error('This browser has no built-in model. Chrome or Edge on a laptop can do this; phones cannot yet.'); }
@@ -92,6 +116,7 @@ export async function enableModel(onProgress) {
       }
     });
     state = 'ready';
+    try { localStorage.setItem(REMEMBER, '1'); } catch { /* private window */ }
     return true;
   } catch (err) {
     state = 'failed';
@@ -104,6 +129,7 @@ export function disableModel() {
   try { session?.destroy?.(); } catch { /* already gone */ }
   session = null;
   state = 'unknown';
+  try { localStorage.removeItem(REMEMBER); } catch { /* ignore */ }
 }
 
 /**

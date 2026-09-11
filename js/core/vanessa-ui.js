@@ -3,7 +3,7 @@
    tokens so it looks like part of the app rather than a bolted-on widget.
 ============================================================================ */
 import { ask, greeting, shareInterviews, shareOther } from './vanessa.js';
-import { modelSupported, modelState, checkAvailability, enableModel, disableModel, interpret } from './vanessa-model.js';
+import { modelSupported, modelState, checkAvailability, enableModel, disableModel, interpret, resumeIfEnabled, wasEnabled } from './vanessa-model.js';
 import { state as appState } from './state.js';
 import { $, esc, injectStyle } from './ui.js';
 import { go } from './router.js';
@@ -131,7 +131,13 @@ export function initVanessa() {
     </form>`;
   document.body.appendChild(panel);
 
-  checkAvailability().then(paintModelRow);
+  checkAvailability().then(async () => {
+    paintModelRow();
+    // Already downloaded on a previous visit: switch it on with no click and no
+    // wait, which is what "on when you open the app" looks like after the first
+    // time. If Chrome still wants a gesture, the button stays and nothing stalls.
+    if (wasEnabled()) { await resumeIfEnabled(); paintModelRow(); }
+  });
 
   launch.addEventListener('click', () => {
     open = !open;
@@ -147,14 +153,35 @@ export function initVanessa() {
   panel.addEventListener('click', async e => {
     if (e.target.id === 'v-model-on') {
       const btn = e.target;
-      btn.textContent = 'Starting…'; btn.disabled = true;
+      btn.disabled = true;
+      btn.textContent = 'Starting…';
+
+      /* This is a multi-gigabyte download the first time, and a button reading
+         "Starting…" for ten minutes looks broken. Say what is happening, keep
+         the number moving, and make clear she still works meanwhile. */
+      const note = say('her',
+        'Chrome is downloading its language model now — a few gigabytes, once, ' +
+        'and it keeps it afterwards so this never happens again. It can take a ' +
+        'while on a slow connection.\n\nCarry on asking me things; I will say ' +
+        'when it is ready.');
+
+      let pct = 0, ticks = 0;
+      const beat = setInterval(() => {
+        ticks++;
+        const shown = pct ? `${Math.round(pct * 100)}%` : 'still going';
+        note.textContent = `Downloading Chrome's model — ${shown}. ` +
+          (ticks > 12 ? 'This one is taking a while; it is safe to close this panel and come back.' : 'Carry on asking me things meanwhile.');
+      }, 5000);
+
       try {
-        // Must happen inside this click: Chrome will not start the download
-        // from a script that was not triggered by a person.
-        await enableModel(p => { btn.textContent = `Downloading ${Math.round(p * 100)}%`; });
-        say('her', 'Smarter answers are on. Ask me something in your own words and I will try harder to work out what you mean.');
+        // Must happen inside this click: Chrome will not begin the download
+        // from a script that a person did not trigger.
+        await enableModel(p => { pct = p; btn.textContent = `Downloading ${Math.round(p * 100)}%`; });
+        clearInterval(beat);
+        note.textContent = 'Smarter answers are on. Ask me something in your own words and I will work harder to understand it. Next time you open the hub it will already be on.';
       } catch (err) {
-        say('her', err.message);
+        clearInterval(beat);
+        note.textContent = err.message;
       }
       paintModelRow();
       return;
