@@ -29,9 +29,17 @@
       <input type="password" id="gate-password" autocomplete="current-password" required>
     </label>
 
+    <label class="field" id="gate-name-wrap" hidden>
+      <span>Full name</span>
+      <input type="text" id="gate-name" autocomplete="name" placeholder="Jane Boilermaker">
+    </label>
+
     <p class="form-error" id="gate-error" hidden></p>
     <button class="btn btn-primary btn-block" type="submit" id="gate-submit">Continue</button>
-    <p class="hint">No account? Ask a codirector to add you.</p>
+    <p class="hint">
+      <span id="gate-swap-text">First time here?</span>
+      <button type="button" class="linkish" id="gate-swap">Make a password</button>
+    </p>
   </form>
 </div>
 

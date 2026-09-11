@@ -84,6 +84,50 @@ export async function restore() {
   try { await loadMe(); return true; } catch { clearSession(); return false; }
 }
 
+/**
+ * Make a password for an address a codirector has already put on the list.
+ *
+ * This is not an open door. The database decides what a new account can see,
+ * and it looks the address up on the invite list to do it: somebody who was
+ * never added lands inactive, and every permission check requires an active
+ * member, so they sign in to a hub with nothing in it. Being able to make a
+ * password and being allowed to see anything are two different things.
+ *
+ * It exists so the hub can be handed on. The alternative is that adding a
+ * person always means somebody opening the database itself, which is exactly
+ * the job this is meant to remove.
+ */
+export async function signUp(email, password, fullName) {
+  const { SUPABASE_URL: url, SUPABASE_KEY: key } = cfg();
+  const res = await fetch(`${url}/auth/v1/signup`, {
+    method: 'POST',
+    headers: { apikey: key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email, password,
+      data: fullName ? { full_name: fullName } : undefined
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    if (data.error_code === 'signup_disabled' || /signups not allowed/i.test(data.msg || '')) {
+      throw new Error(
+        'New passwords are switched off for this hub. A codirector can turn them ' +
+        'back on in Supabase under Authentication → Sign In / Providers → ' +
+        '"Allow new users to sign up".');
+    }
+    throw new Error(data.error_description || data.msg || 'That did not work.');
+  }
+
+  // Email confirmation on: there is no token yet and they must click the link.
+  if (!data.access_token) {
+    throw new Error('Check your Purdue email for a confirmation link, then come back and sign in.');
+  }
+
+  saveSession(data);
+  await loadMe();
+}
+
 export function signOut() {
   clearSession();
   showGate();
@@ -105,6 +149,20 @@ export function hideGate() {
 }
 
 export function initAuth(onReady) {
+  let making = false;                 // making a password, rather than signing in
+
+  const paintMode = () => {
+    $('#gate-name-wrap').hidden = !making;
+    $('#gate-name').required = making;
+    $('#gate-password').setAttribute('autocomplete', making ? 'new-password' : 'current-password');
+    $('#gate-submit').textContent = making ? 'Create account' : 'Continue';
+    $('#gate-swap-text').textContent = making ? 'Already have a password?' : 'First time here?';
+    $('#gate-swap').textContent = making ? 'Sign in' : 'Make a password';
+    $('#gate-error').hidden = true;
+  };
+
+  $('#gate-swap').addEventListener('click', () => { making = !making; paintMode(); });
+
   $('#gate-form').addEventListener('submit', async e => {
     e.preventDefault();
     const email = $('#gate-email').value.trim();
@@ -112,15 +170,17 @@ export function initAuth(onReady) {
     if (!email || !password) return;
 
     const btn = $('#gate-submit');
-    btn.disabled = true; btn.textContent = 'Checking…';
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = making ? 'Creating…' : 'Checking…';
     try {
-      await signIn(email, password);
+      if (making) await signUp(email, password, $('#gate-name').value.trim());
+      else await signIn(email, password);
       hideGate();
       onReady();
     } catch (err) {
       showGate(err.message);
     } finally {
-      btn.disabled = false; btn.textContent = 'Continue';
+      btn.disabled = false; btn.textContent = label;
     }
   });
 
