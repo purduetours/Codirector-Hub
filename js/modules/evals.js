@@ -8,7 +8,7 @@ import { loadTours } from '../core/sheets.js';
 import { state, myName, isAdmin } from '../core/state.js';
 import { paintNav } from '../core/router.js';
 import {
-  $, $$, esc, sameName, prettyDate, prettyTime, toast, showError,
+  $, $$, esc, sameName, prettyDate, prettyTime, todayISO, toast, showError,
   openModal, closeModal, wireModal, debounce, injectStyle, SEARCH_ICON
 } from '../core/ui.js';
 
@@ -16,11 +16,31 @@ const STATUS_LABEL = { open: 'Open', claimed: 'Claimed', submitted: 'Submitted',
 const TONE = { open: 'tone-open', claimed: 'tone-warn', submitted: 'tone-good', reviewed: 'tone-info', skip: 'tone-mute' };
 const TOUR_PREVIEW = 5;
 
-const local = { tab: 'open', search: '', priority: '', target: null, toursExpanded: false };
+const local = { tab: 'open', search: '', priority: '', days: 14, target: null, toursExpanded: false };
 
 const isMine = g => !!g.evaluatorId && g.evaluatorId === state.me?.id;
 
 injectStyle('evals-css', `
+.ev-day { margin-bottom:18px; }
+.ev-day-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+  padding:0 2px 7px; border-bottom:1px solid var(--line); margin-bottom:8px; position:sticky; top:0;
+  background:var(--bg); z-index:1; }
+.ev-day-name { font-size:.95rem; font-weight:650; letter-spacing:-.01em; }
+.ev-day-name .soon { color:var(--accent); }
+.ev-day-count { font-size:.75rem; color:var(--text-faint); flex:none; }
+.ev-slot { display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--bg-elev); margin-bottom:6px; }
+.ev-slot.taken { background:transparent; border-style:dashed; }
+.ev-slot-time { font-size:.78rem; color:var(--text-faint); font-variant-numeric:tabular-nums;
+  min-width:112px; flex:none; }
+.ev-slot-who { flex:1; min-width:0; }
+.ev-slot-who b { display:block; font-size:.88rem; font-weight:600; }
+.ev-slot-who em { display:block; font-style:normal; font-size:.74rem; color:var(--text-faint); margin-top:1px; }
+.ev-slot .btn { flex:none; }
+@media (max-width:520px){
+  .ev-slot { flex-wrap:wrap; gap:6px 10px; }
+  .ev-slot-time { min-width:0; width:100%; }
+}
 .ev-card { display:flex; flex-direction:column; gap:11px; position:relative; overflow:hidden; }
 .ev-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--tone,var(--line-strong)); }
 .ev-card.is-mine { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
@@ -92,6 +112,7 @@ function shell() {
 
   <nav class="tabs" id="ev-tabs" style="margin-bottom:14px">
     <button class="tab is-active" data-tab="open">Available</button>
+    <button class="tab" data-tab="days">By day</button>
     <button class="tab" data-tab="mine">My evals <span class="tab-badge" id="ev-badge" hidden>0</span></button>
     <button class="tab" data-tab="claimed">Claimed</button>
     <button class="tab" data-tab="done" ${admin ? '' : 'hidden'}>Done</button>
@@ -101,6 +122,12 @@ function shell() {
   <div class="filters" style="margin-bottom:16px">
     <label class="search">${SEARCH_ICON}<input type="search" id="ev-search" placeholder="Search a guide's name…" autocomplete="off"></label>
     <select id="ev-priority" class="select" aria-label="Filter by priority"><option value="">All priorities</option></select>
+    <select id="ev-days" class="select" aria-label="How far ahead to show" hidden>
+      <option value="7">Next 7 days</option>
+      <option value="14" selected>Next 14 days</option>
+      <option value="30">Next 30 days</option>
+      <option value="0">Rest of term</option>
+    </select>
   </div>
 
   <div id="ev-banner" class="callout" style="margin-bottom:14px" hidden></div>
@@ -270,6 +297,94 @@ const EMPTY = {
   all: 'No guides match that search.'
 };
 
+/* ------------------------------------------------------------- by day ----
+   Asked for by the committee: "which evals can I actually go to on Thursday?"
+
+   Every other tab answers "who needs an eval" and leaves you to open each card
+   to find out when they are leading. This inverts it -- the schedule first,
+   the people second -- because that is the order the question arrives in. You
+   know which afternoon you are free before you know whose tour you want.
+
+   The tours are the same ones already hanging off each guide from the shared
+   workbook, so nothing new is fetched. A guide leading three tours appears on
+   three days, which is correct: each is a separate chance to go and watch.
+-------------------------------------------------------------------------- */
+
+function dayGroups() {
+  const q = local.search.trim().toLowerCase();
+  const keep = g =>
+    (g.status === 'open' || g.status === 'claimed') &&
+    (!local.priority || g.priority === local.priority) &&
+    (!q || `${g.name} ${g.priority} ${g.evaluator}`.toLowerCase().includes(q));
+
+  const byDate = new Map();
+  state.guides.forEach(g => {
+    if (!keep(g)) return;
+    (g.tours || []).forEach(t => {
+      if (!byDate.has(t.date)) byDate.set(t.date, []);
+      byDate.get(t.date).push({ g, t });
+    });
+  });
+
+  /* The workbook holds the whole term, which is 55 days and several hundred
+     tours -- useful to nobody as one scroll. Two weeks is the horizon people
+     actually plan an eval over; the rest is one click away. */
+  let cutoff = '';
+  if (local.days) {
+    const d = new Date();
+    d.setDate(d.getDate() + Number(local.days));
+    cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  return [...byDate.entries()]
+    .filter(([date]) => !cutoff || date <= cutoff)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, rows]) => ({
+      date,
+      rows: rows.sort((a, b) =>
+        a.t.start.localeCompare(b.t.start) || a.g.name.localeCompare(b.g.name)),
+      free: rows.filter(r => r.g.status === 'open').length
+    }));
+}
+
+function dayView() {
+  const groups = dayGroups();
+  if (!groups.length) return '';
+
+  const today = todayISO();
+  const tomorrow = (() => {
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+
+  return groups.map(({ date, rows, free }) => {
+    const label = date === today ? 'Today' : date === tomorrow ? 'Tomorrow' : '';
+    const full = prettyDate(date, { weekday: 'long', month: 'long', day: 'numeric' });
+
+    return `<section class="ev-day">
+      <div class="ev-day-head">
+        <span class="ev-day-name">${label ? `<span class="soon">${label}</span> · ` : ''}${esc(full)}</span>
+        <span class="ev-day-count">${free ? `${free} to claim` : 'all claimed'}</span>
+      </div>
+      ${rows.map(({ g, t }) => {
+        const mine = isMine(g);
+        const taken = g.status !== 'open';
+        const who = taken
+          ? (mine ? 'Claimed by you' : g.evaluator ? `Claimed by ${g.evaluator}` : 'Already claimed')
+          : (g.priority || '');
+        return `<div class="ev-slot ${taken ? 'taken' : ''}">
+          <span class="ev-slot-time">${esc(t.slot || prettyTime(t.start))}</span>
+          <span class="ev-slot-who"><b>${esc(g.name)}</b><em>${esc(who)}</em></span>
+          ${taken
+            ? ''
+            : `<button class="btn btn-primary btn-sm" data-act="claim" data-id="${esc(g.id)}"
+                  data-date="${esc(t.date)}" data-start="${esc(t.start)}">Claim</button>`}
+        </div>`;
+      }).join('')}
+    </section>`;
+  }).join('');
+}
+
 function paint() {
   const c = state.counts || {};
   const open = c.open || 0, claimed = c.claimed || 0;
@@ -303,8 +418,25 @@ function paint() {
   sel.innerHTML = '<option value="">All priorities</option>' + seen.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
   if (seen.includes(keep)) sel.value = keep;
 
+  const list = $('#ev-list');
+
+  if (local.tab === 'days') {
+    const html = dayView();
+    list.classList.remove('grid');
+    list.innerHTML = html;
+    $('#ev-empty').hidden = !!html;
+    if (!html) {
+      $('#ev-empty-text').textContent = (local.search || local.priority)
+        ? 'No guides match those filters on any upcoming day.'
+        : 'Nobody who still needs an eval has a tour on the schedule yet. Tours are read from the shared workbook, so they appear here as soon as they are put in.';
+    }
+    paintNav();
+    return;
+  }
+
+  list.classList.add('grid');
   const rows = visible();
-  $('#ev-list').innerHTML = rows.map(card).join('');
+  list.innerHTML = rows.map(card).join('');
   $('#ev-empty').hidden = rows.length > 0;
   if (!rows.length) {
     $('#ev-empty-text').textContent = (local.search || local.priority)
@@ -433,6 +565,11 @@ async function attachTours() {
     a.date === b.date ? a.start.localeCompare(b.start) : a.date.localeCompare(b.date)));
   state.unmatchedSchedule = [...unmatched];
   paintNav();
+
+  /* Tours arrive from the workbook a moment after the roster does, and the
+     By day tab is made entirely of tours -- without this it would paint empty
+     and stay that way until something else happened to redraw it. */
+  if (document.getElementById('ev-list')) paint();
 }
 
 async function reload() {
@@ -474,13 +611,16 @@ function renderTours() {
     : 'Pick one above, or scroll for more.';
 }
 
-function openClaim(g, editing) {
+/* `preset` is the tour that was actually clicked. Claiming from the By day tab
+   means you already chose the day and the time -- being handed an empty date
+   box and a list of their other tours would be asking the same question twice. */
+function openClaim(g, editing, preset) {
   local.target = g;
   local.toursExpanded = false;
   $('#ev-claim-title').textContent = editing ? 'Edit schedule' : 'Claim eval';
   $('#ev-claim-sub').textContent = `${g.name} · ${g.priority || ''}`;
-  $('#ev-claim-date').value = g.date || '';
-  $('#ev-claim-time').value = g.time || '';
+  $('#ev-claim-date').value = preset?.date || g.date || '';
+  $('#ev-claim-time').value = preset?.start || g.time || '';
   $('#ev-claim-notes').value = g.notes || '';
   const go = $('#ev-claim-submit');
   go.textContent = editing ? 'Save' : 'Claim it';
@@ -517,6 +657,7 @@ export default {
     if (!state.guides.length) await loadRoster();
     view.innerHTML = shell();
     $$('.modal-root', view).forEach(wireModal);
+    $('#ev-days').hidden = local.tab !== 'days';
     paint();
 
     $('#ev-tabs').addEventListener('click', e => {
@@ -524,6 +665,7 @@ export default {
       if (!t) return;
       local.tab = t.dataset.tab;
       $$('#ev-tabs .tab').forEach(x => x.classList.toggle('is-active', x === t));
+      $('#ev-days').hidden = local.tab !== 'days';
       paint();
     });
 
@@ -536,6 +678,7 @@ export default {
 
     $('#ev-search').addEventListener('input', debounce(e => { local.search = e.target.value; paint(); }));
     $('#ev-priority').addEventListener('change', e => { local.priority = e.target.value; paint(); });
+    $('#ev-days').addEventListener('change', e => { local.days = Number(e.target.value); paint(); });
 
     $('#ev-list').addEventListener('click', async e => {
       const b = e.target.closest('button[data-act]');
@@ -543,7 +686,10 @@ export default {
       const g = state.guides.find(x => x.id === b.dataset.id);
       if (!g) return;
 
-      if (b.dataset.act === 'claim')  return openClaim(g, false);
+      if (b.dataset.act === 'claim') {
+        const d = b.dataset.date;
+        return openClaim(g, false, d ? { date: d, start: b.dataset.start } : null);
+      }
       if (b.dataset.act === 'edit')   return openClaim(g, true);
       if (b.dataset.act === 'submit') return openEval(g);
 
