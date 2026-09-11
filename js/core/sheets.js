@@ -58,7 +58,18 @@ function slotStart(slot) {
   return String(h).padStart(2, '0') + ':' + (m[2] || '00');
 }
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+/**
+ * Today, in the reader's own timezone.
+ *
+ * toISOString() is UTC, so after about 8pm Eastern it already reports tomorrow
+ * and every one of today's tours gets filtered out as though it had happened.
+ * Invisible all day, wrong every evening -- precisely when somebody checks what
+ * they are leading tomorrow.
+ */
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 /**
  * The grid writes dates as "Monday 9/7" with no year. Pick whichever year puts

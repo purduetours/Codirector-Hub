@@ -3,7 +3,7 @@ import { state, myName, isAdmin } from './core/state.js';
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
 import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
 import { $, $$, initials, toast } from './core/ui.js';
-import { initVanessa } from './core/vanessa-ui.js';
+import { initVanessa, registerWarmers } from './core/vanessa-ui.js';
 
 import evals, { loadRoster } from './modules/evals.js';
 import interviews    from './modules/interviews.js';
@@ -13,6 +13,15 @@ import desks         from './modules/desks.js';
 import announcements from './modules/announcements.js';
 
 [announcements, evals, interviews, schedule, directory, desks].forEach(register);
+
+/* The modules already know how to fetch their own data; Vanessa just asks them
+   to, rather than reaching past them into the database herself. */
+registerWarmers([
+  { needs: 'training',    load: () => (state.guides.length ? null : loadRoster()) },
+  { needs: 'recruitment', load: () => interviews.prefetch?.() },
+  { needs: 'any',         load: () => schedule.prefetch?.() },
+  { needs: 'any',         load: () => desks.prefetch?.() }
+]);
 
 function paintShell() {
   $('#who-name').textContent = myName();

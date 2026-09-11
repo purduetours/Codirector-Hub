@@ -4,7 +4,7 @@
 ============================================================================ */
 import { ask, greeting, shareInterviews, shareOther } from './vanessa.js';
 import { modelSupported, modelState, checkAvailability, enableModel, disableModel, interpret, resumeIfEnabled, wasEnabled } from './vanessa-model.js';
-import { state as appState } from './state.js';
+import { state as appState, inTraining, inRecruitment } from './state.js';
 import { $, esc, injectStyle } from './ui.js';
 import { go } from './router.js';
 
@@ -48,6 +48,34 @@ const SUGGESTIONS = [
 ];
 
 let open = false;
+let warmers = [];
+let warmed = false;
+
+/**
+ * What Vanessa needs loaded before she can answer.
+ *
+ * She reads only what the app already holds, which is the right rule -- it means
+ * she can never surface something the database withheld. The flaw was that
+ * nothing loaded the data until you visited that tab, so asking "who still
+ * needs an eval" from the Interviews screen got a shrug. Now opening her warms
+ * whatever your role entitles you to, using the modules' own loaders, so it is
+ * the same query the tab itself would run.
+ */
+export function registerWarmers(list) { warmers = list; }
+
+async function warmUp() {
+  if (warmed) return;
+  warmed = true;
+  const allowed = warmers.filter(w =>
+    w.needs === 'training' ? inTraining()
+    : w.needs === 'recruitment' ? inRecruitment()
+    : true);
+  if (!allowed.length) return;
+
+  const note = say('her', 'One moment, getting up to speed…');
+  await Promise.allSettled(allowed.map(w => w.load()));
+  note.remove();
+}
 
 function say(who, text) {
   const log = $('#v-log');
@@ -139,13 +167,14 @@ export function initVanessa() {
     if (wasEnabled()) { await resumeIfEnabled(); paintModelRow(); }
   });
 
-  launch.addEventListener('click', () => {
+  launch.addEventListener('click', async () => {
     open = !open;
     panel.hidden = !open;
     if (open) {
       paintModelRow();
       if (!$('#v-log').children.length) say('her', greeting());
       setTimeout(() => $('#v-input').focus(), 60);
+      await warmUp();
     }
   });
   $('#v-close').addEventListener('click', () => { open = false; panel.hidden = true; });
