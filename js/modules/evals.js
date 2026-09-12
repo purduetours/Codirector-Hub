@@ -43,8 +43,9 @@ injectStyle('evals-css', `
 .ev-cal-day.none { color:var(--text-faint); cursor:default; }
 .ev-cal-day.off { visibility:hidden; }
 .ev-cal-day.today { border-color:var(--accent); }
-.ev-cal-day.sel { background:var(--accent); border-color:var(--accent); color:#fff; }
-.ev-cal-day.sel .n { color:#fff; }
+.ev-cal-day.sel { background:var(--accent); border-color:var(--accent); color:var(--accent-text); }
+/* Gold on the black selected day; white would read as any old calendar. */
+.ev-cal-day.sel .n { color:var(--gold); }
 .ev-cal-day:not(.none):not(.sel):hover { border-color:var(--accent); }
 .ev-day { margin-bottom:18px; }
 .ev-day-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
@@ -101,7 +102,7 @@ injectStyle('evals-css', `
   border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:9px 4px;
   font-size:.85rem; font-weight:600; color:var(--text-soft); transition:all .13s; user-select:none; }
 .rating label:hover { border-color:var(--accent); color:var(--text); }
-.rating input:checked + label { background:var(--accent); border-color:var(--accent); color:#fff; }
+.rating input:checked + label { background:var(--accent); border-color:var(--accent); color:var(--accent-text); }
 .checkline { display:flex; gap:10px; align-items:flex-start; border:1px solid var(--line-strong);
   border-radius:var(--radius-sm); padding:12px 14px; cursor:pointer; }
 .checkline input { width:17px; height:17px; margin-top:2px; flex:none; accent-color:var(--accent); }

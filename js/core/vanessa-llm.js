@@ -62,23 +62,57 @@ export function loadLlm() {
   publish({ phase: 'loading', progress: 0, message: 'Starting…' });
 
   loading = (async () => {
+    const onProgress = report => {
+      const text = report?.text || '';
+      // WebLLM reports "[15/38]" style progress inside its own text.
+      const frac = typeof report?.progress === 'number' ? report.progress : 0;
+      publish({ phase: 'loading', progress: Math.max(0, Math.min(1, frac)), message: text });
+    };
+
     try {
       const webllm = await import(/* @vite-ignore */ WEBLLM_URL);
-      engine = await webllm.CreateMLCEngine(MODEL, {
-        initProgressCallback: report => {
-          const text = report?.text || '';
-          // WebLLM reports "[15/38]" style progress inside its own text.
-          const frac = typeof report?.progress === 'number' ? report.progress : 0;
-          publish({ phase: 'loading', progress: Math.max(0, Math.min(1, frac)), message: text });
+
+      /* The download is a few dozen separate files, and one of them failing
+         takes the whole thing down with "Failed to execute 'add' on 'Cache'".
+         That is not a real error about this laptop -- retrying immediately
+         worked every time -- so it is retried here rather than being handed to
+         the person as something to solve.
+
+         The second attempt stores the weights in IndexedDB instead of the
+         Cache API, which is where that failure comes from. Whatever was
+         already fetched is kept, so a retry resumes rather than restarting. */
+      const attempts = [
+        {},
+        { appConfig: { ...webllm.prebuiltAppConfig, useIndexedDBCache: true } }
+      ];
+
+      let lastError = null;
+      for (let i = 0; i < attempts.length; i++) {
+        try {
+          engine = await webllm.CreateMLCEngine(MODEL, { initProgressCallback: onProgress, ...attempts[i] });
+          publish({ phase: 'ready', progress: 1, message: 'Vanessa is writing her own answers now.' });
+          return true;
+        } catch (err) {
+          lastError = err;
+          engine = null;
+          if (i < attempts.length - 1) {
+            publish({ phase: 'loading', message: 'That stalled — picking up where it left off…' });
+            await new Promise(r => setTimeout(r, 1200));
+          }
         }
-      });
-      publish({ phase: 'ready', progress: 1, message: 'Vanessa is writing her own answers now.' });
-      return true;
+      }
+      throw lastError;
     } catch (err) {
       engine = null;
       remember(false);
-      publish({ phase: 'failed', message:
-        (err?.message || 'The model could not start.') + ' Vanessa still answers without it.' });
+      const raw = String(err?.message || '');
+      const friendly =
+        /Cache|storage|quota|QuotaExceeded/i.test(raw)
+          ? 'The download could not be saved — this browser may be low on space or blocking site storage. Free some room, or check that site data is allowed, then press Retry.'
+        : /network|fetch|Failed to fetch/i.test(raw)
+          ? 'The download was interrupted. Press Retry and it will carry on from where it stopped.'
+          : (raw || 'The model could not start.');
+      publish({ phase: 'failed', message: friendly + ' Vanessa still answers without it.' });
       return false;
     } finally {
       loading = null;

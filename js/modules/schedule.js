@@ -22,7 +22,7 @@ injectStyle('sch-css', `
   font-variant-numeric:tabular-nums; }
 .sch-guides { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
 .sch-guide { font-size:.8rem; background:var(--bg-sunken); border-radius:999px; padding:3px 10px; }
-.sch-guide.hit { background:var(--accent); color:#fff; font-weight:600; }
+.sch-guide.hit { background:var(--accent); color: var(--accent-text); font-weight:600; }
 .sch-count { font-size:.74rem; color:var(--text-faint); flex:none; }
 `);
 

@@ -70,7 +70,7 @@ p { margin: 0; }
 .navlink .ico { width: 18px; text-align: center; flex: none; font-size: 15px; }
 .navlink .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .navlink .count {
-  font-size: .7rem; font-weight: 700; background: var(--accent); color: #fff;
+  font-size: .7rem; font-weight: 700; background: var(--accent); color: var(--accent-text);
   border-radius: 999px; padding: 1px 6px; min-width: 18px; text-align: center;
 }
 .navlink.is-soon { opacity: .5; cursor: default; }
@@ -84,7 +84,7 @@ p { margin: 0; }
 }
 .who:hover { background: var(--bg-sunken); }
 .avatar {
-  width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff;
+  width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-text);
   display: grid; place-items: center; font-size: .74rem; font-weight: 700; flex: none;
 }
 .who-name { font-size: .82rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
