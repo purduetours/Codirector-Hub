@@ -257,7 +257,7 @@ function interviewAnswers(q) {
 }
 
 /* --------------------------------------------------- a particular guide ---
-   "who is evaluating Noah Cash", "when is Ella leading a tour". Matched on any
+   "who is evaluating Jane Boilermaker", "when is Jane leading a tour". Matched on any
    part of the name so a first name alone is enough, and it refuses to answer
    when two guides fit rather than picking one.
 -------------------------------------------------------------------------- */
@@ -856,7 +856,7 @@ export function ask(question) {
   const interviewy = has(q, 'candidate', 'interview', 'undecided', 'decision', 'graded',
                             'grading', 'rater', 'checked in', 'discuss', 'top ', 'highest');
   // Naming exactly one person makes it a question about them, whatever other
-  // words happen to be in it. "When is Noah Cash LEADING a tour" otherwise
+  // words happen to be in it. "When is Jane Boilermaker LEADING a tour" otherwise
   // collided with the word "leader" and came back with the top scorers.
   const namesOne = (state.guides || []).length &&
                    findPeople(q, state.guides, x => x.name).length === 1;

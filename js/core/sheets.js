@@ -10,6 +10,12 @@
 
 const SHEET_ID = '1XIfi_T4G1tkc_8D28cQWXUtCgk7Cb-BuyLrEvhfAzno';
 
+/* The training absence form writes to its own workbook, so it needs its own id.
+   Read live rather than copied into the database: it is a Google Form's
+   responses, it only ever grows, and nobody edits it here — showing a stale
+   copy of who will be missing on Monday would be worse than useless. */
+const ABSENCE_SHEET_ID = '1zlbSaty-ZCSY9wvoa8p_yPbWVm604hCl-hw1IRYpQ4s';
+
 /**
  * Which month tabs belong to the term we are in, and what year they are.
  *
@@ -123,11 +129,12 @@ const tabCache = new Map();
 /** Forget everything read from the workbook; the next ask goes to Google. */
 export const bustSheets = () => tabCache.clear();
 
-function fetchTab(tab) {
-  if (tabCache.has(tab)) return tabCache.get(tab);
+function fetchTab(tab, book = SHEET_ID, extra = '') {
+  const cacheKey = `${book}|${tab}|${extra}`;
+  if (tabCache.has(cacheKey)) return tabCache.get(cacheKey);
 
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
-              `?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+  const url = `https://docs.google.com/spreadsheets/d/${book}/gviz/tq` +
+              `?tqx=out:csv&sheet=${encodeURIComponent(tab)}${extra}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
@@ -139,14 +146,14 @@ function fetchTab(tab) {
     })
     .then(text => (text === null ? null : parseCSV(text)))
     .then(rows => {
-      if (rows === null && tabCache.get(tab) === pending) tabCache.delete(tab);
+      if (rows === null && tabCache.get(cacheKey) === pending) tabCache.delete(cacheKey);
       return rows;
     }).catch(err => {
-      if (tabCache.get(tab) === pending) tabCache.delete(tab);
+      if (tabCache.get(cacheKey) === pending) tabCache.delete(cacheKey);
       throw err;
     }).finally(() => clearTimeout(timer));
 
-  tabCache.set(tab, pending);
+  tabCache.set(cacheKey, pending);
   return pending;
 }
 
@@ -304,4 +311,38 @@ export async function loadDesks() {
     });
   });
   return out;
+}
+
+/**
+ * Training absence form responses, newest first.
+ *
+ * Straight off the form's own sheet. `headers=0` matters: gviz otherwise
+ * guesses how many rows are headers and, on a sheet with wrapped question text,
+ * folds several rows into one — the tracking sheet came back as two rows of
+ * glued-together nonsense until this was set.
+ *
+ * The columns are the form's questions, which somebody may reword at any time,
+ * so they are found by looking for the question rather than by position.
+ */
+export async function loadAbsences() {
+  const rows = await fetchTab('Form Responses 1', ABSENCE_SHEET_ID, '&headers=0');
+  if (!rows || rows.length < 2) return [];
+
+  const head = rows[0].map(h => String(h || '').toLowerCase());
+  const find = (...bits) => head.findIndex(h => bits.every(b => h.includes(b)));
+
+  const iWhen   = find('timestamp') >= 0 ? find('timestamp') : 0;
+  const iName   = find('name') >= 0 ? find('name') : 1;
+  const iWhich  = find('which') >= 0 ? find('which') : find('training') >= 0 ? find('training') : 2;
+  const iReason = find('reason') >= 0 ? find('reason') : 3;
+
+  return rows.slice(1)
+    .filter(r => String(r[iName] || '').trim())
+    .map(r => ({
+      when:     String(r[iWhen]   || '').trim(),
+      name:     String(r[iName]   || '').trim(),
+      sessions: String(r[iWhich]  || '').split(',').map(x => x.trim()).filter(Boolean),
+      reason:   String(r[iReason] || '').trim()
+    }))
+    .reverse();                       // newest first; the form appends
 }

@@ -181,7 +181,7 @@ const FRAME_SHOTS = [
   { role: 'assistant', content: 'Quite a few still going spare:' },
   { role: 'user',      content: 'Question: what are my evals\nReport: You have not claimed anybody yet. The Available tab has 52 guides up for grabs.' },
   { role: 'assistant', content: 'Nothing on your plate at the moment.' },
-  { role: 'user',      content: 'Question: who is leading tours today\nReport: 7 guide assignments for Saturday, September 12: Xander T., Ella H.' },
+  { role: 'user',      content: 'Question: who is leading tours today\nReport: 7 guide assignments for Saturday, September 12: Alex T., Sam H.' },
   { role: 'assistant', content: 'Here is today\u2019s line-up.' },
 
   /* Four more, added because the first set produced "Here's a sample of the
@@ -189,7 +189,7 @@ const FRAME_SHOTS = [
      never been shown an alternative to. These cover the shapes it kept getting
      wrong: a full list (say so), a single item, an empty result, and a figure
      that is bad news. */
-  { role: 'user',      content: 'Question: who is ungraded\nReport: 8 candidates have no scores at all: Anna T., Maya L.' },
+  { role: 'user',      content: 'Question: who is ungraded\nReport: 8 candidates have no scores at all: Jo P., Kim R.' },
   { role: 'assistant', content: 'These ones have slipped through completely:' },
   { role: 'user',      content: 'Question: which desk slots are uncovered\nReport: Every desk slot is covered this week.' },
   { role: 'assistant', content: 'All covered — nothing to chase.' },
@@ -320,7 +320,7 @@ export function usableLeadIn(text, facts) {
   if (/\n/.test(t)) return false;                  // one line, not a list
 
   /* And no names. Shown a list of today's tours it wrote "The tour leader is
-     Xander T." -- true of one person out of seven, and not the point. Any
+     Alex T." -- true of one person out of seven, and not the point. Any
      capitalised word carried over from the report is a name it should not have
      picked out. Tab names are the exception; they are places, not people. */
   const PLACES = new Set(['Eval', 'Tracker', 'Interviews', 'Tour', 'Schedule', 'Desk',

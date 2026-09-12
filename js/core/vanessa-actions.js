@@ -17,7 +17,7 @@
 import { state, myName, inTraining } from './state.js';
 import { claimGuide } from '../modules/evals.js';
 
-/* "claim noah", "put me down for Ella Herr", "I'll take Zach" */
+/* "claim noah", "put me down for Jane Boilermaker", "I'll take Zach" */
 const CLAIM = /\b(?:claim|put me down for|sign me up for|i(?:'| wi)?ll take|give me|assign me)\b\s*(.*)$/i;
 
 let pending = null;                    // { guide } awaiting a yes

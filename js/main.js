@@ -17,8 +17,9 @@ import desks         from './modules/desks.js';
 import announcements from './modules/announcements.js';
 import today         from './modules/today.js';
 import people        from './modules/people.js';
+import training      from './modules/training.js';
 
-[today, announcements, evals, interviews, schedule, directory, desks, people].forEach(register);
+[today, announcements, evals, interviews, training, schedule, directory, desks, people].forEach(register);
 
 /* The modules already know how to fetch their own data; Vanessa just asks them
    to, rather than reaching past them into the database herself. */
@@ -26,7 +27,8 @@ registerWarmers([
   { needs: 'training', label: 'evaluations', load: () => (state.guides.length ? null : loadRoster()) },
   { needs: 'recruitment', label: 'interviews', load: () => interviews.prefetch?.() },
   { needs: 'any', label: 'tour schedule', load: () => schedule.prefetch?.() },
-  { needs: 'training', label: 'desk coverage', load: () => desks.prefetch?.() }
+  { needs: 'training', label: 'desk coverage', load: () => desks.prefetch?.() },
+  { needs: 'training', label: 'training attendance', load: () => training.prefetch?.() }
 ]);
 
 onSessionReset(() => {
