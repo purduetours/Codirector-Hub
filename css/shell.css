@@ -34,6 +34,8 @@ p { margin: 0; }
   background: var(--accent-soft); border-radius: 15px; margin-bottom: 4px;
 }
 .gate-card h1 { font-size: 1.45rem; }
+.gate-news { font-size: .8rem; padding: 9px 12px; border-radius: var(--radius-sm);
+  background: var(--warn-bg); color: var(--warn); border: 1px solid transparent; }
 
 /* ---------------------------------------------------------- layout */
 .app { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 100dvh; }

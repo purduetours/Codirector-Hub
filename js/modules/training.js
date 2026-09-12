@@ -13,9 +13,9 @@
    missing on Monday is worse than no copy at all.
 ============================================================================ */
 import { select, update } from '../core/db.js';
-import { loadAbsences } from '../core/sheets.js';
+import { loadAbsences, formStamp } from '../core/sheets.js';
 import { state, isAdmin } from '../core/state.js';
-import { $, $$, esc, toast, injectStyle, prettyDate, debounce, SEARCH_ICON } from '../core/ui.js';
+import { $, $$, esc, toast, injectStyle, prettyDate, todayISO, debounce, SEARCH_ICON } from '../core/ui.js';
 
 /* The sheet's own vocabulary, offered as dropdowns. Free text underneath, so a
    value that arrives from elsewhere still displays rather than vanishing. */
@@ -52,9 +52,21 @@ injectStyle('tr-css', `
 .tr-sel.warn { background:var(--warn-bg); color:var(--warn); border-color:transparent; }
 .tr-sel.info { background:var(--info-bg); color:var(--info); border-color:transparent; }
 .tr-sel.mute { background:var(--mute-bg); color:var(--mute); border-color:transparent; }
+/* A suggestion from the form, not yet part of the record. */
+.tr-sel.suggested { background:var(--warn-bg); color:var(--warn); border:1px dashed var(--warn); }
 .tr-sub { font-size:.7rem; color:var(--text-faint); font-weight:400; }
 .tr-filed { color:var(--warn); cursor:help; border-bottom:1px dotted currentColor; }
 .tr-guess { color:var(--warn); font-style:italic; cursor:help; }
+.tr-owe { display:flex; align-items:center; gap:14px; padding:11px 14px; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--bg-elev); margin-bottom:8px; }
+.tr-owe-who { min-width:190px; flex:none; }
+.tr-owe-who b { display:block; font-size:.9rem; font-weight:600; }
+.tr-owe-who em { display:block; font-style:normal; font-size:.72rem; color:var(--text-faint); margin-top:1px; }
+.tr-owe-list { flex:1; display:flex; flex-wrap:wrap; gap:5px; }
+.tr-owe-pill { font-size:.72rem; padding:3px 9px; border-radius:999px; background:var(--warn-bg); color:var(--warn); }
+.tr-owe-pill.assumed { background:transparent; border:1px dashed var(--line-strong); color:var(--text-faint); }
+@media (max-width:620px){ .tr-owe { flex-wrap:wrap; } .tr-owe-who { min-width:0; width:100%; } }
+
 .tr-abs { border:1px solid var(--line); border-radius:var(--radius); background:var(--bg-elev);
   padding:12px 14px; margin-bottom:9px; }
 .tr-abs-top { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:5px; }
@@ -188,6 +200,28 @@ function indexFiled() {
   filedUnknownSessions = [...unknown];
 }
 
+/**
+ * What the dropdown should show when somebody has filed an absence.
+ *
+ * The tracker was filled in optimistically: every session, including ones that
+ * have not happened yet, arrived marked "Attended". So for a future date that
+ * word is a placeholder rather than an observation, and a filed absence should
+ * win over it. For a date that has already passed it is a real observation
+ * made by a person who was in the room, and the form does NOT get to overrule
+ * it — plenty of people file an absence and then turn up anyway.
+ *
+ * Nothing here is saved. It is shown as a suggestion until a codirector
+ * accepts it, so the record never quietly disagrees with what somebody typed.
+ */
+function suggestedActual(row, person, session) {
+  if (!filedFor(person, session.label)) return null;
+  if (!row.actual) return 'Absent, Need Makeup';
+
+  const future = session.held_on && session.held_on > todayISO();
+  if (future && /^attended/i.test(row.actual)) return 'Absent, Need Makeup';
+  return null;
+}
+
 const filedFor = (person, label) => filedIndex?.get(`${person}|${sessionKey(label)}`) || null;
 
 /**
@@ -227,6 +261,13 @@ function attendanceView() {
       ${loadError ? `<p class="muted" style="margin-top:8px">${esc(loadError)}</p>` : ''}</div>`;
   }
 
+  // How many suggestions are outstanding across everything on screen.
+  const byId = new Map(sessions.map(x => [x.id, x]));
+  const pending = attendance.filter(a => {
+    const sess = byId.get(a.session_id);
+    return sess && suggestedActual(a, a.person_name, sess);
+  }).length;
+
   const totals = shown.map(s => {
     const forS = attendance.filter(a => a.session_id === s.id);
     // "owed" counts what is recorded absent plus what is assumed absent, or
@@ -239,6 +280,11 @@ function attendanceView() {
   });
 
   return `
+    ${pending ? `<div class="callout" style="margin-bottom:14px">
+      <strong>${pending} ${pending === 1 ? 'person has' : 'people have'} filed an absence</strong> for a session still
+      marked as attended. They are shown dashed and are not saved yet.
+      ${isAdmin() ? '<button class="btn btn-primary btn-sm" id="tr-apply" style="margin-left:8px">Accept them all</button>' : ''}
+    </div>` : ''}
     <div class="filters" style="margin-bottom:14px">
       <label class="search">${SEARCH_ICON}<input type="search" id="tr-search" placeholder="Find a guide…" value="${esc(local.search)}" autocomplete="off"></label>
       <select id="tr-session" class="select" aria-label="Show one session">
@@ -263,9 +309,10 @@ function attendanceView() {
             const r = p.rows.get(s.id);
             if (!r) return '<td class="tr-sub">—</td>';
             const filed = filedFor(p.name, s.label);
+            const suggest = suggestedActual(r, p.name, s);
             const guess = inferredAbsent(r);
             return `<td>
-              ${admin ? cellEditor(r)
+              ${admin ? cellEditor(r, suggest)
                       : `<span class="tr-pill ${guess ? 'warn' : TONE(r.actual)}">${esc(r.actual || (guess ? 'Absent (assumed)' : '—'))}</span>`}
               <div class="tr-sub">
                 ${guess && admin ? '<span class="tr-guess" title="They gave a reason and nothing has been recorded, so they are assumed absent until you say otherwise">assumed absent</span> ' : ''}
@@ -277,6 +324,18 @@ function attendanceView() {
     </table></div>`;
 }
 
+/* The suggestion is shown as its own option with a value that is not a real
+   attendance value. That matters: while the suggestion was simply "Absent,
+   Need Makeup" pre-selected, ANY change event on the control — a re-render, a
+   stray script, a browser quirk — saved it, because the shown value genuinely
+   differed from the stored one and looked exactly like a choice. One row was
+   silently rewritten that way during testing.
+   
+   With a sentinel, the initial state cannot be written at all: the handler
+   sees SUGGESTED and stops. Picking the real "Absent, Need Makeup" underneath
+   it saves normally, and so does "Accept them all". */
+const SUGGESTED = '__suggested__';
+
 const options = (list, current) =>
   ['<option value="">—</option>',
    ...list.map(o => `<option value="${esc(o)}" ${o === current ? 'selected' : ''}>${esc(o)}</option>`),
@@ -285,17 +344,105 @@ const options = (list, current) =>
    (current && !list.includes(current)) ? `<option value="${esc(current)}" selected>${esc(current)}</option>` : ''
   ].join('');
 
-const cellEditor = r => `
+const cellEditor = (r, suggest) => `
   <div class="tr-cell">
-    <select class="tr-sel ${TONE(r.actual)}" data-field="actual" data-id="${esc(r.id)}" aria-label="Attendance">
-      ${options(ACTUAL, r.actual)}
+    <select class="tr-sel ${suggest ? 'suggested' : TONE(r.actual)}" data-field="actual" data-id="${esc(r.id)}"
+      data-stored="${esc(r.actual || '')}"
+      aria-label="Attendance"${suggest ? ` title="They filed an absence for this session. Not saved yet — pick it to confirm."` : ''}>
+      ${suggest ? `<option value="${SUGGESTED}" selected>${esc(suggest)} (from form)</option>` : ''}
+      ${options(ACTUAL, suggest ? null : r.actual)}
     </select>
-    <select class="tr-sel" data-field="expectation" data-id="${esc(r.id)}" aria-label="Reason">
+    <select class="tr-sel" data-field="expectation" data-id="${esc(r.id)}"
+      data-stored="${esc(r.expectation || '')}" aria-label="Reason">
       ${options(EXPECTATION, r.expectation)}
     </select>
   </div>`;
 
+/* --------------------------------------------------------------- makeups
+   The question the grid is bad at answering.
+
+   A hundred rows by eight columns is fine for "what happened on the 31st" and
+   hopeless for "who still owes me something" — that answer is six cells
+   scattered across eight hundred. This is the same data asked the other way
+   round: only the people with something outstanding, what they owe, and how
+   long it has been sitting there.
+
+   Outstanding means marked absent and not since marked "Makeup Completed" —
+   completing the makeup is exactly what changes the cell. Sessions that are
+   assumed absent (a reason given, nothing recorded) are counted too, and
+   marked as such, because they are the ones most likely to be forgotten.
+-------------------------------------------------------------------------- */
+function makeupsView() {
+  if (!sessions.length) return attendanceView();
+
+  const byLabel = new Map(sessions.map(x => [x.id, x]));
+  const owed = new Map();                       // person -> [{session, assumed}]
+
+  for (const a of attendance) {
+    const isAbsent  = /absent/i.test(a.actual || '');
+    const isAssumed = inferredAbsent(a);
+    if (!isAbsent && !isAssumed) continue;
+    const sess = byLabel.get(a.session_id);
+    if (!sess) continue;
+    if (!owed.has(a.person_name)) owed.set(a.person_name, []);
+    owed.get(a.person_name).push({ sess, assumed: isAssumed && !isAbsent, row: a });
+  }
+
+  const q = local.search.trim().toLowerCase();
+  const list = [...owed.entries()]
+    .filter(([name]) => !q || name.toLowerCase().includes(q))
+    .map(([name, items]) => ({ name, items: items.sort((a, b) => a.sess.sort_order - b.sess.sort_order) }))
+    .sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name));
+
+  const total = [...owed.values()].reduce((n, i) => n + i.length, 0);
+  const today = new Date();
+  const daysSince = iso => {
+    if (!iso) return null;
+    const [y, m, d] = iso.split('-').map(Number);
+    return Math.round((today - new Date(y, m - 1, d)) / 86400000);
+  };
+
+  if (!list.length) {
+    return `<div class="empty"><div class="empty-mark">✅</div>
+      <p>Nobody owes a makeup.</p>
+      <p class="muted" style="margin-top:6px">Everyone marked absent has since completed one.</p></div>`;
+  }
+
+  return `
+    <div class="filters" style="margin-bottom:14px">
+      <label class="search">${SEARCH_ICON}<input type="search" id="tr-search" placeholder="Find a guide…" value="${esc(local.search)}" autocomplete="off"></label>
+      <span class="muted" style="align-self:center">${list.length} ${list.length === 1 ? 'person' : 'people'} · ${total} outstanding</span>
+    </div>
+    ${list.map(p => `
+      <div class="tr-owe">
+        <div class="tr-owe-who">
+          <b>${esc(p.name)}</b>
+          <em>${p.items.length} outstanding</em>
+        </div>
+        <div class="tr-owe-list">
+          ${p.items.map(({ sess, assumed, row }) => {
+            const age = daysSince(sess.held_on);
+            return `<span class="tr-owe-pill${assumed ? ' assumed' : ''}"
+              title="${assumed ? 'Gave a reason, nothing recorded yet' : 'Marked absent, needs a makeup'}">
+              ${esc(sess.label)}${age !== null && age > 0 ? ` · ${age}d ago` : ''}${assumed ? ' · assumed' : ''}</span>`;
+          }).join('')}
+        </div>
+        ${isAdmin() ? `<button class="btn btn-ghost btn-sm" data-clear="${esc(p.name)}"
+          title="Mark every outstanding session for this person as Makeup Completed">Makeup done</button>` : ''}
+      </div>`).join('')}
+    <p class="muted" style="margin-top:12px">Outstanding means marked absent and not since marked as a completed makeup.</p>`;
+}
+
+/* Read means on screen. Called when the Absence tab paints, so the sign-in
+   page stops counting submissions this person has now seen. */
+function markAbsencesSeen() {
+  if (!absences?.length) return;
+  const newest = Math.max(...absences.map(a => formStamp(a.when)));
+  try { localStorage.setItem('hub2.abs.seen', String(newest)); } catch { /* private window */ }
+}
+
 function absencesView() {
+  markAbsencesSeen();
   if (absences === null) return `<div class="loading"><div class="spinner"></div><p>Reading the absence form…</p></div>`;
   if (!absences.length)  return `<div class="empty"><div class="empty-mark">✅</div><p>Nobody has filed an absence.</p></div>`;
 
@@ -336,7 +483,10 @@ function absencesView() {
 
 function paint() {
   indexFiled();
-  $('#tr-body').innerHTML = local.tab === 'attendance' ? attendanceView() : absencesView();
+  $('#tr-body').innerHTML =
+    local.tab === 'makeups'  ? makeupsView()
+    : local.tab === 'absences' ? absencesView()
+    : attendanceView();
 }
 
 export default {
@@ -358,7 +508,7 @@ export default {
 
     view.innerHTML = `
       <nav class="tabs" id="tr-tabs" style="margin-bottom:16px">
-        ${tab('attendance', 'Attendance')}${tab('absences', 'Absence form')}
+        ${tab('attendance', 'Attendance')}${tab('makeups', 'Makeups owed')}${tab('absences', 'Absence form')}
       </nav>
       <div id="tr-body"><div class="loading"><div class="spinner"></div><p>Loading training…</p></div></div>`;
 
@@ -394,6 +544,52 @@ export default {
       if (e.target.id === 'tr-search') { local.search = e.target.value; paint(); }
     }));
 
+    /* Buttons fire click, not change. These lived in the change handler and so
+       did nothing at all — the confirm never appeared and the row stayed put. */
+    body.addEventListener('click', async e => {
+      if (e.target.id === 'tr-apply') {
+        const byId = new Map(sessions.map(x => [x.id, x]));
+        const todo = attendance
+          .map(a => ({ a, want: suggestedActual(a, a.person_name, byId.get(a.session_id) || {}) }))
+          .filter(x => x.want);
+        if (!todo.length) return;
+        if (!confirm(`Mark ${todo.length} session${todo.length === 1 ? '' : 's'} as "Absent, Need Makeup", based on the absence form?`)) return;
+        e.target.disabled = true;
+        let done = 0;
+        try {
+          for (const { a, want } of todo) {
+            await update('training_attendance', `id=eq.${a.id}`, { actual: want });
+            a.actual = want; done++;
+          }
+          toast(`${done} updated from the absence form.`);
+        } catch (err) { toast(`${done} saved, then: ${err.message}`, 'err'); }
+        paint();
+        return;
+      }
+
+      const clear = e.target.closest('button[data-clear]');
+      if (clear) {
+        const who = clear.dataset.clear;
+        const rows = attendance.filter(a => a.person_name === who &&
+          (/absent/i.test(a.actual || '') || inferredAbsent(a)));
+        if (!rows.length) return;
+        if (!confirm(`Mark ${rows.length} outstanding session${rows.length === 1 ? '' : 's'} for ${who} as Makeup Completed?`)) return;
+        clear.disabled = true;
+        try {
+          // One at a time on purpose: if the third fails, the first two still
+          // stand and the list simply shows what is left.
+          for (const r of rows) {
+            await update('training_attendance', `id=eq.${r.id}`, { actual: 'Makeup Completed' });
+            r.actual = 'Makeup Completed';
+          }
+          toast(`${who} is all caught up.`);
+          paint();
+        } catch (err) { toast(err.message, 'err'); clear.disabled = false; paint(); }
+        return;
+      }
+
+    });
+
     body.addEventListener('change', async e => {
       if (e.target.id === 'tr-session') { local.session = e.target.value; return paint(); }
 
@@ -405,10 +601,27 @@ export default {
       const field = sel.dataset.field;
       const was = row[field] || '';
       const now = sel.value || null;
+
+      /* Only write what a person actually picked.
+
+         A suggested cell shows "Absent, Need Makeup" while the record still
+         says "Attended", so the control's value and the stored value disagree
+         on purpose. That is fine until something fires a change event nobody
+         asked for — a re-render, a stray script — at which point the
+         suggestion would be saved as though it had been chosen. Comparing
+         against the value this control was DRAWN with, rather than against
+         whatever it is showing now, means an accidental event writes nothing.
+         One stray row appeared in testing this way; it should not be possible. */
+      // The untouched suggestion. Nobody chose it, so nothing is saved.
+      if (now === SUGGESTED) return;
+
+      const drawnWith = sel.dataset.stored || '';
+      if ((now || '') === drawnWith) return;              // nothing was chosen
       sel.disabled = true;
       try {
         await update('training_attendance', `id=eq.${row.id}`, { [field]: now });
         row[field] = now;
+        sel.dataset.stored = now || '';        // this is the record now
         sel.classList.add('dirty');
         // Repaint only the pill colour; a full repaint would steal focus mid-edit.
         if (field === 'actual') {

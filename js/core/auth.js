@@ -75,6 +75,20 @@ export async function loadMe() {
   state.me = me;
   const roles = await select('roles', `select=*&name=eq.${encodeURIComponent(me.role)}`);
   state.role = (roles && roles[0]) || { name: me.role, is_admin: false, in_recruitment: false, in_training: false };
+
+  /* Remember on THIS DEVICE that a Developer signed in here, so the sign-in
+     page can show them what has come in while they were away.
+     
+     The sign-in page runs before anybody has identified themselves, so it
+     cannot ask the database who is looking. A role kept on the device is the
+     only thing available — and it is a role, not an email, so nothing
+     identifying goes into the code or the browser store. Anyone else signing
+     in on the same machine clears it again. */
+  try {
+    if (state.role?.name === 'Developer') localStorage.setItem('hub2.dev', '1');
+    else localStorage.removeItem('hub2.dev');
+  } catch { /* private window */ }
+
   return me;
 }
 

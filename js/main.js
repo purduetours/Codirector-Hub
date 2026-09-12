@@ -4,7 +4,7 @@ import { state, myName, isAdmin, inTraining, onSessionReset } from './core/state
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
 import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
 import { $, $$, initials, toast } from './core/ui.js';
-import { bustSheets } from './core/sheets.js';
+import { bustSheets, loadAbsences, formStamp } from './core/sheets.js';
 import { registerEvalActions } from './core/vanessa-eval.js';
 import { submitReviewedEval } from './core/vanessa-eval-submit.js';
 import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup } from './core/vanessa-ui.js';
@@ -62,6 +62,44 @@ async function start() {
      costs the user nothing and saves them a pause later. */
   prewarm();
 }
+
+/* ------------------------------------------------- what came in overnight
+   A line on the sign-in page saying how many absence submissions have arrived
+   since this person last read them.
+
+   Two deliberate limits.
+
+   It shows a COUNT and nothing else. The sign-in page is public — anybody who
+   reaches the URL sees it, signed in or not — so a student's name next to
+   "will be absent" has no business there. The names are one sign-in away.
+
+   And it only appears where a Developer last signed in, because that is who
+   asked to be told. Everyone else gets the ordinary sign-in page.
+-------------------------------------------------------------------------- */
+const ABS_SEEN = 'hub2.abs.seen';
+
+async function paintGateNews() {
+  const el = $('#gate-news');
+  if (!el) return;
+  try { if (localStorage.getItem('hub2.dev') !== '1') return; } catch { return; }
+
+  try {
+    const rows = await loadAbsences();
+    if (!rows.length) return;
+
+    let seen = 0;
+    try { seen = Number(localStorage.getItem(ABS_SEEN) || 0); } catch {}
+    const fresh = rows.filter(r => formStamp(r.when) > seen);
+    if (!fresh.length) return;
+
+    const newest = new Date(Math.max(...fresh.map(r => formStamp(r.when))));
+    el.textContent = `${fresh.length} new absence ${fresh.length === 1 ? 'submission' : 'submissions'} ` +
+      `since you last looked — the most recent ${newest.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}. ` +
+      `Sign in to see who.`;
+    el.hidden = false;
+  } catch { /* the form is unreachable; the sign-in page is not the place to say so */ }
+}
+paintGateNews();
 
 /* --------------------------------------------------------- version stamp
    "Did my upload actually go live?"
