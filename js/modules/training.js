@@ -16,6 +16,7 @@ import { select, update } from '../core/db.js';
 import { loadAbsences, formStamp } from '../core/sheets.js';
 import { state, isAdmin } from '../core/state.js';
 import { $, $$, esc, toast, injectStyle, prettyDate, todayISO, debounce, SEARCH_ICON } from '../core/ui.js';
+import { shareData } from '../core/vanessa-ui.js';
 
 /* The sheet's own vocabulary, offered as dropdowns. Free text underneath, so a
    value that arrives from elsewhere still displays rather than vanishing. */
@@ -162,6 +163,8 @@ async function loadAll() {
     ]);
     sessions = s || [];
     attendance = a || [];
+    indexFiled();
+    shareWithVanessa();      // she must know even if this screen is never opened
   } catch (err) {
     sessions = []; attendance = [];
     loadError = err?.message || 'Training data could not be loaded.';
@@ -223,6 +226,20 @@ function suggestedActual(row, person, session) {
 }
 
 const filedFor = (person, label) => filedIndex?.get(`${person}|${sessionKey(label)}`) || null;
+
+/* Vanessa reads only what a screen has already loaded, so she gets this the
+   moment it is assembled — the same rows, already matched to the form, rather
+   than a second query of her own that could disagree with what is on show. */
+function shareWithVanessa() {
+  if (!sessions) return;
+  shareData('training', {
+    sessions,
+    attendance,
+    absences: absences || [],
+    filed: filedIndex ? [...filedIndex.keys()] : [],
+    unmatched: filedUnmatched
+  });
+}
 
 /**
  * What the grid should show when nothing has been recorded yet.
@@ -483,6 +500,7 @@ function absencesView() {
 
 function paint() {
   indexFiled();
+  shareWithVanessa();
   $('#tr-body').innerHTML =
     local.tab === 'makeups'  ? makeupsView()
     : local.tab === 'absences' ? absencesView()
@@ -496,8 +514,12 @@ export default {
   crumb: 'Attendance, makeups and who has said they will miss one',
   icon: '🎓',
   section: 'Tools',
-  prefetch: async () => { if (!sessions) await loadAll(); if (absences === null) absences = await loadAbsences().catch(() => []); },
-  bust: () => { sessions = null; attendance = null; absences = null; },
+  prefetch: async () => {
+    if (!sessions) await loadAll();
+    if (absences === null) absences = await loadAbsences().catch(() => []);
+    indexFiled(); shareWithVanessa();
+  },
+  bust: () => { sessions = null; attendance = null; absences = null; shareData('training', null); },
 
   async mount(view) {
     /* The highlighted tab has to come from local.tab, not be hardcoded. Coming
@@ -519,7 +541,9 @@ export default {
        database first and the markers appear a moment later — better than
        holding a hundred rows behind a spreadsheet fetch. */
     if (absences === null) {
-      const arriving = loadAbsences().then(a => { absences = a; }).catch(() => { absences = []; });
+      const arriving = loadAbsences()
+        .then(a => { absences = a; indexFiled(); shareWithVanessa(); })
+        .catch(() => { absences = []; });
       if (local.tab === 'absences') await arriving;     // that tab IS the form
       else arriving.then(() => { if ($('#tr-body')) paint(); });
     }
@@ -547,6 +571,16 @@ export default {
     /* Buttons fire click, not change. These lived in the change handler and so
        did nothing at all — the confirm never appeared and the row stayed put. */
     body.addEventListener('click', async e => {
+      /* Only a real person may set off a bulk write.
+      
+         These two buttons change dozens of rows at once. During testing 62
+         rows were rewritten by a synthetic event and it took a comparison
+         against the original spreadsheet to notice — nothing on screen looked
+         wrong. `isTrusted` is false for any event a script dispatches, so a
+         stray click from code now does nothing at all, while a finger or a
+         keyboard works exactly as before. */
+      if (!e.isTrusted && (e.target.id === 'tr-apply' || e.target.closest?.('button[data-clear]'))) return;
+
       if (e.target.id === 'tr-apply') {
         const byId = new Map(sessions.map(x => [x.id, x]));
         const todo = attendance

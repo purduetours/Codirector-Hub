@@ -18,7 +18,7 @@ import { TOPICS } from './vanessa-knowledge.js';
 import { smallTalk, smallTalkStrong, peel } from './vanessa-chat.js';
 import { HANDBOOK } from './vanessa-handbook.js';
 import { state, myName, isAdmin, inTraining, inRecruitment } from './state.js';
-import { esc } from './ui.js';
+import { esc, todayISO } from './ui.js';
 import { taskSummary } from './vanessa-tasks.js';
 import { matchEvalTours } from './vanessa-tour-match.js';
 import { dateRange, dayISO, DAY_NAMES } from './vanessa-dates.js';
@@ -147,10 +147,87 @@ function evalAnswers(q) {
   return null;
 }
 
+/* ------------------------------------------------- training answers -------
+   Attendance, makeups and who has said in advance they will be missing.
+
+   Worth its own section rather than being folded into the handbook: "who
+   missed training" used to return the written absence POLICY, which is a real
+   paragraph and completely useless when what you wanted was five names.
+-------------------------------------------------------------------------- */
+function trainingAnswers(q) {
+  const t = shared.training;
+  if (!t || !inTraining()) return null;
+  const { sessions = [], attendance = [], absences = [] } = t;
+  if (!sessions.length) return null;
+
+  const byId = new Map(sessions.map(s => [s.id, s]));
+  const label = id => byId.get(id)?.label || '';
+  const past = s => !s.held_on || s.held_on <= todayISO();
+  const owed = attendance.filter(a => /absent/i.test(a.actual || ''));
+
+  /* --- who owes a makeup ------------------------------------------------ */
+  if (has(q, 'makeup', 'make up', 'made up', 'owes', 'owe', 'outstanding', 'still absent',
+             'not done their', 'catch up', 'behind on training')) {
+    if (!owed.length) return 'Nobody owes a makeup — everyone marked absent has completed one.';
+    const people = [...new Set(owed.map(a => a.person_name))];
+    remember(people);
+    return `${people.length} ${people.length === 1 ? 'person owes' : 'people owe'} a makeup:\n` +
+      owed.slice(0, 12).map(a => `- ${a.person_name} — ${label(a.session_id)}`).join('\n') +
+      (owed.length > 12 ? `\n…and ${owed.length - 12} more.` : '');
+  }
+
+  /* --- who has said they will be away ----------------------------------- */
+  if (has(q, 'filed', 'absence form', 'said they', 'told us', 'will miss', 'going to miss',
+             'will be gone', 'wont be there', 'will not be there', 'heads up')) {
+    if (!absences.length) return 'Nobody has filed an absence.';
+    const upcoming = sessions.filter(s => !past(s));
+    const next = upcoming[0];
+    if (next && has(q, 'next', 'upcoming', 'this week')) {
+      const who = absences.filter(a => a.sessions.some(x => sameSession(x, next.label)));
+      remember(who.map(a => a.name));
+      return who.length
+        ? `${who.length} filed an absence for ${next.label}:\n` +
+          who.slice(0, 12).map(a => `- ${a.name}`).join('\n')
+        : `Nobody has filed an absence for ${next.label}.`;
+    }
+    remember(absences.map(a => a.name));
+    return `${absences.length} absence${absences.length === 1 ? '' : 's'} filed. The most recent:\n` +
+      absences.slice(0, 8).map(a => `- ${a.name} — ${a.sessions.join(', ') || 'no session given'}`).join('\n') +
+      '\n\nThe Training tab has the reasons.';
+  }
+
+  /* --- how a particular session went, or the term overall --------------- */
+  if (has(q, 'training', 'attendance', 'attended', 'showed up', 'turned up', 'came to')) {
+    const named = sessions.find(s => String(q).toLowerCase().includes(s.label.toLowerCase()));
+    const target = named || [...sessions].reverse().find(past);
+    if (!target) return 'No training session has happened yet this term.';
+
+    const rows = attendance.filter(a => a.session_id === target.id);
+    const came = rows.filter(a => /^attended/i.test(a.actual || '')).length;
+    const madeUp = rows.filter(a => /^makeup/i.test(a.actual || '')).length;
+    const missing = rows.filter(a => /absent/i.test(a.actual || ''));
+    remember(missing.map(a => a.person_name));
+
+    return `${target.label}: ${came} of ${rows.length} attended` +
+      (madeUp ? `, ${madeUp} completed a makeup` : '') +
+      (missing.length
+        ? `, ${missing.length} still owe one:\n` + missing.slice(0, 10).map(a => `- ${a.person_name}`).join('\n')
+        : '. Nobody is outstanding.') +
+      (named ? '' : `\n\nThat is the most recent session; name another and I will look it up.`);
+  }
+  return null;
+}
+
+/** "November 2rd" and "November 2nd" are the same evening. */
+const sameSession = (a, b) => {
+  const k = x => String(x || '').toLowerCase().replace(/(\d+)\s*(st|nd|rd|th)\b/g, '$1').replace(/[^a-z0-9]/g, '');
+  return k(a) === k(b);
+};
+
 /* ------------------------------------------------- interview answers ------ */
 
 let interviewData = null;
-const shared = { tours: null, desks: null };
+const shared = { tours: null, desks: null, training: null };
 export function shareInterviews(d) { interviewData = d; }
 export function shareOther(kind, rows) { shared[kind] = rows; }
 
@@ -402,7 +479,9 @@ const DESTINATIONS = [
   { to: 'schedule',      k: ['schedule', 'tours', 'tour schedule'] },
   { to: 'desks',         k: ['desk', 'desks', 'coverage'] },
   { to: 'directory',     k: ['directory', 'guide list', 'guides'] },
-  { to: 'announcements', k: ['announcement', 'announcements', 'notices'] }
+  { to: 'announcements', k: ['announcement', 'announcements', 'notices'] },
+  { to: 'training',      k: ['training', 'makeup', 'makeups', 'attendance', 'absence form'] },
+  { to: 'people',        k: ['people', 'members', 'accounts', 'who can sign in'] }
 ];
 
 function navigation(q) {
@@ -410,8 +489,13 @@ function navigation(q) {
   if (!/^(?:please\s+)?(?:open|go to|take me to|jump to|navigate to)\b/i.test(q)) return null;
   for (const d of DESTINATIONS) {
     if (d.k.some(k => q.toLowerCase().includes(k))) {
-      if ((['evals','desks','directory'].includes(d.to) && !inTraining()) || (d.to === 'interviews' && !inRecruitment())) return { say: 'Your current role does not include that tool.' };
-      return { go: d.to, say: `Opening ${d.to === 'evals' ? 'Eval Tracker' : d.to}.` };
+      const barred =
+        (['evals', 'desks', 'directory', 'training'].includes(d.to) && !inTraining()) ||
+        (d.to === 'interviews' && !inRecruitment()) ||
+        (d.to === 'people' && !isAdmin());
+      if (barred) return { say: 'Your current role does not include that tool.' };
+      const NICE = { evals: 'Eval Tracker', training: 'Training', people: 'People', desks: 'Desk Coverage' };
+      return { go: d.to, say: `Opening ${NICE[d.to] || d.to}.` };
     }
   }
   return null;
@@ -537,7 +621,7 @@ function expand(words) {
 /* Words that belong to the hub, not to the handbook.
  The handbook is a whole printed booklet about Purdue, so it can find a plausible-sounding sentence for almost anything. Asked "what's the average score" it answered "the average starting salary for graduates is $79,364" -- a real sentence, confidently delivered, and nothing to do with the question. That is the worst thing she does, because it is indistinguishable from a real answer.
  So the handbook is barred outright from questions that use hub vocabulary. It knows about being a tour guide; it knows nothing about who is claimed, who is ungraded or what anybody scored, and it should not be allowed to guess. Those questions go unanswered instead, which is honest and also lets them reach the model tier. */
-const HUB_WORDS = /\b(eval|evals|evaluation|evaluations|evaluator|claim|claimed|unclaimed|candidate|candidates|interview|interviews|interviewer|grade|graded|ungraded|grading|score|scores|scored|scoring|rating|ratings|average|decision|decisions|undecided|roster|priority|priorities|submitted|submit|reviewed|rollover|checked in|checkin|desk|desks|uncovered|slot|slots|assignment|assignments|committee|codirector|hub|tab|dashboard)\b/i;
+const HUB_WORDS = /\b(eval|evals|evaluation|evaluations|evaluator|claim|claimed|unclaimed|candidate|candidates|interview|interviews|interviewer|grade|graded|ungraded|grading|score|scores|scored|scoring|rating|ratings|average|decision|decisions|undecided|roster|priority|priorities|submitted|submit|reviewed|rollover|checked in|checkin|desk|desks|uncovered|slot|slots|assignment|assignments|committee|codirector|training|trainings|makeup|makeups|attendance|absence|absences|hub|tab|dashboard)\b/i;
 
 /**
  * The handbook section that best fits the question, with its score.
@@ -825,7 +909,12 @@ export function ask(question) {
      would have gone quietly wrong the first time anybody inserted a topic --
      a nasty thing to leave for whoever inherits this. The topics now say so
      themselves. */
-  const handbookTopic = !!earlyTopic?.book;
+  /* A written handbook answer explains a rule. It must not answer a question
+     about people: "what are the rules about absences" is the policy, "who
+     filed an absence" is five names, and both contain the word absence. Asking
+     who or how many is asking about the data, so the handbook stands aside. */
+  const aboutPeople = /^\s*(who|how many|which (guides?|people|candidates?)|list|show me who|anyone|anybody)\b/i.test(q);
+  const handbookTopic = !!earlyTopic?.book && !aboutPeople;
   if (handbookTopic) return { text: earlyTopic.a };
   if (/\bwho\b.*\b(?:still|gotta)\b.*\b(?:look|evaluate|eval)\b/i.test(q)) {
     if (inTraining() && inRecruitment() && !/\bevals?\b/i.test(q)) return { text: 'Do you mean guides needing an eval, or candidates needing interview scores?', stuck: false };
@@ -869,7 +958,8 @@ export function ask(question) {
     if (candidateHits.length) return { text: interviewAnswers(q) };
     if (/^tell me about\s+/i.test(q) && !earlyTopic) return { text: 'I could not identify that person in your loaded hub data. Try their full name.' };
   }
-  const answer = deskAnswers(q)
+  const answer = trainingAnswers(q)
+    || deskAnswers(q)
     || scheduleAnswers(q)
     || (namesOne ? guideAnswers(q) : null)
     || (interviewy ? (interviewAnswers(q) || evalAnswers(q))
@@ -997,6 +1087,7 @@ function greetText() {
 function capabilityText() {
   const can = [];
   if (inTraining())     can.push('• Evals — who still needs one, what you have claimed, how far along we are, who has no tour scheduled');
+  if (inTraining())     can.push('• Training — who owes a makeup, who filed an absence, how a session went');
   if (inRecruitment())  can.push('• Interviews — who is ungraded, who is worth discussing, the top candidates, how many are undecided');
   can.push('• The schedule — who is leading tours today, tomorrow, or this week');
   if (inTraining()) can.push('• Desks — weekly coverage and uncovered slots');
