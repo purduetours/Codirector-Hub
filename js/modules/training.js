@@ -53,6 +53,8 @@ injectStyle('tr-css', `
 .tr-sel.info { background:var(--info-bg); color:var(--info); border-color:transparent; }
 .tr-sel.mute { background:var(--mute-bg); color:var(--mute); border-color:transparent; }
 .tr-sub { font-size:.7rem; color:var(--text-faint); font-weight:400; }
+.tr-filed { color:var(--warn); cursor:help; border-bottom:1px dotted currentColor; }
+.tr-guess { color:var(--warn); font-style:italic; cursor:help; }
 .tr-abs { border:1px solid var(--line); border-radius:var(--radius); background:var(--bg-elev);
   padding:12px 14px; margin-bottom:9px; }
 .tr-abs-top { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:5px; }
@@ -62,6 +64,73 @@ injectStyle('tr-css', `
 .tr-abs-for span { font-size:.7rem; padding:2px 8px; border-radius:999px; background:var(--warn-bg); color:var(--warn); }
 .tr-abs-why { font-size:.83rem; color:var(--text-soft); white-space:pre-wrap; }
 `);
+
+
+/* ------------------------------------------------ matching form to tracker
+   The absence form is typed by hand, so the names in it rarely line up with
+   the tracker. Real shapes it has to survive: a nickname and an initial where
+   the tracker has the full name, a surname typed with one letter too many, and
+   two letters transposed.
+
+   The rule is surname-first, and that is not fussiness. This roster contains
+   two people whose first names are both "Nicholas/Nick" with quite different
+   surnames, and a looser matcher happily put a form response on the wrong one.
+   Marking the wrong guide absent is worse than marking nobody.
+   So the surname has to agree before a first name is even considered, and any
+   name that could be two people is left unmatched and shown to you instead.
+-------------------------------------------------------------------------- */
+const nameParts = full => {
+  const raw = String(full || '').toLowerCase();
+  const nick = [...raw.matchAll(/\(([^)]*)\)/g)].map(m => m[1].trim()).filter(Boolean);
+  const words = raw.replace(/\([^)]*\)/g, ' ').replace(/[^a-z\s'-]/g, ' ').split(/\s+/).filter(Boolean);
+  return { firsts: [...words.slice(0, -1), ...nick], last: words[words.length - 1] || '' };
+};
+
+/** One substitution, insertion or deletion apart. */
+function within1(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, slips = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++slips > 1) return false;
+    if (a.length > b.length) i++;
+    else if (a.length < b.length) j++;
+    else { i++; j++; }
+  }
+  return slips + (a.length - i) + (b.length - j) <= 1;
+}
+
+/* Note the last clause. "Nick" is NOT a prefix of "Nicholas" — they part
+   company at the fourth letter, nich/nick — so prefix matching alone misses
+   the commonest nickname there is. A shared three-letter stem catches it, and
+   is only reached once the surname already agrees, so it cannot wander off to
+   a different person. Two people who share a surname AND a stem come back
+   ambiguous and are shown to you rather than guessed at. */
+const firstFits = (a, b) =>
+  a === b || within1(a, b) ||
+  (a.length >= 3 && b.startsWith(a)) || (b.length >= 3 && a.startsWith(b)) ||
+  (a.length >= 3 && b.length >= 3 && a.slice(0, 3) === b.slice(0, 3));
+
+/** The one tracker name this form name means, or null if it is not certain. */
+export function matchPerson(formName, trackerNames) {
+  const f = nameParts(formName);
+  if (!f.last) return null;
+
+  const hits = trackerNames.filter(t => {
+    const c = nameParts(t);
+    const surnameOk = c.last === f.last || within1(c.last, f.last) ||
+      // "Leo G" — an initial for a surname only counts when a first name is exact.
+      (f.last.length <= 2 && c.last.startsWith(f.last) && c.firsts.some(x => f.firsts.includes(x)));
+    if (!surnameOk) return false;
+    return f.firsts.some(a => c.firsts.some(b => firstFits(a, b)));
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** "November 2rd" and "November 2nd" are the same evening. */
+export const sessionKey = label =>
+  String(label || '').toLowerCase().replace(/(\d+)\s*(st|nd|rd|th)\b/g, '$1').replace(/[^a-z0-9]/g, '');
 
 let sessions = null, attendance = null, absences = null;
 const local = { tab: 'attendance', search: '', session: '' };
@@ -86,6 +155,51 @@ async function loadAll() {
     loadError = err?.message || 'Training data could not be loaded.';
   }
 }
+
+/* ---------------------------------------------------- filed absences
+   Who has told us in advance that they will not be there.
+
+   Read off the form every time this screen loads, matched to the tracker, and
+   laid over the grid. Nothing is written: a form response is what somebody
+   said they intend, an attendance record is what happened, and quietly turning
+   the first into the second would overwrite a codirector's own marking the
+   moment a student filed a late form. The grid shows both and lets you decide.
+-------------------------------------------------------------------------- */
+let filedIndex = null, filedUnmatched = [], filedUnknownSessions = [];
+
+function indexFiled() {
+  filedIndex = new Map();          // `${person}|${sessionKey}` -> reason
+  filedUnmatched = [];
+  const unknown = new Set();
+  if (!absences || !sessions) return;
+
+  const names = [...new Set(attendance.map(a => a.person_name))];
+  const known = new Map(sessions.map(x => [sessionKey(x.label), x.label]));
+
+  for (const a of absences) {
+    const person = matchPerson(a.name, names);
+    if (!person) { filedUnmatched.push(a.name); continue; }
+    for (const raw of a.sessions) {
+      const k = sessionKey(raw);
+      if (!known.has(k)) { unknown.add(raw); continue; }
+      filedIndex.set(`${person}|${k}`, a.reason || 'No reason given');
+    }
+  }
+  filedUnknownSessions = [...unknown];
+}
+
+const filedFor = (person, label) => filedIndex?.get(`${person}|${sessionKey(label)}`) || null;
+
+/**
+ * What the grid should show when nothing has been recorded yet.
+ *
+ * If somebody gave a reason they would miss a session, "blank" does not mean
+ * "we do not know" — it means absent and nobody has written it down. Shown as
+ * an inference rather than saved, so the record still says what a person
+ * actually entered and this vanishes the moment one is chosen.
+ */
+const inferredAbsent = row =>
+  !row.actual && row.expectation && row.expectation !== 'Attendance Expected';
 
 /** person -> { name, bySession: Map(sessionId -> row) } */
 function people() {
@@ -115,8 +229,13 @@ function attendanceView() {
 
   const totals = shown.map(s => {
     const forS = attendance.filter(a => a.session_id === s.id);
-    return { s, attended: forS.filter(a => /^attended/i.test(a.actual || '')).length,
-             owed: forS.filter(a => /absent/i.test(a.actual || '')).length, all: forS.length };
+    // "owed" counts what is recorded absent plus what is assumed absent, or
+    // the number on screen would disagree with the cells underneath it.
+    return { s,
+      attended: forS.filter(a => /^attended/i.test(a.actual || '')).length,
+      owed: forS.filter(a => /absent/i.test(a.actual || '') || inferredAbsent(a)).length,
+      filed: forS.filter(a => filedFor(a.person_name, s.label)).length,
+      all: forS.length };
   });
 
   return `
@@ -130,7 +249,7 @@ function attendanceView() {
 
     <section class="stats" style="margin-bottom:16px">
       ${totals.map(t => `<div class="stat"><span class="stat-num">${t.attended}</span>
-        <span class="stat-lbl">${esc(t.s.label)}${t.owed ? ` · ${t.owed} owed` : ''}</span></div>`).join('')}
+        <span class="stat-lbl">${esc(t.s.label)}${t.owed ? ` · ${t.owed} owed` : ''}${t.filed ? ` · ${t.filed} filed` : ''}</span></div>`).join('')}
     </section>
 
     <div class="tr-wrap"><table class="tr-tbl">
@@ -143,8 +262,15 @@ function attendanceView() {
           ${shown.map(s => {
             const r = p.rows.get(s.id);
             if (!r) return '<td class="tr-sub">—</td>';
-            return `<td>${admin ? cellEditor(r) : `<span class="tr-pill ${TONE(r.actual)}">${esc(r.actual || '—')}</span>`}
-              <div class="tr-sub">${esc(r.expectation || '')}</div></td>`;
+            const filed = filedFor(p.name, s.label);
+            const guess = inferredAbsent(r);
+            return `<td>
+              ${admin ? cellEditor(r)
+                      : `<span class="tr-pill ${guess ? 'warn' : TONE(r.actual)}">${esc(r.actual || (guess ? 'Absent (assumed)' : '—'))}</span>`}
+              <div class="tr-sub">
+                ${guess && admin ? '<span class="tr-guess" title="They gave a reason and nothing has been recorded, so they are assumed absent until you say otherwise">assumed absent</span> ' : ''}
+                ${filed ? `<span class="tr-filed" title="${esc(filed)}">✉ filed an absence</span>` : esc(r.expectation || '')}
+              </div></td>`;
           }).join('')}
         </tr>`).join('') : `<tr><td colspan="${shown.length + 1}"><div class="empty"><p>Nobody matches that.</p></div></td></tr>`}
       </tbody>
@@ -177,7 +303,21 @@ function absencesView() {
   const shown = absences.filter(a => !q ||
     a.name.toLowerCase().includes(q) || a.sessions.join(' ').toLowerCase().includes(q));
 
+  /* Anything the matcher could not place is said out loud. A form response
+     that quietly matched nobody is the one failure mode that matters here —
+     somebody tells you they will be away and the hub silently loses it. */
+  indexFiled();
+  const problems = [];
+  if (filedUnmatched.length) problems.push(
+    `<strong>${filedUnmatched.length} name${filedUnmatched.length === 1 ? '' : 's'} on the form ` +
+    `${filedUnmatched.length === 1 ? 'does' : 'do'} not match anybody on the tracker:</strong> ` +
+    esc(filedUnmatched.join(', ')) + '. Their absence is not shown on the grid.');
+  if (filedUnknownSessions.length) problems.push(
+    `<strong>The form offers ${filedUnknownSessions.length === 1 ? 'a session' : 'sessions'} the tracker does not have:</strong> ` +
+    esc(filedUnknownSessions.join(', ')) + '. Worth making the two agree.');
+
   return `
+    ${problems.length ? `<div class="callout" style="margin-bottom:14px">${problems.join('<br><br>')}</div>` : ''}
     <div class="filters" style="margin-bottom:14px">
       <label class="search">${SEARCH_ICON}<input type="search" id="tr-search" placeholder="Find a name or a date…" value="${esc(local.search)}" autocomplete="off"></label>
       <span class="muted" style="align-self:center">${shown.length} of ${absences.length}</span>
@@ -195,6 +335,7 @@ function absencesView() {
 }
 
 function paint() {
+  indexFiled();
   $('#tr-body').innerHTML = local.tab === 'attendance' ? attendanceView() : absencesView();
 }
 
@@ -205,7 +346,7 @@ export default {
   crumb: 'Attendance, makeups and who has said they will miss one',
   icon: '🎓',
   section: 'Tools',
-  prefetch: async () => { if (!sessions) await loadAll(); },
+  prefetch: async () => { if (!sessions) await loadAll(); if (absences === null) absences = await loadAbsences().catch(() => []); },
   bust: () => { sessions = null; attendance = null; absences = null; },
 
   async mount(view) {
@@ -222,8 +363,16 @@ export default {
       <div id="tr-body"><div class="loading"><div class="spinner"></div><p>Loading training…</p></div></div>`;
 
     if (!sessions) await loadAll();
-    // Returning straight onto the absence tab must fetch it, not sit on a spinner.
-    if (local.tab === 'absences' && absences === null) absences = await loadAbsences().catch(() => []);
+
+    /* The grid needs the form too, now that it marks who has filed. It is a
+       separate trip to Google though, so the table is painted from the
+       database first and the markers appear a moment later — better than
+       holding a hundred rows behind a spreadsheet fetch. */
+    if (absences === null) {
+      const arriving = loadAbsences().then(a => { absences = a; }).catch(() => { absences = []; });
+      if (local.tab === 'absences') await arriving;     // that tab IS the form
+      else arriving.then(() => { if ($('#tr-body')) paint(); });
+    }
     paint();
 
     $('#tr-tabs').addEventListener('click', async e => {
