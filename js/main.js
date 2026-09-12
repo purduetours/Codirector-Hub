@@ -61,6 +61,83 @@ async function start() {
   prewarm();
 }
 
+/* --------------------------------------------------------- version stamp
+   "Did my upload actually go live?"
+
+   GitHub Pages tells browsers to hold these files for ten minutes without
+   checking, so right after an upload the answer is often no, and there was no
+   way to tell except by squinting at the page. This asks the server when
+   index.html was last written and prints it, which needs no version number to
+   remember to bump — every upload changes it by itself.
+
+   The request deliberately bypasses the cache, or it would cheerfully report
+   the age of the copy already in the browser, which is precisely the thing in
+   doubt. If the file on the server is newer than the one this page was built
+   from, it says so: your upload has landed and a reload will pick it up.
+-------------------------------------------------------------------------- */
+async function paintVersion() {
+  const el = $('#rail-ver');
+  if (!el) return;
+  try {
+    const res = await fetch(`${location.pathname}?v=${Date.now()}`, { method: 'HEAD', cache: 'no-store' });
+    const when = res.headers.get('last-modified');
+    if (!when) { el.textContent = ''; return; }
+
+    const built = new Date(when);
+    const stamp = built.toLocaleString(undefined,
+      { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+
+    // Newer on the server than what this tab loaded? Then this tab is behind.
+    const loaded = window.__hubLoadedAt || 0;
+    if (loaded && built.getTime() > loaded + 1000) {
+      el.textContent = `Updated ${stamp} — reload to get it`;
+      el.classList.add('stale');
+    } else {
+      el.textContent = `Updated ${stamp}`;
+      el.classList.remove('stale');
+    }
+  } catch { el.textContent = ''; }
+}
+paintVersion();
+// Cheap enough to re-check occasionally, so a tab left open all day notices.
+setInterval(paintVersion, 10 * 60 * 1000);
+
+/* ------------------------------------------------------------- dark mode
+   Follows the laptop until somebody says otherwise, then remembers.
+
+   The button says what it will DO, not what is currently on — "Dark mode" when
+   you are in daylight. A toggle labelled with its own current state is the
+   classic way to make people click it twice to find out which way round it is.
+-------------------------------------------------------------------------- */
+const THEME_KEY = 'hub2.theme';
+const systemDark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+const isDark = () => (document.documentElement.dataset.theme || (systemDark() ? 'dark' : 'light')) === 'dark';
+
+function paintTheme() {
+  const dark = isDark();
+  const btn = $('#btn-theme');
+  if (!btn) return;
+  $('#theme-ico').textContent = dark ? '☀️' : '🌙';
+  $('#theme-lbl').textContent = dark ? 'Light mode' : 'Dark mode';
+  btn.setAttribute('aria-pressed', String(dark));
+  btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+}
+
+$('#btn-theme').addEventListener('click', () => {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(THEME_KEY, next); } catch { /* private window */ }
+  paintTheme();
+});
+
+/* Somebody who has never touched the toggle should still follow their laptop
+   when it flips at sunset. */
+window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+  if (!document.documentElement.dataset.theme) paintTheme();
+});
+
+paintTheme();
+
 /* --- shell chrome ------------------------------------------------------ */
 $('#btn-refresh').addEventListener('click', async function () {
   this.classList.add('is-busy');

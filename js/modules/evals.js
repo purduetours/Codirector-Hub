@@ -210,6 +210,7 @@ function shell() {
           <textarea id="ev-improve" rows="4" placeholder="Concrete, actionable suggestions…"></textarea></label>
         <label class="field"><span>Other notes <em class="muted">(optional)</em></span>
           <textarea id="ev-notes" rows="2"></textarea></label>
+        <p class="hint" id="ev-draft-note" hidden style="color:var(--good)"></p>
         <p class="hint">Submitting writes to the Submissions tab and drops this guide to Last Priority.</p>
         <p class="form-error" id="ev-eval-error" hidden></p>
       </div>
@@ -518,6 +519,28 @@ function paint() {
  * read and comes back in well under a second, so there is no prefetching, no
  * caching and no retry policy to get wrong.
  */
+/**
+ * Claim a guide for the signed-in person.
+ *
+ * Exported so Vanessa can do it without keeping her own copy of the write. The
+ * `evaluator_id=is.null` filter is the important part and must not be
+ * duplicated loosely: it is what makes two people claiming at the same instant
+ * safe, because Postgres hands the row to exactly one of them and the other
+ * gets nothing back rather than quietly overwriting.
+ */
+export async function claimGuide(g, { date = null, time = null } = {}) {
+  const rows = await update('evals', `id=eq.${g.id}&evaluator_id=is.null`, {
+    evaluator_id: state.me.id,
+    claimed_at:   new Date().toISOString(),
+    tour_date:    date,
+    tour_time:    time
+  });
+  if (!rows || !rows.length) throw new Error(`${g.name} was just claimed by somebody else.`);
+  await loadRoster();
+  paintNav();
+  return rows[0];
+}
+
 export async function loadRoster() {
   const version = state.sessionVersion;
   const rows = await select('eval_roster',
@@ -702,6 +725,59 @@ function openClaim(g, editing, preset) {
   openModal($('#ev-modal-claim'));
 }
 
+/* ---------------------------------------------------------- form drafts
+   An eval is the longest thing anybody types into this hub — several
+   paragraphs of considered feedback about a colleague. The modal already
+   survives a failed submit, but not a closed tab, a flat battery or a stray
+   Escape, and losing it means writing the whole thing again from memory.
+
+   So it is saved to this browser as it is typed, per guide and per person, and
+   offered back the next time that eval is opened. It is deliberately local: an
+   unfinished, unsubmitted opinion about somebody is not something to be
+   pushing to a shared database on every keystroke.
+-------------------------------------------------------------------------- */
+const DRAFT_KEY = id => `hub2.evaldraft.${state.me?.id || 'anon'}.${id}`;
+const DRAFT_FIELDS = ['#ev-well', '#ev-improve', '#ev-notes'];
+
+function saveDraft() {
+  const g = local.target;
+  if (!g) return;
+  const checked = $('#ev-rating input:checked');
+  const draft = {
+    well:   $('#ev-well').value,
+    improve:$('#ev-improve').value,
+    notes:  $('#ev-notes').value,
+    rating: checked ? checked.value : null,
+    at:     Date.now()
+  };
+  // Nothing typed yet is not a draft; do not litter storage with empties.
+  const empty = !draft.well.trim() && !draft.improve.trim() && !draft.notes.trim() && !draft.rating;
+  try {
+    if (empty) localStorage.removeItem(DRAFT_KEY(g.id));
+    else localStorage.setItem(DRAFT_KEY(g.id), JSON.stringify(draft));
+  } catch { /* private window, or full — the form still works */ }
+  paintDraftNote();
+}
+
+function readDraft(id) {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY(id));
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    return (d && typeof d.well === 'string') ? d : null;
+  } catch { return null; }
+}
+
+const clearDraft = id => { try { localStorage.removeItem(DRAFT_KEY(id)); } catch {} };
+
+function paintDraftNote() {
+  const note = $('#ev-draft-note');
+  if (!note || !local.target) return;
+  const d = readDraft(local.target.id);
+  note.hidden = !d;
+  if (d) note.textContent = 'Saved on this device — you can close this and come back.';
+}
+
 function openEval(g) {
   local.target = g;
   $('#ev-eval-sub').textContent = `${g.name} · ${g.priority || ''}`;
@@ -710,6 +786,19 @@ function openEval(g) {
   ['#ev-well', '#ev-improve', '#ev-notes'].forEach(s => ($(s).value = ''));
   $$('#ev-rating input').forEach(i => (i.checked = false));
   $('#ev-eval-error').hidden = true;
+
+  // Hand back whatever was typed last time and never submitted.
+  const draft = readDraft(g.id);
+  if (draft) {
+    $('#ev-well').value    = draft.well    || '';
+    $('#ev-improve').value = draft.improve || '';
+    $('#ev-notes').value   = draft.notes   || '';
+    if (draft.rating) {
+      const hit = $$('#ev-rating input').find(i => i.value === draft.rating);
+      if (hit) hit.checked = true;
+    }
+  }
+  paintDraftNote();
   openModal($('#ev-modal-eval'));
   setTimeout(() => $('#ev-well').focus(), 60);
 }
@@ -847,6 +936,12 @@ export default {
       } finally { go.disabled = false; go.textContent = label; }
     });
 
+    /* Saved as it is typed, so closing the tab is not a disaster. Debounced —
+       this runs on every keystroke across three textareas. */
+    const stash = debounce(saveDraft, 400);
+    DRAFT_FIELDS.forEach(sel => $(sel).addEventListener('input', stash));
+    $('#ev-rating').addEventListener('change', saveDraft);
+
     $('#ev-eval-form').addEventListener('submit', async e => {
       e.preventDefault();
       const go = $('#ev-eval-submit'), err = $('#ev-eval-error');
@@ -869,6 +964,7 @@ export default {
           p_improve:   $('#ev-improve').value,
           p_notes:     $('#ev-notes').value
         });
+        clearDraft(local.target.id);      // it is on the server now
         closeModal($('#ev-modal-eval'));
         toast(r?.message || 'Eval submitted.');
         await reload();

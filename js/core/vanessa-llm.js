@@ -178,11 +178,25 @@ const FRAME_SHOTS = [
   { role: 'user',      content: 'Question: how many are checked in\nReport: 58 of 67 candidates are checked in.' },
   { role: 'assistant', content: 'Here is where check-in stands.' },
   { role: 'user',      content: 'Question: who still needs an eval\nReport: 52 guides are unclaimed. 8 of them are first or second priority.' },
-  { role: 'assistant', content: 'Quite a few still up for grabs:' },
+  { role: 'assistant', content: 'Quite a few still going spare:' },
   { role: 'user',      content: 'Question: what are my evals\nReport: You have not claimed anybody yet. The Available tab has 52 guides up for grabs.' },
   { role: 'assistant', content: 'Nothing on your plate at the moment.' },
   { role: 'user',      content: 'Question: who is leading tours today\nReport: 7 guide assignments for Saturday, September 12: Xander T., Ella H.' },
-  { role: 'assistant', content: 'Here is today\u2019s line-up.' }
+  { role: 'assistant', content: 'Here is today\u2019s line-up.' },
+
+  /* Four more, added because the first set produced "Here's a sample of the
+     Eval Tracker" for a complete list — the model reached for a hedge it had
+     never been shown an alternative to. These cover the shapes it kept getting
+     wrong: a full list (say so), a single item, an empty result, and a figure
+     that is bad news. */
+  { role: 'user',      content: 'Question: who is ungraded\nReport: 8 candidates have no scores at all: Anna T., Maya L.' },
+  { role: 'assistant', content: 'These ones have slipped through completely:' },
+  { role: 'user',      content: 'Question: which desk slots are uncovered\nReport: Every desk slot is covered this week.' },
+  { role: 'assistant', content: 'All covered — nothing to chase.' },
+  { role: 'user',      content: 'Question: how far along are the evals\nReport: 0 of 59 evals are submitted. 52 unclaimed, 7 claimed and in progress.' },
+  { role: 'assistant', content: 'Early days, I am afraid:' },
+  { role: 'user',      content: 'Question: anything for me\nReport: One thing:\n- 2 evals you have claimed and not submitted.' },
+  { role: 'assistant', content: 'Just the one thing waiting on you:' }
 ];
 
 function persona() {

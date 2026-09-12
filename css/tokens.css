@@ -74,8 +74,24 @@
   --rail: 232px;   /* sidebar width */
 }
 
+/* ---------------------------------------------------------------- dark mode
+
+   Two ways in, and they must not fight.
+
+   By default the hub follows whatever the laptop is set to. Once somebody uses
+   the toggle in the sidebar, that choice is stamped on <html> as data-theme and
+   wins from then on — including the case people forget, where the machine is
+   dark and the person has explicitly asked for light.
+
+   That is why the media query is guarded with :not([data-theme="light"]).
+   Without it, choosing light on a dark laptop would do nothing at all.
+
+   `color-scheme` is set alongside the tokens so the browser's own furniture —
+   scrollbars, date pickers, form controls — follows the same choice. Without
+   it you get a white date picker on a black page.
+-------------------------------------------------------------------------- */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     /* Purdue black, warmed very slightly so the gold reads as gold. */
     --bg:          #121110;
     --bg-elev:     #1b1a17;
@@ -105,3 +121,36 @@
     --shadow-lg: 0 24px 60px -18px rgba(0,0,0,.78);
   }
 }
+
+:root[data-theme="dark"] {
+    /* Purdue black, warmed very slightly so the gold reads as gold. */
+    --bg:          #121110;
+    --bg-elev:     #1b1a17;
+    --bg-sunken:   #23211c;
+    --line:        #2f2c25;
+    --line-strong: #443f34;
+    --text:        #f1ece1;
+    --text-soft:   #b6afa1;
+    --text-faint:  #8b8577;
+
+    --accent:       #cfb991;  /* at night, gold takes the action */
+    --accent-hover: #dcc9a8;
+    --accent-soft:  #2b2418;
+    --accent-text:  #000000;  /* black on gold — 11:1, and unmistakably Purdue */
+
+    --gold:      #cfb991;
+    --gold-deep: #cfb991;     /* the dark ground already gives it contrast */
+
+    --open:   #8fb6d4;  --open-bg:   #172430;
+    --warn:   #ddb945;  --warn-bg:   #322708;   /* Field */
+    --good:   #6cc190;  --good-bg:   #13291d;
+    --info:   #c4bfc0;  --info-bg:   #26251f;   /* Steam */
+    --mute:   #9d9795;  --mute-bg:   #221f1b;   /* Railway Gray */
+    --danger: #e98a8a;  --danger-bg: #33191a;
+
+    --shadow:    0 1px 2px rgba(0,0,0,.45), 0 8px 24px -12px rgba(0,0,0,.65);
+    --shadow-lg: 0 24px 60px -18px rgba(0,0,0,.78);
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }

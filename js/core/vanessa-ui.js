@@ -10,6 +10,7 @@ import { state as appState, inTraining, inRecruitment, myName } from './state.js
 import { $, esc, injectStyle } from './ui.js';
 import { go } from './router.js';
 import { handleEvalMessage, evalDraft, resetEvalFlow, editEvalDraft, savedEvalSummary, bufferEvalDraft } from './vanessa-eval.js';
+import { handleAction, resetActions } from './vanessa-actions.js';
 import { voiceSupported, voiceState, onVoiceChange, startVoice, stopVoice, resetVoice, setVoiceText } from './vanessa-voice.js';
 let voiceDraftRef=null;
 export { shareInterviews };
@@ -325,6 +326,16 @@ function send(question) {
     try {
       const failures = await warmUp();
       if (ticket !== epoch || user !== appState.me?.id) return;
+      /* Doing something comes before answering: "claim Noah" is a request,
+         not a question, and must not be routed to the roster matcher. */
+      const acted = await handleAction(q);
+      if (acted) {
+        note?.remove();
+        say('her', acted.text);
+        if (acted.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(acted.go); }, 500);
+        return;
+      }
+
       const reply = handleEvalMessage(q);
       paintEvalDraft();
       let r = await reply;
@@ -365,6 +376,7 @@ function send(question) {
 
 export function resetVanessa() {
   resetLlmHistory();
+  resetActions();
   resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
   $('#v-launch')?.remove(); $('#v-panel')?.remove();
 }

@@ -4,6 +4,7 @@
 ============================================================================ */
 import { select, insert, remove } from '../core/db.js';
 import { state, isAdmin } from '../core/state.js';
+import { paintNav } from '../core/router.js';
 import {
   $, esc, prettyDate, toast, showError, injectStyle,
   openModal, closeModal, wireModal
@@ -35,12 +36,41 @@ function card(a) {
   </article>`;
 }
 
+/* -------------------------------------------------------------- unread
+   An announcement nobody notices is the same as one nobody posted.
+
+   The badge used to count PINNED notices, which never changes and so stops
+   meaning anything within a day. It now counts what THIS person has not yet
+   seen: the newest announcement they have looked at is remembered on their
+   device, and anything newer than that is unread. Opening the tab marks them
+   read, which is the moment they actually appear on screen.
+
+   Kept on the device rather than in the database on purpose — a per-person
+   read receipt for every notice is a table, a policy and a write on every page
+   view, to solve a problem a timestamp in localStorage solves.
+-------------------------------------------------------------------------- */
+const SEEN_KEY = () => `hub2.ann.seen.${state.me?.id || 'anon'}`;
+
+const lastSeen = () => { try { return localStorage.getItem(SEEN_KEY()) || ''; } catch { return ''; } };
+
+/** Announcements posted since this person last opened the tab. */
+export const unreadCount = () =>
+  (items || []).filter(a => (a.at || '') > lastSeen()).length;
+
+function markAllRead() {
+  const newest = (items || []).reduce((max, a) => (a.at || '') > max ? a.at : max, '');
+  if (!newest) return;
+  try { localStorage.setItem(SEEN_KEY(), newest); } catch { /* private window */ }
+  paintNav();
+}
+
 async function prime() {
   const rows = await select('announcements',
     'select=id,title,body,pinned,created_at,author:members(full_name)&order=pinned.desc,created_at.desc');
   items = (rows || []).map(r => ({
     id: r.id, title: r.title, body: r.body, pinned: r.pinned,
     date: (r.created_at || '').slice(0, 10),
+    at:   r.created_at || '',        // full stamp: two on one day must not tie
     author: r.author?.full_name || 'Committee'
   }));
 }
@@ -64,11 +94,13 @@ export default {
   crumb: 'Notices for the committee',
   icon: '📣',
   section: 'Hub',
-  badge: () => (items || []).filter(a => a.pinned).length || null,
+  badge: () => unreadCount() || null,
   prefetch: prime,
   bust: () => { items = null; },
 
   async mount(view) {
+    // Seen means on screen, so this happens on mount rather than on load.
+    setTimeout(markAllRead, 400);
     view.innerHTML = `
       ${isAdmin() ? `<div style="margin-bottom:16px"><button class="btn btn-primary" id="ann-new">＋ New announcement</button></div>` : ''}
       <div id="ann-list"></div>
