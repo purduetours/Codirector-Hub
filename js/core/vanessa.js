@@ -426,7 +426,7 @@ function navigation(q) {
    Anything longer starts guessing at what "her" meant three questions ago.
 -------------------------------------------------------------------------- */
 
-const memory = { list: [], person: null, pending: null, recent: [] };
+const memory = { list: [], person: null, pending: null, recent: [], lastQuestion: null };
 
 export function forget() { memory.list = []; memory.person = null; memory.pending = null; memory.recent = []; }
 export function resetVanessaData() {
@@ -534,7 +534,52 @@ function expand(words) {
   return [...out];
 }
 
+/* Words that belong to the hub, not to the handbook.
+ The handbook is a whole printed booklet about Purdue, so it can find a plausible-sounding sentence for almost anything. Asked "what's the average score" it answered "the average starting salary for graduates is $79,364" -- a real sentence, confidently delivered, and nothing to do with the question. That is the worst thing she does, because it is indistinguishable from a real answer.
+ So the handbook is barred outright from questions that use hub vocabulary. It knows about being a tour guide; it knows nothing about who is claimed, who is ungraded or what anybody scored, and it should not be allowed to guess. Those questions go unanswered instead, which is honest and also lets them reach the model tier. */
+const HUB_WORDS = /\b(eval|evals|evaluation|evaluations|evaluator|claim|claimed|unclaimed|candidate|candidates|interview|interviews|interviewer|grade|graded|ungraded|grading|score|scores|scored|scoring|rating|ratings|average|decision|decisions|undecided|roster|priority|priorities|submitted|submit|reviewed|rollover|checked in|checkin|desk|desks|uncovered|slot|slots|assignment|assignments|committee|codirector|hub|tab|dashboard)\b/i;
+
+/**
+ * The handbook section that best fits the question, with its score.
+ *
+ * Split out of handbookAnswer so the model tier can share the retrieval and
+ * apply its own, looser bar. The strict quoting path needs a high bar because
+ * a bad quote reads as fact; a model that is handed a passage can weigh it and
+ * say it is not sure, so it can afford to see more.
+ */
+function bestSection(q) {
+  if (HUB_WORDS.test(q)) return null;
+  const base = [...new Set(tokens(q))];
+  if (!base.length) return null;
+  const ws = expand(base);
+
+  const scored = HANDBOOK.map(sec => {
+    const body = new Set(tokens(sec.text));
+    const title = new Set(tokens(sec.title));
+    let score = 0, matched = 0, rarest = 0;
+    for (const w of ws) {
+      const inBody = body.has(w) || [...body].some(b => near(b, w));
+      const inTitle = title.has(w) || [...title].some(t => near(t, w));
+      if (!inBody && !inTitle) continue;
+      matched++;
+      rarest = Math.max(rarest, rarity(w));
+      score += inTitle ? rarity(w) * 2 : rarity(w);
+    }
+    return { sec, score, matched, rarest, ws };
+  }).sort((a, b) => b.score - a.score);
+
+  return scored[0] || null;
+}
+
+/** What the model is allowed to read: a real match, but not a desperate one. */
+export function handbookContext(q) {
+  const best = bestSection(q);
+  if (!best || best.rarest < 1.6 || best.score < 1.6) return null;
+  return { title: best.sec.title, page: best.sec.page, text: best.sec.text };
+}
+
 function handbookAnswer(q) {
+  if (HUB_WORDS.test(q)) return null;      // not its territory — see HUB_WORDS
   const base = [...new Set(tokens(q))];
   // One word is enough if it is a rare one. "What are postcards for" reduces to
   // just "postcard" once the filler is stripped, and that is the whole question.
@@ -617,6 +662,95 @@ function offerFor(q, text) {
   return null;
 }
 
+/* ------------------------------------------------- "what needs me?"
+   The single most common thing anyone actually types, in a dozen phrasings,
+   and until now every one of them got a shrug: "whos free", "anything for
+   me", "idk what to do", "is there anything urgent", "who is behind".
+
+   They are all the same question, and the hub already computes the answer for
+   the Today screen. This routes the plain-English versions to it rather than
+   making people learn the phrase the matcher wants.
+-------------------------------------------------------------------------- */
+const NEEDS_ME = new RegExp([
+  'anything (for me|i (need|should)|urgent|pressing|waiting|outstanding|left)',
+  'what (do i|should i|can i|needs|is) (need|do|doing|be doing|left|next|urgent|waiting)',
+  'what needs (me|doing|my attention)',
+  '(whats|what is) (urgent|pressing|next|left|outstanding|on my plate)',
+  'wh(o|at)s free',
+  'i(dk| dont know| do not know) what to do',
+  'where (do i|should i) start',
+  'catch me up', 'whats going on', 'sum(mary|marise|marize)',
+  'am i behind', 'who is behind', 'whos behind', 'anyone behind',
+  'nothing to do', 'give me something'
+].join('|'), 'i');
+
+/** Everything waiting on this person, most pressing first. */
+function needsMe() {
+  const bits = [];
+  const g = state.guides || [];
+  const me = state.me?.id;
+
+  if (inTraining() && g.length) {
+    const mine = g.filter(x => x.evaluatorId === me && x.status === 'claimed');
+    const undated = mine.filter(x => !x.date);
+    if (undated.length) bits.push(`${undated.length} of your claimed eval${undated.length === 1 ? ' has' : 's have'} no tour date yet: ` +
+      undated.slice(0, 5).map(x => x.name).join(', ') + (undated.length > 5 ? '…' : ''));
+    const dated = mine.filter(x => x.date);
+    if (dated.length) bits.push(`${dated.length} eval${dated.length === 1 ? '' : 's'} you have claimed and not submitted: ` +
+      dated.slice(0, 5).map(x => `${x.name} (${x.date})`).join(', ') + (dated.length > 5 ? '…' : ''));
+    if (!mine.length) {
+      const urgent = g.filter(x => x.status === 'open' && x.rank <= 2);
+      if (urgent.length) bits.push(`You have not claimed anybody. ${urgent.length} guides are unclaimed at first or second priority.`);
+    }
+    if (isAdmin()) {
+      const waiting = g.filter(x => x.status === 'submitted');
+      if (waiting.length) bits.push(`${waiting.length} submitted eval${waiting.length === 1 ? '' : 's'} waiting for a codirector to review.`);
+    }
+  }
+
+  if (inRecruitment() && interviewData?.candidates?.length) {
+    const c = interviewData.candidates;
+    const unscored = c.filter(x => x.checkin === 'Yes' && !x.scores?.[myName()]);
+    if (unscored.length) bits.push(`${unscored.length} checked-in candidate${unscored.length === 1 ? ' is' : 's are'} waiting on a score from you.`);
+    const none = c.filter(x => x.raters === 0);
+    if (none.length) bits.push(`${none.length} candidates have no scores from anybody yet.`);
+  }
+
+  if (!bits.length) {
+    return 'Nothing is waiting on you right now. ' +
+      vary('Enjoy it.', 'Genuinely — you are clear.', 'Make the most of it.');
+  }
+  return (bits.length === 1 ? 'One thing:' : `${bits.length} things:`) + '\n' +
+    bits.map(b => `- ${b}`).join('\n');
+}
+
+/* Some questions genuinely cannot be answered as asked -- "how many people",
+   "show me everything". Guessing produces confident nonsense and shrugging
+   wastes the person's turn. Asking which they meant is the honest reply, and
+   it is what a colleague would do. */
+function clarify(q) {
+  const t = String(q).toLowerCase().trim();
+
+  if (/^(how many|how much)( people| are there| do we have)?\??$/.test(t) ||
+      /^how many (people|are there|of them|total)\??$/.test(t)) {
+    const opts = [];
+    if (inTraining())    opts.push('guides needing an eval');
+    if (inRecruitment()) opts.push('interview candidates');
+    opts.push('people on the hub');
+    return `How many of what — ${opts.join(', ')}? Say the word and I will count them.`;
+  }
+
+  if (/^(show me |give me |tell me )?(everything|all of it|all|the lot)\??$/.test(t)) {
+    const opts = [];
+    if (inTraining())    opts.push('"how far along are the evals"');
+    if (inRecruitment()) opts.push('"who is worth discussing"');
+    opts.push('"who is leading tours today"', '"anything for me"');
+    return `More than fits in one answer. Pick a thread and I will pull it:\n` +
+           opts.map(o => `- ${o}`).join('\n');
+  }
+  return null;
+}
+
 export function ask(question) {
   let q = String(question || '').trim();
   if (!state.me) return { text: 'Sign in to use Vanessa.' };
@@ -657,18 +791,52 @@ export function ask(question) {
     q = peeled.rest;              // "hey bro who needs an eval" -> "who needs an eval"
   }
 
+  /* --- "what about tomorrow?" --------------------------------------------
+     A bare time or place with no verb is a follow-up to whatever was just
+     asked. On its own "what about tomorrow" means nothing; after "who is
+     leading tours today" it plainly means the same question, moved a day.
+     So the previous question is reused with the new time swapped in. */
+  const followUp = /^\s*(and\s+|so\s+|ok\s+|but\s+)?(what about|how about|and)\s+(.+?)\s*\??$/i.exec(q);
+  if (followUp && memory.lastQuestion) {
+    const bit = followUp[3].trim();
+    const WHEN = /\b(today|tomorrow|yesterday|tonight|this week|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b/i;
+    const when = WHEN.exec(bit);
+    if (when) {
+      // Swap the time word in the old question, or append it if it had none.
+      q = WHEN.test(memory.lastQuestion)
+        ? memory.lastQuestion.replace(WHEN, when[0])
+        : `${memory.lastQuestion} ${when[0]}`;
+    } else {
+      q = `${memory.lastQuestion} ${bit}`;
+    }
+  }
+
   /* --- "the second one", "what about her" -------------------------------- */
   const ref = resolveReference(q);
   q = ref.q;
 
+  // Worth building on later, once it is clear this is a real question.
+  if (q.split(/\s+/).length >= 2) memory.lastQuestion = q;
+
   // Specific handbook/how-to topics win before operational data matching.
   const earlyTopic = topicMatch(q).topic;
-  const handbookTopic = earlyTopic && TOPICS.indexOf(earlyTopic) >= 15 && TOPICS.indexOf(earlyTopic) < TOPICS.length - 1;
+  /* Was `TOPICS.indexOf(earlyTopic) >= 15`, which decided what counted as a
+     handbook answer by its POSITION in the array. It happened to be right, and
+     would have gone quietly wrong the first time anybody inserted a topic --
+     a nasty thing to leave for whoever inherits this. The topics now say so
+     themselves. */
+  const handbookTopic = !!earlyTopic?.book;
   if (handbookTopic) return { text: earlyTopic.a };
   if (/\bwho\b.*\b(?:still|gotta)\b.*\b(?:look|evaluate|eval)\b/i.test(q)) {
     if (inTraining() && inRecruitment() && !/\bevals?\b/i.test(q)) return { text: 'Do you mean guides needing an eval, or candidates needing interview scores?', stuck: false };
     q = inTraining() ? 'who still needs an eval' : 'who is ungraded';
   }
+  /* "anything for me", "whos free", "idk what to do" -- all one question. */
+  if (NEEDS_ME.test(q)) return { text: needsMe() };
+
+  const vague = clarify(q);
+  if (vague) return { text: vague };
+
   const tasks=taskSummary(q);
   if(tasks)return tasks;
   const tourMatch=matchEvalTours(q);
@@ -852,3 +1020,31 @@ function socialReply(item) {
    waiting, rather than announcing herself and leaving them to think of
    something. */
 export const greeting = () => greetText();
+
+/**
+ * Everything the in-browser model should see for one question.
+ *
+ * `facts` is what the deterministic code worked out — the real numbers, which
+ * the model is told to use verbatim and never recompute. `book` is the
+ * handbook passage, if the question is a handbook question. `notes` are the
+ * written answers about how the hub itself works.
+ */
+export function llmContext(question) {
+  const q = String(question || '').trim();
+  const deterministic = ask(q);
+
+  const topic = topicMatch(q).topic;
+  return {
+    facts: deterministic.stuck ? null : deterministic.text,
+    book:  handbookContext(q),
+    notes: topic ? topic.a : null,
+    go:    deterministic.go || null,
+    fallback: deterministic.text
+  };
+}
+
+/** The written note about how the hub works that best fits, if any. */
+export function topicNote(question) {
+  const t = topicMatch(String(question || '')).topic;
+  return t ? t.a : null;
+}
