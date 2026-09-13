@@ -22,6 +22,23 @@ export const state = {
    "sam" became two different evaluators. The name now comes from the account
    and cannot drift. */
 export const myName    = () => state.me?.full_name || '';
+
+/* Which term the hub is showing.
+   
+   This used to be the literal string 'fall-2026' written into four different
+   files. Come spring somebody would have had to find all four and edit code —
+   in a project whose whole point is that running it does not require editing
+   code. The database already knows, in terms.is_current, so ask it. */
+export const termId    = () => state.term?.id || 'fall-2026';
+export const termLabel = () => state.term?.label || window.CONFIG?.TERM_LABEL || '';
+
+/** The term after this one: fall-2026 -> spring-2027, spring-2027 -> fall-2027. */
+export function nextTermId() {
+  const m = /^(fall|spring|summer)-(\d{4})$/.exec(termId());
+  if (!m) return 'next-term';
+  const [, season, year] = m;
+  return season === 'fall' ? `spring-${Number(year) + 1}` : `fall-${year}`;
+}
 export const isAdmin   = () => !!state.role?.is_admin;
 export const inTraining    = () => !!state.role?.in_training;
 export const inRecruitment = () => !!state.role?.in_recruitment;

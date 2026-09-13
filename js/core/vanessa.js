@@ -178,7 +178,8 @@ function trainingAnswers(q) {
 
   /* --- who has said they will be away ----------------------------------- */
   if (has(q, 'filed', 'absence form', 'said they', 'told us', 'will miss', 'going to miss',
-             'will be gone', 'wont be there', 'will not be there', 'heads up')) {
+             'will be gone', 'wont be there', 'will not be there', 'heads up',
+             'missing the next', 'missing next', 'out next', 'away next', 'skipping')) {
     if (!absences.length) return 'Nobody has filed an absence.';
     const upcoming = sessions.filter(s => !past(s));
     const next = upcoming[0];
@@ -197,7 +198,8 @@ function trainingAnswers(q) {
   }
 
   /* --- how a particular session went, or the term overall --------------- */
-  if (has(q, 'training', 'attendance', 'attended', 'showed up', 'turned up', 'came to')) {
+  if (has(q, 'training', 'attendance', 'attended', 'showed up', 'turned up', 'came to',
+             'absent on', 'was absent', 'were absent', 'missed', 'no show', 'did not come')) {
     const named = sessions.find(s => String(q).toLowerCase().includes(s.label.toLowerCase()));
     const target = named || [...sessions].reverse().find(past);
     if (!target) return 'No training session has happened yet this term.';

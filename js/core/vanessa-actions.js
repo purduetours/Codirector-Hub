@@ -16,11 +16,16 @@
 ============================================================================ */
 import { state, myName, inTraining } from './state.js';
 import { claimGuide } from '../modules/evals.js';
+import { markMakeupDone } from '../modules/training.js';
 
 /* "claim noah", "put me down for Jane Boilermaker", "I'll take Zach" */
 const CLAIM = /\b(?:claim|put me down for|sign me up for|i(?:'| wi)?ll take|give me|assign me)\b\s*(.*)$/i;
 
-let pending = null;                    // { guide } awaiting a yes
+/* "mark Abigail's makeup done", "Ella did her makeup", "clear Noah's makeup" */
+const MAKEUP = /\b(?:mark|clear|log|record)?\s*(.+?)(?:'s|s')?\s*(?:makeup|make ?up)\s*(?:is\s*)?(?:as\s*)?(?:done|complete[d]?|finished)\b/i;
+const MAKEUP_ALT = /\b(?:did|completed|finished)\s+(?:their|his|her)\s+(?:makeup|make ?up)\b/i;
+
+let pending = null;                    // { kind, guide|person } awaiting a yes
 export const resetActions = () => { pending = null; };
 
 const YES = /^\s*(y|ye|yes|yep|yeah|yup|sure|ok|okay|please|do it|go on|go ahead|sounds good|confirm)\b/i;
@@ -57,18 +62,42 @@ export async function handleAction(question) {
 
   /* --- answering a confirmation -------------------------------------- */
   if (pending) {
-    const { guide } = pending;
+    const job = pending;
     if (YES.test(q)) {
       pending = null;
       try {
-        await claimGuide(guide);
-        return { text: `Done — ${guide.name} is yours. Add the tour date on Eval Tracker when you know it.`, go: 'evals' };
+        if (job.kind === 'makeup') {
+          const n = await markMakeupDone(job.person);
+          return { text: `Done — ${job.person} is marked as having completed ${n} makeup${n === 1 ? '' : 's'}.`, go: 'training' };
+        }
+        await claimGuide(job.guide);
+        return { text: `Done — ${job.guide.name} is yours. Add the tour date on Eval Tracker when you know it.`, go: 'evals' };
       } catch (err) {
         return { text: err.message };
       }
     }
     if (NO.test(q)) { pending = null; return { text: 'Left it alone.' }; }
     pending = null;               // anything else: drop it and answer normally
+  }
+
+  /* --- marking a makeup as done ----------------------------------------- */
+  const mk = MAKEUP.exec(q) || (MAKEUP_ALT.test(q) ? [null, q.replace(MAKEUP_ALT, '')] : null);
+  if (mk) {
+    if (!inTraining()) return { text: 'Training records are for the training committee.' };
+    const who = String(mk[1] || '').replace(/\b(mark|clear|log|record|the|as|for)\b/gi, '').trim();
+    if (!who) return { text: 'Whose makeup? Give me a name.' };
+
+    const { owedBy } = await import('../modules/training.js');
+    const list = owedBy();
+    if (!list) return { text: 'The training records have not loaded yet — try me again in a moment.' };
+
+    const hits = matchOwed(who, [...list.keys()]);
+    if (!hits.length)    return { text: `Nobody called "${who}" owes a makeup.` };
+    if (hits.length > 1) return { text: `Which one — ${hits.slice(0, 4).join(', ')}?` };
+
+    const n = list.get(hits[0]);
+    pending = { kind: 'makeup', person: hits[0] };
+    return { text: `Mark ${hits[0]}'s ${n} outstanding session${n === 1 ? '' : 's'} as a completed makeup?` };
   }
 
   const m = CLAIM.exec(q);
@@ -98,4 +127,16 @@ export async function handleAction(question) {
 
   pending = { guide: g };
   return { text: `Claim ${g.name}${g.priority ? ` (${g.priority})` : ''} for you? Say yes and I will put your name on it.` };
+}
+
+/** Names on the owed list are few, so a loose contains-match is enough here. */
+function matchOwed(text, names) {
+  const q = String(text).toLowerCase().trim();
+  const exact = names.filter(n => n.toLowerCase() === q);
+  if (exact.length) return exact;
+  const words = q.split(/\s+/).filter(w => w.length > 1);
+  return names.filter(n => {
+    const low = n.toLowerCase();
+    return words.length && words.every(w => low.includes(w));
+  });
 }

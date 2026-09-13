@@ -5,7 +5,7 @@
 ============================================================================ */
 import { select, update, rpc, toGuide } from '../core/db.js';
 import { loadTours } from '../core/sheets.js';
-import { state, myName, isAdmin } from '../core/state.js';
+import { state, myName, isAdmin, termId, nextTermId } from '../core/state.js';
 import { paintNav } from '../core/router.js';
 import {
   $, $$, esc, sameName, prettyDate, prettyTime, todayISO, toast, showError,
@@ -544,7 +544,7 @@ export async function claimGuide(g, { date = null, time = null } = {}) {
 export async function loadRoster() {
   const version = state.sessionVersion;
   const rows = await select('eval_roster',
-    'select=*&term_id=eq.fall-2026&order=priority_rank.asc,last_name.asc');
+    `select=*&term_id=eq.${termId()}&order=priority_rank.asc,last_name.asc`);
   state.guides = (rows || []).map(toGuide);
 
   // Counts cover the WHOLE roster so the progress bar stays truthful even for
@@ -1001,7 +1001,7 @@ function wireRollover() {
     const err = $('#ev-roll-error');
     this.disabled = true; this.textContent = 'Checking…'; err.hidden = true;
     try {
-      const s = await rpc('run_rollover', { p_from_term: 'fall-2026', p_to_term: 'spring-2027', p_dry_run: true });
+      const s = await rpc('run_rollover', { p_from_term: termId(), p_to_term: nextTermId(), p_dry_run: true });
       const moves = Object.keys(s.moves || {}).sort();
       $('#ev-roll-preview').innerHTML = '<h4>What will happen</h4>' +
         (moves.length
@@ -1026,7 +1026,7 @@ function wireRollover() {
     const go = $('#ev-roll-go'), err = $('#ev-roll-error');
     go.disabled = true; go.textContent = 'Running…'; err.hidden = true;
     try {
-      const r = await rpc('run_rollover', { p_from_term: 'fall-2026', p_to_term: 'spring-2027', p_dry_run: false });
+      const r = await rpc('run_rollover', { p_from_term: termId(), p_to_term: nextTermId(), p_dry_run: false });
       closeModal($('#ev-modal-roll'));
       toast(r.message);
       await reload();

@@ -12,9 +12,9 @@
    Nobody edits them here, they only ever grow, and a stale copy of who will be
    missing on Monday is worse than no copy at all.
 ============================================================================ */
-import { select, update } from '../core/db.js';
+import { select, update, insert, remove } from '../core/db.js';
 import { loadAbsences, formStamp } from '../core/sheets.js';
-import { state, isAdmin } from '../core/state.js';
+import { state, isAdmin, termId } from '../core/state.js';
 import { $, $$, esc, toast, injectStyle, prettyDate, todayISO, debounce, SEARCH_ICON } from '../core/ui.js';
 import { shareData } from '../core/vanessa-ui.js';
 
@@ -39,6 +39,17 @@ injectStyle('tr-css', `
 .tr-tbl tbody th { position:sticky; left:0; background:var(--bg-elev); font-weight:600; z-index:1; }
 .tr-tbl tbody tr:hover th, .tr-tbl tbody tr:hover td { background:var(--accent-soft); }
 .tr-cell { display:flex; gap:4px; align-items:center; }
+/* On a phone the two dropdowns shared about 250px and both truncated to
+   "Make…" and "Atten…", which makes choosing a value guesswork. Stacked, each
+   one gets the full width of the cell. */
+@media (max-width:620px){
+  .tr-cell { flex-direction:column; align-items:stretch; }
+  .tr-cell .tr-sel { max-width:none; width:100%; }
+  /* And give the column enough room for the longest option, or stacking just
+     produces two truncated dropdowns instead of one. The table scrolls
+     sideways anyway, so width costs nothing here. */
+  .tr-tbl tbody td { min-width:178px; }
+}
 .tr-pill { font-size:.7rem; padding:2px 8px; border-radius:999px; }
 .tr-pill.good { background:var(--good-bg); color:var(--good); }
 .tr-pill.warn { background:var(--warn-bg); color:var(--warn); }
@@ -55,6 +66,12 @@ injectStyle('tr-css', `
 .tr-sel.mute { background:var(--mute-bg); color:var(--mute); border-color:transparent; }
 /* A suggestion from the form, not yet part of the record. */
 .tr-sel.suggested { background:var(--warn-bg); color:var(--warn); border:1px dashed var(--warn); }
+.tr-edited { position:relative; }
+.tr-edited::after { content:""; position:absolute; top:4px; right:4px; width:5px; height:5px;
+  border-radius:50%; background:var(--accent); opacity:.55; }
+.tr-del { float:right; border:0; background:none; cursor:pointer; color:var(--text-faint);
+  font-size:.7rem; padding:0 2px; line-height:1; }
+.tr-del:hover { color:var(--danger); }
 .tr-sub { font-size:.7rem; color:var(--text-faint); font-weight:400; }
 .tr-filed { color:var(--warn); cursor:help; border-bottom:1px dotted currentColor; }
 .tr-guess { color:var(--warn); font-style:italic; cursor:help; }
@@ -154,15 +171,29 @@ let loadError = null;
    in Supabase, and until they do these reads 404. A tab that throws on mount
    would take the whole screen down and give no clue why, so a missing table is
    treated as "not set up yet" and says so. */
+let editorNames = new Map();      // member id -> name, for "changed by"
+
 async function loadAll() {
   loadError = null;
   try {
     const [s, a] = await Promise.all([
-      select('training_sessions',   'select=*&term_id=eq.fall-2026&order=sort_order.asc'),
-      select('training_attendance', 'select=id,session_id,guide_id,person_name,expectation,actual')
+      select('training_sessions',   `select=*&term_id=eq.${termId()}&order=sort_order.asc`),
+      select('training_attendance', 'select=id,session_id,guide_id,person_name,expectation,actual,updated_at,updated_by')
     ]);
     sessions = s || [];
     attendance = a || [];
+    /* Who touched a cell. The trigger has been stamping updated_by since the
+       table was created and nothing ever showed it, so a surprising value had
+       no story attached — which is exactly the situation that cost an
+       afternoon of diffing against a spreadsheet. */
+    const ids = [...new Set(attendance.map(a => a.updated_by).filter(Boolean))];
+    if (ids.length) {
+      try {
+        const who = await select('members', `select=id,full_name&id=in.(${ids.join(',')})`);
+        editorNames = new Map((who || []).map(m => [m.id, m.full_name]));
+      } catch { /* names are a nicety; the grid works without them */ }
+    }
+
     indexFiled();
     shareWithVanessa();      // she must know even if this screen is never opened
   } catch (err) {
@@ -265,6 +296,104 @@ function people() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/* --------------------------------------------------------- adding a session
+   Sessions could only be created with SQL, which meant every August somebody
+   would have to open Supabase — the exact thing the People tab exists to end.
+
+   Adding one also seeds a row for everybody already on the tracker. Without
+   that the column exists but every cell reads "—", because attendance rows are
+   what the grid is built from, and there would be nothing to click.
+-------------------------------------------------------------------------- */
+async function addSession() {
+  const label = prompt('What is the session called? (for example: February 8th)');
+  if (!label?.trim()) return;
+
+  const when = prompt('What date is it? (YYYY-MM-DD, or leave blank)', '') || null;
+  if (when && !/^\d{4}-\d{2}-\d{2}$/.test(when)) return toast('That date is not YYYY-MM-DD.', 'err');
+  if (sessions.some(x => x.label.toLowerCase() === label.trim().toLowerCase()))
+    return toast('There is already a session with that name.', 'err');
+
+  try {
+    const made = await insert('training_sessions', [{
+      term_id: termId(), label: label.trim(), held_on: when,
+      sort_order: sessions.length ? Math.max(...sessions.map(s => s.sort_order)) + 1 : 0
+    }]);
+    const session = made?.[0];
+    if (!session) throw new Error('The session was not created.');
+
+    const names = [...new Set(attendance.map(a => a.person_name))];
+    if (names.length) {
+      const guideOf = new Map(attendance.map(a => [a.person_name, a.guide_id]));
+      await insert('training_attendance', names.map(n => ({
+        session_id: session.id, person_name: n, guide_id: guideOf.get(n) || null,
+        expectation: 'Attendance Expected', actual: null
+      })));
+    }
+    await loadAll();
+    indexFiled(); shareWithVanessa();
+    toast(`${session.label} added for ${names.length} guides.`);
+    paint();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+/** Removing one takes its attendance with it, so it says so first. */
+async function removeSession(id) {
+  const s = sessions.find(x => x.id === id);
+  if (!s) return;
+  const rows = attendance.filter(a => a.session_id === id).length;
+  if (!confirm(`Delete "${s.label}"?\n\nThis also deletes ${rows} attendance record${rows === 1 ? '' : 's'} for it. It cannot be undone — take a CSV first if you are unsure.`)) return;
+  try {
+    await remove('training_sessions', `id=eq.${id}`);
+    await loadAll();
+    indexFiled(); shareWithVanessa();
+    if (local.session === id) local.session = '';
+    toast(`${s.label} deleted.`);
+    paint();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+/* ------------------------------------------------------------- exporting
+   A way back out.
+
+   This matters more than it looks. During development 62 rows were rewritten
+   by mistake and the only reason it could be put right was that the original
+   spreadsheet still existed to diff against. The moment the sheet and the
+   database drift apart — which is the point of moving off the sheet — that
+   safety net is gone. A download restores it: take one before a big edit, and
+   a bad afternoon costs a paste rather than a term.
+
+   Laid out like the original sheet, one column pair per session, so it opens
+   in Google Sheets looking like the thing it replaced.
+-------------------------------------------------------------------------- */
+function exportCsv() {
+  const cell = v => {
+    const t = String(v ?? '');
+    return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+
+  const head = ['Name', ...sessions.flatMap(s => [s.label, 'Actual'])];
+  const rows = people().map(p => [
+    p.name,
+    ...sessions.flatMap(s => {
+      const r = p.rows.get(s.id);
+      return [r?.expectation || '', r?.actual || (r && inferredAbsent(r) ? 'Absent (assumed)' : '')];
+    })
+  ]);
+
+  const csv = [head, ...rows].map(r => r.map(cell).join(',')).join('\r\n');
+  // BOM, or Excel mangles any name with an accent in it.
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `training-attendance-${todayISO()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`Downloaded ${rows.length} guides.`);
+}
+
 function attendanceView() {
   const shown = local.session ? sessions.filter(s => s.id === local.session) : sessions;
   const rows = people();
@@ -300,10 +429,12 @@ function attendanceView() {
     ${pending ? `<div class="callout" style="margin-bottom:14px">
       <strong>${pending} ${pending === 1 ? 'person has' : 'people have'} filed an absence</strong> for a session still
       marked as attended. They are shown dashed and are not saved yet.
-      ${isAdmin() ? '<button class="btn btn-primary btn-sm" id="tr-apply" style="margin-left:8px">Accept them all</button>' : ''}
+      <span class="muted" style="display:block;margin-top:6px">Set each one yourself when you are ready — picking the value in the dropdown saves it.</span>
     </div>` : ''}
     <div class="filters" style="margin-bottom:14px">
       <label class="search">${SEARCH_ICON}<input type="search" id="tr-search" placeholder="Find a guide…" value="${esc(local.search)}" autocomplete="off"></label>
+      <button class="btn btn-ghost btn-sm" id="tr-export" title="Download the whole grid, laid out like the old spreadsheet">Download CSV</button>
+      ${isAdmin() ? '<button class="btn btn-ghost btn-sm" id="tr-add">＋ Session</button>' : ''}
       <select id="tr-session" class="select" aria-label="Show one session">
         <option value="">All sessions</option>
         ${sessions.map(s => `<option value="${esc(s.id)}" ${local.session === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}
@@ -317,7 +448,9 @@ function attendanceView() {
 
     <div class="tr-wrap"><table class="tr-tbl">
       <thead><tr><th>Guide</th>
-        ${shown.map(s => `<th>${esc(s.label)}<div class="tr-sub">${s.held_on ? esc(prettyDate(s.held_on)) : ''}</div></th>`).join('')}
+        ${shown.map(s => `<th>${esc(s.label)}
+          ${admin ? `<button class="tr-del" data-del="${esc(s.id)}" title="Delete this session">✕</button>` : ''}
+          <div class="tr-sub">${s.held_on ? esc(prettyDate(s.held_on)) : ''}</div></th>`).join('')}
       </tr></thead>
       <tbody>
         ${rows.length ? rows.map(p => `<tr>
@@ -328,7 +461,7 @@ function attendanceView() {
             const filed = filedFor(p.name, s.label);
             const suggest = suggestedActual(r, p.name, s);
             const guess = inferredAbsent(r);
-            return `<td>
+            return `<td class="${r.updated_by ? 'tr-edited' : ''}">
               ${admin ? cellEditor(r, suggest)
                       : `<span class="tr-pill ${guess ? 'warn' : TONE(r.actual)}">${esc(r.actual || (guess ? 'Absent (assumed)' : '—'))}</span>`}
               <div class="tr-sub">
@@ -361,8 +494,16 @@ const options = (list, current) =>
    (current && !list.includes(current)) ? `<option value="${esc(current)}" selected>${esc(current)}</option>` : ''
   ].join('');
 
+const editedNote = r => {
+  if (!r.updated_by) return '';
+  const who = editorNames.get(r.updated_by) || 'someone';
+  const when = r.updated_at ? new Date(r.updated_at).toLocaleString(undefined,
+    { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+  return `Changed by ${who}${when ? ` on ${when}` : ''}`;
+};
+
 const cellEditor = (r, suggest) => `
-  <div class="tr-cell">
+  <div class="tr-cell"${editedNote(r) ? ` title="${esc(editedNote(r))}"` : ''}>
     <select class="tr-sel ${suggest ? 'suggested' : TONE(r.actual)}" data-field="actual" data-id="${esc(r.id)}"
       data-stored="${esc(r.actual || '')}"
       aria-label="Attendance"${suggest ? ` title="They filed an absence for this session. Not saved yet — pick it to confirm."` : ''}>
@@ -573,33 +714,26 @@ export default {
     body.addEventListener('click', async e => {
       /* Only a real person may set off a bulk write.
       
-         These two buttons change dozens of rows at once. During testing 62
-         rows were rewritten by a synthetic event and it took a comparison
-         against the original spreadsheet to notice — nothing on screen looked
-         wrong. `isTrusted` is false for any event a script dispatches, so a
-         stray click from code now does nothing at all, while a finger or a
-         keyboard works exactly as before. */
-      if (!e.isTrusted && (e.target.id === 'tr-apply' || e.target.closest?.('button[data-clear]'))) return;
+         There used to be an "Accept them all" button here that wrote every
+         suggested absence in one go. It rewrote 62 rows of real attendance
+         twice during development, and neither time could the trigger be
+         reproduced — the second time was after a guard had supposedly closed
+         the hole. A bulk overwrite whose cause is not understood does not
+         belong anywhere near a term's records, so it is gone rather than
+         patched again. Suggestions are still shown; accepting one is a
+         dropdown, one cell at a time.
 
-      if (e.target.id === 'tr-apply') {
-        const byId = new Map(sessions.map(x => [x.id, x]));
-        const todo = attendance
-          .map(a => ({ a, want: suggestedActual(a, a.person_name, byId.get(a.session_id) || {}) }))
-          .filter(x => x.want);
-        if (!todo.length) return;
-        if (!confirm(`Mark ${todo.length} session${todo.length === 1 ? '' : 's'} as "Absent, Need Makeup", based on the absence form?`)) return;
-        e.target.disabled = true;
-        let done = 0;
-        try {
-          for (const { a, want } of todo) {
-            await update('training_attendance', `id=eq.${a.id}`, { actual: want });
-            a.actual = want; done++;
-          }
-          toast(`${done} updated from the absence form.`);
-        } catch (err) { toast(`${done} saved, then: ${err.message}`, 'err'); }
-        paint();
-        return;
-      }
+         What remains is per-person and named. It is still restricted to a real
+         click, because a script must never be able to set one off. */
+      if (!e.isTrusted && e.target.closest?.('button[data-clear]')) return;
+
+      /* These went missing when the bulk-apply block was cut out — the slice
+         took the lines below it too, and the buttons silently stopped working
+         while still being drawn. Restored, and tested individually. */
+      if (e.target.id === 'tr-export') return exportCsv();
+      if (e.target.id === 'tr-add')    return addSession();
+      const del = e.target.closest('[data-del]');
+      if (del) return removeSession(del.dataset.del);
 
       const clear = e.target.closest('button[data-clear]');
       if (clear) {
@@ -672,3 +806,34 @@ export default {
     });
   }
 };
+
+/* ------------------------------------------------------- for Vanessa to act
+   Exported so she can finish the job rather than telling you where to click,
+   and so there is one implementation of "mark a makeup done" rather than hers
+   and the button's drifting apart.
+-------------------------------------------------------------------------- */
+
+/** person -> how many sessions they still owe, or null if nothing is loaded. */
+export function owedBy() {
+  if (!attendance) return null;
+  const m = new Map();
+  for (const a of attendance) {
+    if (!/absent/i.test(a.actual || '') && !inferredAbsent(a)) continue;
+    m.set(a.person_name, (m.get(a.person_name) || 0) + 1);
+  }
+  return m;
+}
+
+/** Mark everything this person owes as completed. Returns how many changed. */
+export async function markMakeupDone(person) {
+  const rows = (attendance || []).filter(a => a.person_name === person &&
+    (/absent/i.test(a.actual || '') || inferredAbsent(a)));
+  if (!rows.length) throw new Error(`${person} does not owe a makeup.`);
+  for (const r of rows) {
+    await update('training_attendance', `id=eq.${r.id}`, { actual: 'Makeup Completed' });
+    r.actual = 'Makeup Completed';
+  }
+  indexFiled(); shareWithVanessa();
+  if ($('#tr-body')) paint();
+  return rows.length;
+}
