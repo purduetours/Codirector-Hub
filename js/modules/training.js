@@ -130,7 +130,7 @@ async function loadAll() {
   try {
     const [s, a] = await Promise.all([
       select('training_sessions',   `select=*&term_id=eq.${termId()}&order=sort_order.asc`),
-      select('training_attendance', 'select=id,session_id,guide_id,person_name,expectation,actual,updated_at,updated_by')
+      select('training_attendance', 'select=id,session_id,guide_id,person_name,expectation,actual,updated_at,updated_by,makeup_on,makeup_note')
     ]);
     sessions = s || [];
     attendance = a || [];
@@ -215,9 +215,21 @@ const filedFor = (person, label) => filedIndex?.get(`${person}|${sessionKey(labe
    than a second query of her own that could disagree with what is on show. */
 function shareWithVanessa() {
   if (!sessions) return;
+  const perPerson = new Map();
+  for (const a of attendance) {
+    const k = a.person_name;
+    if (!perPerson.has(k)) perPerson.set(k, { attended: 0, makeup: 0, owed: 0, filed: 0 });
+    const v = perPerson.get(k);
+    if (/^attended/i.test(a.actual || '')) v.attended++;
+    if (/^makeup/i.test(a.actual || '')) v.makeup++;
+    if (/absent/i.test(a.actual || '') || inferredAbsent(a)) v.owed++;
+    if (filedFor(k, sessions.find(x => x.id === a.session_id)?.label || '')) v.filed++;
+  }
+
   shareData('training', {
     sessions,
     attendance,
+    perPerson,
     absences: absences || [],
     filed: filedIndex ? [...filedIndex.keys()] : [],
     unmatched: filedUnmatched
@@ -446,7 +458,15 @@ const options = (list, current) =>
    (current && !list.includes(current)) ? `<option value="${esc(current)}" selected>${esc(current)}</option>` : ''
   ].join('');
 
+const makeupNote = r => {
+  if (!/^makeup/i.test(r.actual || '')) return '';
+  const bits = [r.makeup_on ? `Made up ${prettyDate(r.makeup_on)}` : '', r.makeup_note || ''].filter(Boolean);
+  return bits.join(' — ');
+};
+
 const editedNote = r => {
+  const mk = makeupNote(r);
+  if (mk) return mk + (r.updated_by ? ` · recorded by ${editorNames.get(r.updated_by) || 'someone'}` : '');
   if (!r.updated_by) return '';
   const who = editorNames.get(r.updated_by) || 'someone';
   const when = r.updated_at ? new Date(r.updated_at).toLocaleString(undefined,
@@ -694,13 +714,20 @@ export default {
           (/absent/i.test(a.actual || '') || inferredAbsent(a)));
         if (!rows.length) return;
         if (!confirm(`Mark ${rows.length} outstanding session${rows.length === 1 ? '' : 's'} for ${who} as Makeup Completed?`)) return;
+        /* Optional, and asked for once rather than per session. Skipping it
+           leaves the record exactly as it was before this existed. */
+        const on = prompt(`When did ${who} do the makeup? (YYYY-MM-DD, or leave blank)`, todayISO()) ?? '';
+        if (on && !/^\d{4}-\d{2}-\d{2}$/.test(on)) return toast('That date is not YYYY-MM-DD.', 'err');
+        const note = prompt('What was it? (optional — a session attended, a task, a conversation)', '') ?? '';
+
         clear.disabled = true;
         try {
           // One at a time on purpose: if the third fails, the first two still
           // stand and the list simply shows what is left.
           for (const r of rows) {
-            await update('training_attendance', `id=eq.${r.id}`, { actual: 'Makeup Completed' });
-            r.actual = 'Makeup Completed';
+            const patch = { actual: 'Makeup Completed', makeup_on: on || null, makeup_note: note.trim() || null };
+            await update('training_attendance', `id=eq.${r.id}`, patch);
+            Object.assign(r, patch);
           }
           toast(`${who} is all caught up.`);
           paint();

@@ -5,6 +5,7 @@
 ============================================================================ */
 import { state } from '../core/state.js';
 import { loadRoster } from './evals.js';
+import { shareData } from '../core/vanessa-ui.js';
 import { loadMajors } from '../core/sheets.js';
 import { matchPerson } from '../core/people-match.js';
 import { trainingFor } from './training.js';
@@ -93,6 +94,7 @@ export async function warmMajors() {
       const hit = matchPerson(rec.name, names);
       if (hit) majorIndex.set(hit, rec);
     }
+    shareData('majors', majorIndex);      // so Vanessa can say it too
   } catch { majors = []; majorIndex = new Map(); }
 }
 

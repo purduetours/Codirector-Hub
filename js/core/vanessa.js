@@ -229,7 +229,7 @@ const sameSession = (a, b) => {
 /* ------------------------------------------------- interview answers ------ */
 
 let interviewData = null;
-const shared = { tours: null, desks: null, training: null };
+const shared = { tours: null, desks: null, training: null, majors: null };
 export function shareInterviews(d) { interviewData = d; }
 export function shareOther(kind, rows) { shared[kind] = rows; }
 
@@ -400,6 +400,25 @@ function guideAnswers(q) {
     `${x.evaluatorId === state.me?.id ? 'You are' : x.evaluator + ' is'} evaluating them` +
     (x.date ? `, on ${prettyDay(x.date)}${x.time ? ' at ' + prettyClock(x.time) : ''}.` : ', no tour date set yet.') +
     (x.status === 'submitted' ? ' Eval submitted.' : x.status === 'reviewed' ? ' Eval submitted and reviewed.' : ''));
+
+  /* What they study, and how their training is going. Both come from other
+     screens, so she says them only when those have loaded — never a blank
+     where a fact should be. */
+  const st = shared.majors?.get(x.name);
+  if (st) {
+    const study = [
+      st.majors?.length ? st.majors.join(' and ') : '',
+      st.minors?.length ? `minoring in ${st.minors.join(' and ')}` : ''
+    ].filter(Boolean).join(', ');
+    if (study) bits.push(`Studying ${study}${st.year ? ` — ${st.year.toLowerCase()}` : ''}.`);
+  }
+
+  const tr = shared.training?.perPerson?.get(x.name);
+  if (tr) {
+    if (tr.owed) bits.push(`Training: ${tr.owed} makeup${tr.owed === 1 ? '' : 's'} still owed.`);
+    else if (tr.filed) bits.push(`Training: all square, ${tr.filed} absence${tr.filed === 1 ? '' : 's'} filed in advance.`);
+    else bits.push('Training: nothing outstanding.');
+  }
 
   const range = dateRange(q.replace(new RegExp(x.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ''));
   if (range?.error) return range.error;
@@ -892,6 +911,11 @@ export function ask(question) {
       q = WHEN.test(memory.lastQuestion)
         ? memory.lastQuestion.replace(WHEN, when[0])
         : `${memory.lastQuestion} ${when[0]}`;
+    } else if (inTraining() && findPeople(bit, state.guides || [], x => x.name).length === 1) {
+      /* "what about Saandiya" is a change of subject, not the same question
+         with a name stuck on the end. Without this it appended her to the
+         previous question and cheerfully re-read the makeup list. */
+      q = `tell me about ${findPeople(bit, state.guides, x => x.name)[0].name}`;
     } else {
       q = `${memory.lastQuestion} ${bit}`;
     }
