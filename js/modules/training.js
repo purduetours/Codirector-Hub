@@ -17,6 +17,7 @@ import { loadAbsences, formStamp } from '../core/sheets.js';
 import { state, isAdmin, termId } from '../core/state.js';
 import { $, $$, esc, toast, injectStyle, prettyDate, todayISO, debounce, SEARCH_ICON } from '../core/ui.js';
 import { shareData } from '../core/vanessa-ui.js';
+import { downloadCsv } from '../core/csv.js';
 import { matchPerson } from '../core/people-match.js';
 
 /* The sheet's own vocabulary, offered as dropdowns. Free text underneath, so a
@@ -330,11 +331,6 @@ async function removeSession(id) {
    in Google Sheets looking like the thing it replaced.
 -------------------------------------------------------------------------- */
 function exportCsv() {
-  const cell = v => {
-    const t = String(v ?? '');
-    return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
-  };
-
   const head = ['Name', ...sessions.flatMap(s => [s.label, 'Actual'])];
   const rows = people().map(p => [
     p.name,
@@ -343,20 +339,9 @@ function exportCsv() {
       return [r?.expectation || '', r?.actual || (r && inferredAbsent(r) ? 'Absent (assumed)' : '')];
     })
   ]);
-
-  const csv = [head, ...rows].map(r => r.map(cell).join(',')).join('\r\n');
-  // BOM, or Excel mangles any name with an accent in it.
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `training-attendance-${todayISO()}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast(`Downloaded ${rows.length} guides.`);
+  toast(`Downloaded ${downloadCsv('training-attendance', [head, ...rows])} guides.`);
 }
+
 
 function attendanceView() {
   const shown = local.session ? sessions.filter(s => s.id === local.session) : sessions;
@@ -622,7 +607,9 @@ function paint() {
 
 export default {
   id: 'training',
-  needs: 'training',
+  // Codirectors only: this is a record about a hundred named students,
+  // and the database policies match (16-training-codirectors-only.sql).
+  needs: 'admin',
   title: 'Training',
   crumb: 'Attendance, makeups and who has said they will miss one',
   icon: '🎓',
@@ -830,3 +817,6 @@ export function trainingFor(name) {
     filed:    mine.filter(a => filedFor(name, byId.get(a.session_id)?.label || '')).length
   };
 }
+
+/** The raw material, for the data-health checks. */
+export const trainingSources = () => (sessions ? { sessions, attendance, absences } : null);

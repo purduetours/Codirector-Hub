@@ -7,7 +7,7 @@
    an honest "nothing" when there is nothing.
 ============================================================================ */
 import { state, myName, isAdmin, inTraining, inRecruitment } from '../core/state.js';
-import { select } from '../core/db.js';
+import { select, update } from '../core/db.js';
 import { loadDesks } from '../core/sheets.js';
 import { $, esc, injectStyle } from '../core/ui.js';
 import { go } from '../core/router.js';
@@ -35,6 +35,9 @@ injectStyle('today-css', `
 .td-change .w { font-weight:600; min-width:110px; flex:none; }
 .td-change .t { flex:1; color:var(--text-soft); }
 .td-change .a { color:var(--text-faint); flex:none; }
+.td-undo { border:0; background:none; cursor:pointer; color:var(--accent); font:inherit;
+  font-size:.74rem; padding:0 2px; flex:none; text-decoration:underline; }
+.td-undo:disabled { color:var(--text-faint); text-decoration:none; cursor:default; }
 #td-changes { margin-top:22px; border:1px solid var(--line); border-radius:var(--radius);
   background:var(--bg-elev); padding:4px 12px 8px; }
 `);
@@ -137,19 +140,42 @@ async function recentChanges() {
   const name = new Map();
 
   try {
-    const rows = await select('training_attendance',
-      'select=person_name,actual,updated_at,updated_by&updated_by=not.is.null&order=updated_at.desc&limit=25');
-    const ids = [...new Set((rows || []).map(r => r.updated_by))];
+    /* From the history table, which records what the value WAS. Without that
+       a feed can say something changed but not what it changed from, and
+       cannot offer to put it back. */
+    const rows = await select('training_history',
+      'select=id,attendance_id,person_name,field,was,became,changed_at,changed_by&order=changed_at.desc&limit=25');
+    const ids = [...new Set((rows || []).map(r => r.changed_by).filter(Boolean))];
     if (ids.length) {
       const who = await select('members', `select=id,full_name&id=in.(${ids.join(',')})`);
       (who || []).forEach(m => name.set(m.id, m.full_name));
     }
     (rows || []).forEach(r => out.push({
-      at: r.updated_at,
-      who: name.get(r.updated_by) || 'someone',
-      what: `set ${r.person_name} to “${r.actual || 'blank'}” on training`
+      at: r.changed_at,
+      who: name.get(r.changed_by) || 'someone',
+      what: `${r.person_name}: ${r.field === 'actual' ? '' : 'reason '}“${r.was || 'blank'}” → “${r.became || 'blank'}”`,
+      undo: { id: r.attendance_id, field: r.field, value: r.was, person: r.person_name }
     }));
-  } catch { /* the table may not exist yet */ }
+  } catch {
+    /* No history table yet (15-training-history.sql has not been run). Fall
+       back to the timestamps the row itself carries: that still shows who
+       changed what and when, just without the old value, so no undo. Better a
+       feed with less in it than a screen that silently shows nothing. */
+    try {
+      const rows = await select('training_attendance',
+        'select=person_name,actual,updated_at,updated_by&updated_by=not.is.null&order=updated_at.desc&limit=20');
+      const ids = [...new Set((rows || []).map(r => r.updated_by))];
+      if (ids.length) {
+        const who = await select('members', `select=id,full_name&id=in.(${ids.join(',')})`);
+        (who || []).forEach(m => name.set(m.id, m.full_name));
+      }
+      (rows || []).forEach(r => out.push({
+        at: r.updated_at,
+        who: name.get(r.updated_by) || 'someone',
+        what: `set ${r.person_name} to “${r.actual || 'blank'}” on training`
+      }));
+    } catch { /* training may not be set up at all */ }
+  }
 
   try {
     const evals = await select('evals',
@@ -185,10 +211,11 @@ function paintChanges(list) {
 
   box.innerHTML = `<details${list.some(x => Date.now() - new Date(x.at) < 3600000) ? ' open' : ''}>
     <summary class="td-changes-head">Recent changes <span class="muted">· last ${list.length}</span></summary>
-    ${list.map(c => `<div class="td-change">
+    ${list.map((c, i) => `<div class="td-change">
         <span class="w">${esc(c.who)}</span>
         <span class="t">${esc(c.what)}</span>
         <span class="a">${esc(ago(c.at))}</span>
+        ${c.undo ? `<button class="td-undo" data-undo="${i}" title="Put it back to “${esc(c.undo.value || 'blank')}”">undo</button>` : ''}
       </div>`).join('')}
   </details>`;
 }
@@ -238,7 +265,22 @@ export default {
       box.id = 'td-changes';
       box.hidden = true;
       $('#td-list').after(box);
-      recentChanges().then(paintChanges).catch(() => {});
+      recentChanges().then(list => {
+        paintChanges(list);
+        $('#td-changes')?.addEventListener('click', async e => {
+          const btn = e.target.closest('[data-undo]');
+          if (!btn) return;
+          const c = list[Number(btn.dataset.undo)];
+          if (!c?.undo) return;
+          if (!confirm(`Put ${c.undo.person} back to “${c.undo.value || 'blank'}”?`)) return;
+          btn.disabled = true;
+          try {
+            await update('training_attendance', `id=eq.${c.undo.id}`, { [c.undo.field]: c.undo.value || null });
+            btn.textContent = 'undone';
+            // Reverting is itself a change, so the feed will show it next time.
+          } catch (err) { btn.disabled = false; alert(err.message); }
+        });
+      }).catch(() => {});
     }
 
     $('#td-list').addEventListener('click', e => {

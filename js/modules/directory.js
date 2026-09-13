@@ -3,9 +3,10 @@
    status and tour load. Built entirely from the roster payload already loaded
    for the evals module — no extra network call.
 ============================================================================ */
-import { state } from '../core/state.js';
+import { state, isAdmin } from '../core/state.js';
 import { loadRoster } from './evals.js';
 import { shareData } from '../core/vanessa-ui.js';
+import { takeJumpTarget } from '../core/quicksearch.js';
 import { loadMajors } from '../core/sheets.js';
 import { matchPerson } from '../core/people-match.js';
 import { trainingFor } from './training.js';
@@ -132,6 +133,10 @@ function profile(g) {
     })()}
 
     ${(() => {
+      /* Training is codirector-only now, and a summary of it here would be a
+         way around that: a committee member cannot open the Training tab but
+         would still learn who is behind on makeups. */
+      if (!isAdmin()) return '';
       const t = trainingFor(g.name);
       if (!t) return '';
       const bits = [];
@@ -207,6 +212,12 @@ export default {
         : '<div class="empty"><div class="empty-mark">🔍</div><p>No guides match.</p></div>';
       $('#dir-count').textContent = `${rows.length} of ${state.guides.length} guides`;
     };
+    /* Arrived here from the search box: filter to that person and open them,
+       rather than dropping somebody on an unfiltered list of a hundred names
+       having just told the hub exactly who they wanted. */
+    const jump = takeJumpTarget();
+    if (jump) local.search = jump;
+
     paint();
 
     /* Majors live in a different workbook, so they arrive a moment after the
@@ -214,6 +225,11 @@ export default {
        own const is the kind of thing that works until someone makes the call
        synchronous, and then silently kills everything below it. */
     warmMajors().then(() => { if ($('#dir-list')) paint(); });
+
+    /* The search box has to SHOW the filter it is applying. Arriving from quick
+       search with a one-person list and an empty box looks like the directory
+       has lost everybody. */
+    if (jump) $('#dir-search').value = jump;
 
     $('#dir-search').addEventListener('input', debounce(e => { local.search = e.target.value; paint(); }));
     $('#dir-priority').addEventListener('change', e => { local.priority = e.target.value; paint(); });
@@ -229,5 +245,13 @@ export default {
       $('#dir-p-body').innerHTML = profile(g);
       openModal($('#dir-modal'));
     });
+
+    /* Open them straight away. This runs AFTER the click handler above is
+       registered — clicking a row before that exists does nothing at all,
+       which is exactly what happened the first time. */
+    if (jump) {
+      [...document.querySelectorAll('#dir-list .dir-row')]
+        .find(r => r.textContent.includes(jump))?.click();
+    }
   }
 };

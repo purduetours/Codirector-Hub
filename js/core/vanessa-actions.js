@@ -14,7 +14,7 @@
       the Claim button uses, filter and all, so two people claiming the same
       guide at the same moment is settled the way it always was.
 ============================================================================ */
-import { state, myName, inTraining } from './state.js';
+import { state, myName, inTraining, isAdmin } from './state.js';
 import { claimGuide } from '../modules/evals.js';
 import { markMakeupDone } from '../modules/training.js';
 
@@ -83,7 +83,7 @@ export async function handleAction(question) {
   /* --- marking a makeup as done ----------------------------------------- */
   const mk = MAKEUP.exec(q) || (MAKEUP_ALT.test(q) ? [null, q.replace(MAKEUP_ALT, '')] : null);
   if (mk) {
-    if (!inTraining()) return { text: 'Training records are for the training committee.' };
+    if (!isAdmin()) return { text: 'Training records are for codirectors.' };
     const who = String(mk[1] || '').replace(/\b(mark|clear|log|record|the|as|for)\b/gi, '').trim();
     if (!who) return { text: 'Whose makeup? Give me a name.' };
 

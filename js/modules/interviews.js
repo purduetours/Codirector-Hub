@@ -8,6 +8,8 @@
 import { select, update, upsert, insert, remove, toCandidate } from '../core/db.js';
 import { state, myName, isAdmin } from '../core/state.js';
 import { shareInterviews } from '../core/vanessa-ui.js';
+import { downloadCsv } from '../core/csv.js';
+import { takeJumpTarget } from '../core/quicksearch.js';
 import {
   $, $$, esc, sameName, toast, showError, debounce, injectStyle,
   openModal, closeModal, wireModal, SEARCH_ICON
@@ -497,6 +499,24 @@ const sortableHead = () => Object.entries(RESULT_COLS).map(([k, c]) => {
     title="Sort by ${c.label}">${c.label}${arrow}</th>`;
 }).join('');
 
+/* The record of a hiring decision, and until now it existed only inside the
+   database. One bad afternoon and there is no copy. Includes each criterion
+   and the rater count, because a final score with no workings behind it is not
+   much use to whoever inherits the file. */
+function exportResults() {
+  let rows = filtered(data.candidates).map(c => ({ c, t: averages(c) }));
+  if (local.decision) rows = rows.filter(r => (r.c.decision || '') === local.decision);
+  sortResults(rows);
+
+  const head = ['Name', 'Group', 'Year', 'Grad', 'Major', 'Email',
+                'Raters', 'Speaking', 'Personable', 'Impression', 'Final', 'Decision'];
+  const body = rows.map(({ c, t }) => [
+    c.name, c.group || '', c.year || '', c.grad || '', c.major || '', c.email || '',
+    t.raters, fmt(t.spk), fmt(t.per), fmt(t.imp), fmt(t.final), c.decision || ''
+  ]);
+  toast(`Downloaded ${downloadCsv('interview-results', [head, ...body])} candidates.`);
+}
+
 function resultsView() {
   let rows = filtered(data.candidates).map(c => ({ c, t: averages(c) }));
   if (local.decision) rows = rows.filter(r => (r.c.decision || '') === local.decision);
@@ -510,6 +530,7 @@ function resultsView() {
         ${['Yes', 'Maybe', 'No'].map(d => `<option value="${d}" ${local.decision === d ? 'selected' : ''}>${d}</option>`).join('')}
       </select>
       <button class="btn btn-ghost btn-sm" id="gr-copy">Copy emails (${rows.length})</button>
+      <button class="btn btn-ghost btn-sm" id="gr-export" title="Download these results, including every interviewer's scores">Download CSV</button>
     </div>
     <div class="gr-wrap"><table class="gr-tbl">
       <thead><tr>${sortableHead()}<th>Decision</th></tr></thead>
@@ -1013,6 +1034,9 @@ export default {
     // Re-entering the tab shouldn't cost another 6-second round trip; the toolbar's
     // Refresh is there when someone wants the sheet re-read.
     if (!data) await refresh();
+    // Sent here by the search box; show that candidate rather than everybody.
+    const jump = takeJumpTarget();
+    if (jump) { local.search = jump; local.tab = 'results'; }
     paint();
 
     $('#gr-tabs').addEventListener('click', e => {
@@ -1111,6 +1135,8 @@ export default {
       /* Clicking a column heading sorts by it; clicking the same one again
          reverses. Default direction per column is the useful one: highest
          score first for numbers, A–Z for names. */
+      if (e.target.id === 'gr-export') return exportResults();
+
       const th = e.target.closest('.gr-sort');
       if (th) {
         const key = th.dataset.sort;

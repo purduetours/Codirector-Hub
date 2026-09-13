@@ -157,3 +157,39 @@ p { margin: 0; }
 .active-users-body ul { margin:0; padding-left:20px; }
 .active-users-body li { margin:8px 0; overflow-wrap:anywhere; }
 @media(max-width:520px) { .topbar { flex-wrap:wrap; gap:8px; } .topbar-actions { flex-wrap:wrap; margin-left:auto; } }
+
+/* ==================================================================== print
+   Interview day and training night happen in buildings where the wifi is not
+   reliable, so the room sometimes needs paper. Printing the hub as-is gives
+   you a sidebar, a chat launcher, a row of buttons that do nothing on paper,
+   and tables cut off at the edge of a scrolling box.
+
+   This strips the furniture and lets the content run. Everything here is
+   print-only, so it cannot affect the screen.
+========================================================================== */
+@media print {
+  /* The app is a two-column grid; on paper there is one column. */
+  .app { display: block; }
+  .rail, .topbar-actions, #burger, #nav-scrim,
+  .v-launch, .v-panel, .filters, .tabs,
+  .btn, .icon-btn, .tr-del, .td-undo, #td-changes { display: none !important; }
+
+  /* Print what is on the page, not what fits in the viewport. A table inside
+     an overflow box otherwise prints only its first screenful. */
+  .tr-wrap, .gr-wrap, .prof-tours, .v-log,
+  .main, .content { overflow: visible !important; max-height: none !important; }
+
+  body { background: #fff; color: #000; }
+  .card, .panel, .tr-wrap, .gr-wrap, .hz-card {
+    box-shadow: none !important; border-color: #bbb !important; break-inside: avoid;
+  }
+
+  /* Sticky headers stack on top of the content once the page stops scrolling. */
+  .tr-tbl thead th, .tr-tbl tbody th, .topbar { position: static !important; }
+  /* …but a long table should repeat its heading on each sheet. */
+  thead { display: table-header-group; }
+  tr, .tr-owe, .tr-abs, .ev-card { break-inside: avoid; }
+
+  a[href]::after { content: ""; }          /* no URLs printed after links */
+  @page { margin: 14mm; }
+}

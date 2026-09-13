@@ -156,7 +156,8 @@ function evalAnswers(q) {
 -------------------------------------------------------------------------- */
 function trainingAnswers(q) {
   const t = shared.training;
-  if (!t || !inTraining()) return null;
+  // Training is codirector-only, so she will not discuss it with anyone else.
+  if (!t || !isAdmin()) return null;
   const { sessions = [], attendance = [], absences = [] } = t;
   if (!sessions.length) return null;
 
@@ -511,9 +512,10 @@ function navigation(q) {
   for (const d of DESTINATIONS) {
     if (d.k.some(k => q.toLowerCase().includes(k))) {
       const barred =
-        (['evals', 'desks', 'directory', 'training'].includes(d.to) && !inTraining()) ||
+        (['evals', 'desks', 'directory'].includes(d.to) && !inTraining()) ||
+        (['training', 'people'].includes(d.to) && !isAdmin()) ||
         (d.to === 'interviews' && !inRecruitment()) ||
-        (d.to === 'people' && !isAdmin());
+        false;
       if (barred) return { say: 'Your current role does not include that tool.' };
       const NICE = { evals: 'Eval Tracker', training: 'Training', people: 'People', desks: 'Desk Coverage' };
       return { go: d.to, say: `Opening ${NICE[d.to] || d.to}.` };

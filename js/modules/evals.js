@@ -7,6 +7,7 @@ import { select, update, rpc, toGuide } from '../core/db.js';
 import { loadTours } from '../core/sheets.js';
 import { state, myName, isAdmin, termId, nextTermId } from '../core/state.js';
 import { paintNav } from '../core/router.js';
+import { downloadCsv } from '../core/csv.js';
 import {
   $, $$, esc, sameName, prettyDate, prettyTime, todayISO, toast, showError,
   openModal, closeModal, wireModal, debounce, injectStyle, SEARCH_ICON
@@ -148,6 +149,7 @@ function shell() {
   <div class="filters" style="margin-bottom:16px">
     <label class="search">${SEARCH_ICON}<input type="search" id="ev-search" placeholder="Search a guide's name…" autocomplete="off"></label>
     <select id="ev-priority" class="select" aria-label="Filter by priority"><option value="">All priorities</option></select>
+    <button type="button" class="btn btn-ghost btn-sm" id="ev-export" title="Download whatever this tab is currently showing">Download CSV</button>
   </div>
 
   <div id="ev-banner" class="callout" style="margin-bottom:14px" hidden></div>
@@ -449,6 +451,19 @@ function dayView() {
       </div>`;
     }).join('')}
   </section>`;
+}
+
+/* The eval roster as it stands — who is claimed, by whom, when the tour is and
+   whether feedback has been submitted. Not the written feedback itself: that
+   is somebody's candid opinion of a colleague and does not belong in a file
+   that gets emailed around. */
+function exportEvals() {
+  const head = ['Guide', 'Priority', 'Status', 'Evaluator', 'Tour date', 'Tour time', 'Notes', 'Upcoming tours'];
+  const rows = visible().map(g => [
+    g.name, g.priority || '', STATUS_LABEL[g.status] || g.status, g.evaluator || '',
+    g.date || '', g.time || '', g.notes || '', (g.tours || []).length
+  ]);
+  toast(`Downloaded ${downloadCsv('eval-tracker', [head, ...rows])} guides.`);
 }
 
 function paint() {
@@ -838,6 +853,8 @@ export default {
 
     $('#ev-search').addEventListener('input', debounce(e => { local.search = e.target.value; paint(); }));
     $('#ev-priority').addEventListener('change', e => { local.priority = e.target.value; paint(); });
+
+    $('#ev-export').addEventListener('click', exportEvals);
 
     $('#ev-list').addEventListener('click', async e => {
       const day = e.target.closest('[data-day]');
