@@ -5,6 +5,10 @@
 ============================================================================ */
 import { state } from '../core/state.js';
 import { loadRoster } from './evals.js';
+import { loadMajors } from '../core/sheets.js';
+import { matchPerson } from '../core/people-match.js';
+import { trainingFor } from './training.js';
+import { deskShiftsFor } from './desks.js';
 import {
   $, $$, esc, prettyDate, prettyTime, debounce, injectStyle,
   openModal, closeModal, wireModal, SEARCH_ICON
@@ -32,6 +36,12 @@ injectStyle('dir-css', `
 .prof-stat { background:var(--bg-sunken); border-radius:var(--radius-sm); padding:11px 13px; }
 .prof-stat .n { font-size:1.3rem; font-weight:700; line-height:1.2; }
 .prof-stat .l { font-size:.72rem; color:var(--text-soft); }
+.prof-block { display:grid; gap:6px; margin:10px 0; }
+.prof-line { display:flex; gap:10px; font-size:.83rem; align-items:baseline; }
+.prof-line .l { color:var(--text-faint); min-width:120px; flex:none; font-size:.75rem; }
+.prof-chip { display:inline-block; font-size:.74rem; padding:2px 8px; border-radius:999px;
+  background:var(--accent-soft); color:var(--text); margin:0 4px 4px 0; }
+.prof-chip.soft { background:var(--bg-sunken); color:var(--text-soft); }
 .prof-tours { display:grid; gap:5px; max-height:220px; overflow-y:auto; }
 .prof-tour { display:flex; justify-content:space-between; gap:10px; font-size:.83rem;
   padding:7px 10px; background:var(--bg-sunken); border-radius:var(--radius-sm); }
@@ -63,6 +73,36 @@ function row(g) {
   </button>`;
 }
 
+/* --------------------------------------------------- what they are studying
+   From the majors workbook, which somebody else keeps and which is not
+   complete: 40 of 103 guides were absent from it when this was written. So a
+   guide with nothing here is shown as "not listed", never as having no major.
+   Saying "no major" about a real student because a spreadsheet is behind would
+   be worse than saying nothing.
+-------------------------------------------------------------------------- */
+let majors = null;                        // name-as-written -> record
+let majorIndex = null;                    // guide name -> record
+
+export async function warmMajors() {
+  if (majors) return;
+  try {
+    majors = await loadMajors();
+    const names = state.guides.map(g => g.full_name || g.name);
+    majorIndex = new Map();
+    for (const rec of majors) {
+      const hit = matchPerson(rec.name, names);
+      if (hit) majorIndex.set(hit, rec);
+    }
+  } catch { majors = []; majorIndex = new Map(); }
+}
+
+const studiesFor = name => majorIndex?.get(name) || null;
+
+const chips = (label, list, tone = '') => list?.length
+  ? `<div class="prof-line"><span class="l">${label}</span>
+       <span>${list.map(x => `<span class="prof-chip ${tone}">${esc(x)}</span>`).join('')}</span></div>`
+  : '';
+
 function profile(g) {
   const tours = g.tours || [];
   const when = [prettyDate(g.date), prettyTime(g.time)].filter(Boolean).join(' · ');
@@ -74,6 +114,39 @@ function profile(g) {
     </div>
     ${when ? `<p class="muted">Eval tour scheduled for <strong>${esc(when)}</strong></p>` : ''}
     ${g.notes ? `<p class="muted">Notes: ${esc(g.notes)}</p>` : ''}
+
+    ${(() => {
+      const st = studiesFor(g.name);
+      if (majorIndex && !st) return `<p class="hint">Not on the majors sheet — that list is maintained separately and is not complete.</p>`;
+      if (!st) return '';
+      return `<div class="prof-block">
+        ${chips('Major', st.majors)}
+        ${chips('Minor', st.minors, 'soft')}
+        ${chips('Certificate', st.certificates, 'soft')}
+        ${chips('Learning community', st.learningCommunities, 'soft')}
+        ${chips('College', st.colleges, 'soft')}
+        ${st.year ? `<div class="prof-line"><span class="l">Year</span><span>${esc(st.year)}</span></div>` : ''}
+      </div>`;
+    })()}
+
+    ${(() => {
+      const t = trainingFor(g.name);
+      if (!t) return '';
+      const bits = [];
+      if (t.attended)  bits.push(`${t.attended} attended`);
+      if (t.makeup)    bits.push(`${t.makeup} made up`);
+      if (t.owed)      bits.push(`<strong style="color:var(--warn)">${t.owed} still owed</strong>`);
+      if (t.filed)     bits.push(`${t.filed} absence${t.filed === 1 ? '' : 's'} filed`);
+      return `<div class="prof-line"><span class="l">Training</span><span>${bits.join(' · ') || 'nothing recorded'}</span></div>`;
+    })()}
+
+    ${(() => {
+      const d = deskShiftsFor(g.name);
+      return d?.length
+        ? `<div class="prof-line"><span class="l">Desk</span><span>${d.slice(0, 4).map(x =>
+            `${esc(x.day)} ${esc(x.slot)}`).join(', ')}${d.length > 4 ? ` +${d.length - 4}` : ''}</span></div>`
+        : '';
+    })()}
     <div class="field"><span>Upcoming tours</span>
       ${tours.length
         ? `<div class="prof-tours">${tours.map(t =>
@@ -133,6 +206,12 @@ export default {
       $('#dir-count').textContent = `${rows.length} of ${state.guides.length} guides`;
     };
     paint();
+
+    /* Majors live in a different workbook, so they arrive a moment after the
+       list does. Declared after paint() on purpose — referencing it above its
+       own const is the kind of thing that works until someone makes the call
+       synchronous, and then silently kills everything below it. */
+    warmMajors().then(() => { if ($('#dir-list')) paint(); });
 
     $('#dir-search').addEventListener('input', debounce(e => { local.search = e.target.value; paint(); }));
     $('#dir-priority').addEventListener('change', e => { local.priority = e.target.value; paint(); });

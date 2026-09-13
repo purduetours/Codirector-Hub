@@ -104,3 +104,15 @@ export default {
     });
   }
 };
+
+/** Which desk shifts this person covers, for the Directory profile. */
+export function deskShiftsFor(name) {
+  if (!rows) return null;
+  const want = String(name || '').toLowerCase();
+  const first = want.split(/\s+/)[0];
+  // The rota abbreviates surnames ("Jane H."); the roster spells them out.
+  return rows.filter(r => {
+    const p = String(r.person || '').toLowerCase();
+    return p === want || (p.startsWith(first) && first.length > 2);
+  });
+}
