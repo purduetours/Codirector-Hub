@@ -83,7 +83,7 @@ export async function handleAction(question) {
   /* --- marking a makeup as done ----------------------------------------- */
   const mk = MAKEUP.exec(q) || (MAKEUP_ALT.test(q) ? [null, q.replace(MAKEUP_ALT, '')] : null);
   if (mk) {
-    if (!isAdmin()) return { text: 'Training records are for codirectors.' };
+    if (!isAdmin()) return { text: "That tool isn't available for your account." };
     const who = String(mk[1] || '').replace(/\b(mark|clear|log|record|the|as|for)\b/gi, '').trim();
     if (!who) return { text: 'Whose makeup? Give me a name.' };
 

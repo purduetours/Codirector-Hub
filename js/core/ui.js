@@ -80,7 +80,11 @@ const focusables = root => [...root.querySelectorAll(FOCUSABLE)].filter(el => el
  * Tab started again from the top of the document. Anyone on a keyboard or a
  * screen reader had to hunt for their place every time they claimed an eval.
  */
+const leaving = new WeakMap();
+const calm = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
 export function openModal(root) {
+  clearTimeout(leaving.get(root)); root.classList.remove('is-leaving');
   focusBefore.set(root, document.activeElement);
   root.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -101,7 +105,15 @@ export function openModal(root) {
 }
 
 export function closeModal(root) {
-  root.hidden = true;
+  /* It plays a short exit before it is hidden. Everything that matters —
+     the scroll lock, focus — is released at once; only the paint lingers, and
+     reopening in that moment cancels it. */
+  if (calm() || !root.isConnected) root.hidden = true;
+  else {
+    root.classList.add('is-leaving');
+    clearTimeout(leaving.get(root));
+    leaving.set(root, setTimeout(() => { root.hidden = true; root.classList.remove('is-leaving'); }, 170));
+  }
   document.body.style.overflow = '';
   const back = focusBefore.get(root);
   focusBefore.delete(root);
@@ -135,7 +147,74 @@ export function wireModal(root) {
  * the page silently stuck unscrollable. The router calls this before it repaints.
  */
 export function closeAllModals() {
-  $$('.modal-root').forEach(r => { if (!r.hidden) closeModal(r); });
+  $$('.modal-root').forEach(r => { if (!r.hidden && !r.classList.contains('is-leaving')) closeModal(r); });
+}
+
+/* ================================================================ motion
+   Called by the router once a screen has mounted. Two small things that
+   make every page feel of a piece without any module having to ask:
+
+   · reveal   surfaces rise into place as they scroll into view, a few at a
+              time, rather than the whole page appearing at once
+   · tabs     the segmented tab control gets a highlight that slides to the
+              chosen tab instead of jumping
+
+   Both are presentation only, both step aside for reduced motion, and a
+   module that re-renders its own list later simply gets it without the
+   entrance — nothing ever waits on an animation to become usable. */
+const REVEAL = '[data-reveal], .card, .panel, .stats > .stat, .tr-wrap, .gr-wrap, .sch-day, .tr-owe, .tr-abs, .ev-day, .ev-cal';
+let io = null;
+
+export function reveal(root) {
+  if (calm() || !('IntersectionObserver' in window)) return;
+  io ||= new IntersectionObserver(entries => {
+    let n = 0;
+    entries.forEach(en => {
+      if (!en.isIntersecting) return;
+      const el = en.target;
+      el.style.setProperty('--rv-d', `${Math.min(n++, 8) * 45}ms`);
+      el.classList.add('rv-in');
+      io.unobserve(el);
+      // Hand the element back to its own hover transitions once it has landed.
+      const done = () => { el.classList.remove('rv', 'rv-in'); el.style.removeProperty('--rv-d'); };
+      el.addEventListener('transitionend', done, { once: true });
+      setTimeout(done, 1200);
+    });
+  }, { rootMargin: '0px 0px -4% 0px', threshold: 0.04 });
+
+  $$(REVEAL, root)
+    .filter(el => !el.closest('.modal-root') && !el.classList.contains('rv'))
+    .forEach(el => { el.classList.add('rv'); io.observe(el); });
+}
+
+export function glideTabs(root) {
+  $$('.tabs', root).forEach(tabs => {
+    if (tabs.querySelector(':scope > .tab-glider')) return;
+    const glider = document.createElement('span');
+    glider.className = 'tab-glider';
+    glider.setAttribute('aria-hidden', 'true');
+    tabs.prepend(glider);
+    tabs.classList.add('has-glider');
+    const place = () => {
+      const on = tabs.querySelector('.tab.is-active:not([hidden])');
+      if (!on) { glider.style.opacity = '0'; return; }
+      glider.style.opacity = '1';
+      glider.style.width = `${on.offsetWidth}px`;
+      glider.style.height = `${on.offsetHeight}px`;
+      glider.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`;
+    };
+    glider.style.transition = 'none';
+    place();
+    requestAnimationFrame(() => { glider.style.transition = ''; });
+    new MutationObserver(place).observe(tabs, { attributes: true, subtree: true, attributeFilter: ['class', 'hidden'] });
+    new ResizeObserver(place).observe(tabs);
+  });
+}
+
+export function settle(root) {
+  if (!root) return;
+  reveal(root);
+  glideTabs(root);
 }
 
 document.addEventListener('keydown', e => {

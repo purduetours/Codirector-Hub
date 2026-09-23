@@ -195,9 +195,30 @@ $('#dock-menu-ico').innerHTML = ICONS.menu;
 
 /* Vanessa is opened from the rail, the top bar and the phone dock. All three
    go through the one launcher, so her open/closed state has one owner. */
-['#rail-ask', '#v-top', '#dock-vanessa'].forEach(sel =>
+['#rail-ask', '#v-top', '#dock-vanessa', '#v-float'].forEach(sel =>
   $(sel).addEventListener('click', () => { app.classList.remove('nav-open'); toggleVanessa(); }));
 onVanessaToggle(isOpen => $('#v-top').setAttribute('aria-expanded', String(isOpen)));
+
+/* Depth and glass: the ambient light drifts at its own pace as the page
+   scrolls, and the top bar turns to glass once content passes under it.
+   One passive listener, throttled to the frame. */
+let scrollTick = false;
+window.addEventListener('scroll', () => {
+  if (scrollTick) return;
+  scrollTick = true;
+  requestAnimationFrame(() => {
+    scrollTick = false;
+    document.documentElement.style.setProperty('--scroll', String(Math.round(window.scrollY)));
+    document.body.classList.toggle('is-scrolled', window.scrollY > 8);
+  });
+}, { passive: true });
+
+/* The corner control names the page and her best question for it. */
+onRoute(mod => {
+  const [first] = hintsFor(mod.id);
+  $('#v-float-title').textContent = `Ask Vanessa about ${mod.title}`;
+  $('#v-float-sub').textContent = first ? `Try “${first}”` : 'Questions, tours, the handbook';
+});
 
 /* Her one contextual question for the page you are on. */
 onRoute(mod => {

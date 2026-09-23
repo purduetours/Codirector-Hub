@@ -8,7 +8,9 @@ import { ask, greeting, shareInterviews, shareOther, resetVanessaData } from './
 import { modelStatus, onModelChange, checkAvailability, enableModel, cancelModel, disableModel, resetModel, interpret, resumeIfEnabled } from './vanessa-model.js';
 import { state as appState, inTraining, inRecruitment, myName } from './state.js';
 import { $, esc, injectStyle } from './ui.js';
-import { go } from './router.js';
+import { go, onRoute, currentModule } from './router.js';
+import { actionsFor } from './vanessa-context.js';
+import { ICONS } from './icons.js';
 import { handleEvalMessage, evalDraft, resetEvalFlow, editEvalDraft, savedEvalSummary, bufferEvalDraft } from './vanessa-eval.js';
 import { handleAction, resetActions } from './vanessa-actions.js';
 import { voiceSupported, voiceState, onVoiceChange, startVoice, stopVoice, resetVoice, setVoiceText } from './vanessa-voice.js';
@@ -70,6 +72,65 @@ injectStyle('vanessa-css', `
 .v-panel > details { max-height:45%; overflow-y:auto; flex-shrink:0; }
 .v-panel > details:not(#v-eval-draft):not(#v-voice) { border-top:1px solid var(--line); }
 .v-panel > .v-chips { max-height:120px; overflow-y:auto; flex-shrink:0; }
+/* ---- 2.0: presence, motion, conversation ---- */
+.v-panel { transform-origin:calc(100% - 40px) 24px; }
+.v-panel.is-closing { animation:v-out .19s var(--ease) forwards; }
+@keyframes v-out { to { opacity:0; transform:translateX(18px) scale(.985); } }
+.v-head::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; opacity:0;
+  background:linear-gradient(90deg, transparent, var(--v-1), var(--v-2), var(--v-3), transparent);
+  background-size:200% 100%; transition:opacity .3s; }
+:root[data-vanessa="thinking"] .v-head::after, :root[data-vanessa="speaking"] .v-head::after { opacity:1; animation:v-sweep 1.4s linear infinite; }
+@keyframes v-sweep { to { background-position:-200% 0; } }
+.v-wave { display:inline-flex; align-items:center; gap:3px; height:18px; margin-left:auto; margin-right:4px; opacity:.25; transition:opacity .3s; }
+.v-wave i { width:3px; height:5px; border-radius:3px; background:var(--gold-deep); transition:height .2s; }
+:root[data-vanessa="thinking"] .v-wave, :root[data-vanessa="speaking"] .v-wave, :root[data-vanessa="listening"] .v-wave { opacity:1; }
+:root[data-vanessa="thinking"] .v-wave i { animation:v-bar 1s ease-in-out infinite; }
+:root[data-vanessa="speaking"] .v-wave i { animation:v-bar .6s ease-in-out infinite; }
+:root[data-vanessa="listening"] .v-wave i { animation:v-bar .45s ease-in-out infinite; background:var(--good); }
+.v-wave i:nth-child(2) { animation-delay:.12s !important; } .v-wave i:nth-child(3) { animation-delay:.24s !important; } .v-wave i:nth-child(4) { animation-delay:.36s !important; }
+@keyframes v-bar { 50% { height:16px; } }
+
+.v-log { padding-left:46px; scroll-behavior:smooth; }
+.v-msg { transform-origin:left bottom; animation:v-msg-in .42s var(--ease-out) both; }
+.v-msg.you { transform-origin:right bottom; }
+@keyframes v-msg-in { from { opacity:0; transform:translateY(8px) scale(.97); } }
+.v-msg.her { position:relative; border:1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background:linear-gradient(180deg, color-mix(in srgb, var(--gold-wash) 55%, var(--bg-sunken)), var(--bg-sunken)); }
+.v-msg.her::before { content:""; position:absolute; left:-32px; bottom:2px; width:22px; height:22px; border-radius:50%;
+  background:radial-gradient(circle at 32% 30%, #fff8e0 0 10%, transparent 34%), conic-gradient(var(--v-1), #f3cf6a, var(--v-2), var(--gold-deep), var(--v-1));
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--gold-deep) 30%, transparent), 0 3px 10px -3px color-mix(in srgb, var(--v-1) 70%, transparent); }
+.v-msg.her:has(+ .v-msg.her)::before { opacity:0; }
+.v-msg.is-typing { color:transparent; font-size:0; padding:13px 16px; min-width:58px; }
+.v-msg.is-typing::after { content:""; display:block; width:34px; height:8px;
+  background:radial-gradient(circle 3.5px, var(--gold-deep) 98%, transparent) 0 50%/11px 8px repeat-x;
+  animation:v-dots 1s linear infinite; font-size:var(--fs-md); }
+@keyframes v-dots { 50% { opacity:.35; } }
+.v-msg.is-error { background:var(--danger-bg); color:var(--danger); border-color:color-mix(in srgb, var(--danger) 25%, transparent); }
+.v-msg.is-long:not(.is-open) { max-height:12.5em; overflow:hidden;
+  -webkit-mask:linear-gradient(#000 60%, transparent); mask:linear-gradient(#000 60%, transparent); padding-bottom:26px; }
+.v-msg.is-long { position:relative; }
+.v-more { position:absolute; left:12px; bottom:6px; font:inherit; font-size:var(--fs-xs); font-weight:750; cursor:pointer;
+  border:0; background:var(--bg-elev); color:var(--gold-deep); padding:3px 10px; border-radius:999px; box-shadow:var(--shadow);
+  -webkit-mask:none; mask:none; }
+.v-msg.is-long:not(.is-open) .v-more { bottom:6px; }
+.v-msg.is-long.is-open .v-more { position:static; display:inline-block; margin-top:8px; }
+.v-follow { display:flex; flex-wrap:wrap; gap:6px; margin:-2px 0 4px; animation:v-msg-in .42s .08s var(--ease-out) both; }
+.v-chip.is-go { display:inline-flex; align-items:center; gap:5px; color:var(--text); border-style:solid;
+  background:color-mix(in srgb, var(--gold-wash) 60%, var(--bg-elev)); }
+.v-chip.is-go svg { width:13px; height:13px; }
+.v-chip { animation:v-msg-in .35s var(--ease-out) both; }
+.v-chips .v-chip:nth-child(2) { animation-delay:.03s; } .v-chips .v-chip:nth-child(3) { animation-delay:.06s; }
+.v-chips .v-chip:nth-child(4) { animation-delay:.09s; } .v-chips .v-chip:nth-child(n+5) { animation-delay:.12s; }
+.v-panel.has-chat [data-suggestions] { display:none; }
+.v-ask:focus-within { box-shadow:inset 0 1px 0 var(--line), 0 -10px 30px -20px color-mix(in srgb, var(--v-1) 60%, transparent); }
+/* On a wide screen she docks beside the workspace instead of covering it. */
+@media (min-width:1280px){
+  .v-panel { top:10px; bottom:10px; right:10px; width:420px; }
+  body.v-open .main { padding-right:432px; }
+  body.v-open .topbar .sync, body.v-open .au-lbl, body.v-open .v-top-lbl, body.v-open .qs-wrap::after { display:none; }
+  body.v-open .qs-input { width:150px !important; }
+  body.v-open .v-float { opacity:0; pointer-events:none; transform:translateY(12px) scale(.9); }
+}
 @media (max-width:860px){
   .v-panel { inset:0; width:auto; border-radius:0; border:0; padding-top:env(safe-area-inset-top);
     padding-bottom:env(safe-area-inset-bottom); animation:v-up var(--dur-3) var(--ease-out); }
@@ -103,10 +164,78 @@ export function prewarm() {
 function say(who, text) {
   const log = $('#v-log');
   if (!log || !appState.me) return null;
+  if (who === 'you') {
+    log.querySelector('.v-follow')?.remove();   // the old follow-ups are stale now
+    $('#v-panel')?.classList.add('has-chat');    // her follow-ups take over from the opening chips
+  }
   const el = document.createElement('div');
   el.className = 'v-msg ' + who; el.textContent = text;
-  log.appendChild(el); log.scrollTop = log.scrollHeight;
+  log.appendChild(el);
+  if (who === 'her') collapse(el);
+  scrollLog();
   return el;
+}
+const scrollLog = () => { const log = $('#v-log'); if (log) log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' }); };
+
+/* Compact by default. A long answer — a list of twenty guides, a handbook
+   passage — shows its first few lines with the rest a click away, so the
+   conversation stays readable and the detail is still all there. */
+function collapse(el) {
+  if (!el || el.classList.contains('is-typing')) return;
+  el.querySelector('.v-more')?.remove();
+  const text = el.textContent || '';
+  if (text.length < 460 && text.split('\n').length <= 8) { el.classList.remove('is-long'); return; }
+  el.classList.add('is-long');
+  const more = document.createElement('button');
+  more.type = 'button'; more.className = 'v-more'; more.textContent = 'Show more';
+  more.addEventListener('click', () => {
+    const openNow = el.classList.toggle('is-open');
+    more.textContent = openNow ? 'Show less' : 'Show more';
+  });
+  el.appendChild(more);
+}
+
+/* Her mood, shared by every orb in the hub — the rail, the top bar, the dock,
+   the home stage and her own. Idle drifts; thinking turns quickly; speaking
+   glows; listening pulses. One attribute on <html>, so they all agree. */
+let moodTimer = null;
+function setMood(mood) {
+  clearTimeout(moodTimer);
+  document.documentElement.dataset.vanessa = mood;
+  if (mood === 'speaking') moodTimer = setTimeout(() => setMood('idle'), 1400);
+}
+
+/* ------------------------------------------------------- context & actions */
+const routeId = () => currentModule()?.id || 'today';
+const routeTitle = () => currentModule()?.title || 'Home';
+
+function actionButton(a) {
+  const go_ = a.kind === 'go';
+  return `<button type="button" class="v-chip ${go_ ? 'is-go' : ''}" ${go_ ? `data-go="${esc(a.to)}"` : `data-question="${esc(a.q)}"`}>` +
+    `${esc(a.label)}${go_ ? ICONS.arrow : ''}</button>`;
+}
+
+function paintContext() {
+  const sub = $('#v-sub');
+  if (sub) sub.textContent = routeId() === 'today' ? 'Here with you on Home' : `Here with you on ${routeTitle()}`;
+  const box = $('[data-suggestions]');
+  if (box) box.innerHTML = actionsFor(routeId()).slice(0, 6).map(actionButton).join('');
+}
+
+/* A few next steps after each answer: things she can do from where you are,
+   minus whatever you just asked. Replaced by the next answer's own. */
+function paintFollowups(asked) {
+  const log = $('#v-log');
+  if (!log) return;
+  log.querySelector('.v-follow')?.remove();
+  const low = String(asked || '').trim().toLowerCase();
+  const next = actionsFor(routeId()).filter(a => a.kind === 'go' || a.q.toLowerCase() !== low).slice(0, 3);
+  if (!next.length) return;
+  const row = document.createElement('div');
+  row.className = 'v-follow';
+  row.innerHTML = next.map(actionButton).join('');
+  log.appendChild(row);
+  scrollLog();
 }
 function paintLlmRow() {
   const row = $('#v-llm');
@@ -209,6 +338,7 @@ function paintVoice(){
   if(use)use.disabled=busy || !status.text.trim();
 }
 onVoiceChange(paintVoice);
+onVoiceChange(() => { const st = voiceState(); if (st.phase === 'recording') setMood('listening'); else if (document.documentElement.dataset.vanessa === 'listening') setMood('idle'); });
 function useTranscript(){
   if(['recording','stopping'].includes(voiceState().phase))return;
   const transcript=$('#v-transcript')?.value.trim();if(!transcript)return;
@@ -302,6 +432,7 @@ async function generate(q, deterministic, ticket, user) {
       const { answer } = splitThinking(raw);
       // While framing, the sentence is short and lands at once; streaming a
       // half-written lead-in above figures that are not there yet reads oddly.
+      if (answer) setMood('speaking');
       if (answer && !hasFacts) { bubble.textContent = answer; $('#v-log').scrollTop = $('#v-log').scrollHeight; }
     });
   } catch {
@@ -319,12 +450,14 @@ async function generate(q, deterministic, ticket, user) {
        usableLeadIn — and the computed answer stands on its own. */
     if (!usableLeadIn(answer, deterministic.text)) { bubble.remove(); return false; }
     bubble.textContent = `${answer}\n\n${deterministic.text}`;
+    collapse(bubble);
   } else {
     /* Nothing computed, so nothing to contradict — but it still may not invent
        a figure that was in neither the handbook nor the question. */
     if (!numbersCheckOut(answer, book?.text, notes, q)) { bubble.remove(); return false; }
     bubble.textContent = answer;
   }
+  collapse(bubble);
 
   llmHistory.push({ role: 'user', content: q }, { role: 'assistant', content: answer });
   llmHistory = llmHistory.slice(-6);
@@ -341,7 +474,10 @@ function send(question) {
   sendQueue = sendQueue.then(async () => {
     if (ticket !== epoch || user !== appState.me?.id) return;
     const note = say('her', 'Checking…');
-    $('#v-orb')?.classList.add('is-thinking');
+    note?.classList.add('is-typing');
+    note?.setAttribute('aria-label', 'Vanessa is thinking');
+    setMood('thinking');
+    let inFlow = false;   // mid eval write-up: no side-quests offered
     try {
       const failures = await warmUp();
       if (ticket !== epoch || user !== appState.me?.id) return;
@@ -360,6 +496,7 @@ function send(question) {
       let r = await reply;
       // `reply` is a promise, so it is always truthy — test what it resolved to.
       const evalFlowHandled = !!r;
+      inFlow = evalFlowHandled || !!evalDraft();
       if (ticket !== epoch || user !== appState.me?.id) return;
       if (!r) r = ask(q);
       paintEvalDraft();
@@ -388,8 +525,11 @@ function send(question) {
       if (r.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(r.go); }, 400);
     } catch (err) {
       note?.remove();
-      if (ticket === epoch) say('her', 'I could not finish that question. Please try again.');
-    } finally { note?.remove(); $('#v-orb')?.classList.remove('is-thinking'); }
+      if (ticket === epoch) say('her', 'I could not finish that question. Please try again.')?.classList.add('is-error');
+    } finally {
+      note?.remove();
+      if (ticket === epoch && user === appState.me?.id) { setMood('speaking'); if (!inFlow) paintFollowups(q); }
+    }
   });
 }
 
@@ -425,7 +565,8 @@ export function resetVanessa() {
   resetLlmHistory();
   resetActions();
   resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
-  $('#v-launch')?.remove(); $('#v-panel')?.remove(); tellToggle();
+  $('#v-launch')?.remove(); $('#v-panel')?.remove(); document.body.classList.remove('v-open');
+  document.documentElement.dataset.vanessa = 'idle'; tellToggle();
 }
 export function initVanessa() {
   if ($('#v-launch') || !appState.me) return;
@@ -435,14 +576,14 @@ export function initVanessa() {
   document.body.appendChild(launch);
   const panel = document.createElement('div');
   panel.id = 'v-panel'; panel.className = 'v-panel'; panel.hidden = true;
-  const suggestions = vanessaSuggestions();
   panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Vanessa');
   panel.innerHTML = `<div class="v-head"><span class="v-head-id"><span class="orb orb-sm" id="v-orb"><i></i></span>
-      <span><strong>Vanessa</strong><span class="sub">Answers from your loaded hub data</span></span></span>
+      <span><strong>Vanessa</strong><span class="sub" id="v-sub">Here with you</span></span></span>
+    <span class="v-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
     <button type="button" class="icon-btn" id="v-close" aria-label="Close">✕</button></div>
     <div id="v-saved" class="v-saved" hidden></div>
     <div class="v-log" id="v-log" role="log" aria-live="polite"></div>
-    <div class="v-chips" data-suggestions>${suggestions.map(s => `<button type="button" class="v-chip" data-question="${esc(s)}">${esc(s)}</button>`).join('')}</div>
+    <div class="v-chips" data-suggestions></div>
     <details><summary style="padding:8px 14px;cursor:pointer;font-size:.8rem">Smarter answers (optional)</summary>
       <div class="v-chips" id="v-llm"></div>
       <div class="v-chips" id="v-model"></div></details>
@@ -463,12 +604,24 @@ export function initVanessa() {
   resumeLlmIfWanted().catch(() => {});
   if(!voiceSupported())$('#v-voice-status').textContent='Dictation is not supported in this browser. You can still type.';
   checkAvailability().then(() => { if (ticket === epoch && appState.me) resumeIfEnabled(); });
-  const close = () => { readEvalEdits(); resetVoice(); voiceDraftRef=null; open = false; panel.hidden = true; launch.setAttribute('aria-expanded','false'); tellToggle(); };
+  /* Closing plays her exit before the panel is hidden. A reopen during that
+     moment cancels it, so a quick double-click never leaves her hidden. */
+  let closing = null;
+  const close = () => {
+    readEvalEdits(); resetVoice(); voiceDraftRef=null; open = false;
+    launch.setAttribute('aria-expanded','false'); document.body.classList.remove('v-open'); tellToggle();
+    panel.classList.add('is-closing');
+    clearTimeout(closing);
+    closing = setTimeout(() => { panel.hidden = true; panel.classList.remove('is-closing'); }, 190);
+  };
   launch.addEventListener('click', async () => {
     if (!appState.me) return;
     if(open){close();return;}
-    open = !open; panel.hidden = !open; launch.setAttribute('aria-expanded', String(open)); tellToggle();
+    open = !open; clearTimeout(closing); panel.classList.remove('is-closing');
+    panel.hidden = !open; launch.setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('v-open', open); tellToggle();
     if (open) {
+      paintContext();
       $('#v-input')?.focus();
       await warmUp();
       if (ticket !== epoch || !open) return;
@@ -514,7 +667,23 @@ export function initVanessa() {
     if (e.target.id === 'v-model-cancel') { cancelModel(); return; }
     if (e.target.id === 'v-model-off') { disableModel(); return; }
     if (e.target.id === 'v-model-check') { checkAvailability(); return; }
+    const dest = e.target.closest('[data-go]');
+    if (dest) {
+      // On a narrow screen she is in the way of the tool she just opened.
+      if (!matchMedia('(min-width: 1280px)').matches) close();
+      go(dest.dataset.go);
+      return;
+    }
     const chip = e.target.closest('[data-question]');
     if (chip) send(chip.dataset.question);
   });
+  paintContext();
 }
+
+/* She always knows which screen you are on: her header, suggestions and
+   follow-ups are redrawn whenever the route changes, open or not. */
+onRoute(() => {
+  paintContext();
+  const log = $('#v-log');
+  if (log?.querySelector('.v-follow')) paintFollowups('');
+});

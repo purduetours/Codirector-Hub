@@ -28,6 +28,8 @@
   import { register, visibleModules } from '../js/core/router.js';
   import { hintsFor } from '../js/core/vanessa-hints.js';
   import { vanessaSuggestions } from '../js/core/vanessa-ui.js';
+  import { actionsFor, homeActions } from '../js/core/vanessa-context.js';
+  import { ask } from '../js/core/vanessa.js';
 
   import evals from '../js/modules/evals.js';
   import interviews from '../js/modules/interviews.js';
@@ -88,6 +90,23 @@
       (/eval/i.test(q) && !role.in_training) ||
       (/discussing|checked in/i.test(q) && !role.in_recruitment));
     check(`${key}: Vanessa's suggestions match the role`, !offTopic.length, offTopic.join(' | '));
+
+    // Every place her home deck and page actions offer must be one the router allows.
+    const offered = [...homeActions(), ...EXPECT.admin.flatMap(id => actionsFor(id))];
+    const badGo = offered.filter(a => a.kind === 'go' && !ids.includes(a.to)).map(a => a.to);
+    check(`${key}: Vanessa only offers to open tools this role can reach`, !badGo.length, [...new Set(badGo)].join(', '));
+
+    // Asking about a restricted tool's data gets a polite no, never the data.
+    const NO = "That tool isn't available for your account.";
+    const probes = [
+      !role.in_training    && 'Who still needs an eval?',
+      !role.in_training    && 'What are my evals?',
+      !role.in_recruitment && 'Who is worth discussing?',
+      !role.in_recruitment && 'Who is ungraded?',
+      !role.is_admin       && 'Who owes a makeup?'
+    ].filter(Boolean);
+    const leakedAnswers = probes.filter(q => ask(q).text !== NO);
+    if (probes.length) check(`${key}: restricted questions get "${NO}"`, !leakedAnswers.length, leakedAnswers.join(' | '));
   }
 
   document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;

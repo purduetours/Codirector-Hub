@@ -1,0 +1,195 @@
+/* ============================================================ flow
+   Hub 2.0, second pass: one continuous surface instead of stacked boxes.
+
+   Four ideas carry it:
+   1. An ambient layer lives behind the whole app — slow light in Vanessa's
+      three colours, tinted by the tool you are in. It spans every section, so
+      the page reads as one environment rather than a column of containers.
+   2. Surfaces are glass over that light, not paper cut-outs on a grey desk.
+   3. Screens change shape rather than swapping: the rail and top bar stay
+      put while the workspace glides, and a tile on Vanessa's home expands
+      into the tool it opens (View Transitions; routes are untouched).
+   4. Motion is physical and sparing: things rise into place as they scroll
+      in, the tab highlight slides, dialogs settle and lift away.
+============================================================================ */
+
+@property --ambient-tint { syntax: "<color>"; inherits: true; initial-value: #8e6f3e; }
+:root { transition: --ambient-tint 1.1s var(--ease-out); }
+
+/* ------------------------------------------------------------- ambient */
+.ambient {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden;
+  background: var(--bg);
+}
+.ambient i {
+  position: absolute; border-radius: 50%; filter: blur(70px); opacity: .55;
+  will-change: transform;
+  transform: translate3d(0, calc(var(--scroll, 0) * var(--depth, -.08px)), 0);
+}
+.ambient .a1 { --depth: -.06px; width: 56vw; height: 56vw; right: -14vw; top: -22vw;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--v-1) 34%, transparent), transparent); animation: drift-a 26s ease-in-out infinite alternate; }
+.ambient .a2 { --depth: -.12px; width: 44vw; height: 44vw; left: -12vw; top: 38vh;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--v-3) 24%, transparent), transparent); animation: drift-b 32s ease-in-out infinite alternate; }
+.ambient .a3 { --depth: -.18px; width: 40vw; height: 40vw; right: 8vw; top: 90vh;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--v-2) 20%, transparent), transparent); animation: drift-a 38s ease-in-out infinite alternate-reverse; }
+.ambient .a4 { --depth: -.04px; width: 70vw; height: 30vw; left: 20vw; top: -12vw; opacity: .5;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--ambient-tint) 26%, transparent), transparent); }
+.ambient::after {  /* the fine paper grain that ties it to the sign-in page */
+  content: ""; position: absolute; inset: 0; opacity: .35;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+  -webkit-mask: radial-gradient(ellipse 80% 60% at 70% 0%, #000, transparent 70%);
+          mask: radial-gradient(ellipse 80% 60% at 70% 0%, #000, transparent 70%);
+}
+@keyframes drift-a { to { translate: -6vw 4vh; scale: 1.08; } }
+@keyframes drift-b { to { translate: 5vw -5vh; scale: .94; } }
+body { background: transparent; }
+:root[data-theme="dark"] .ambient i { opacity: .7; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ambient i { opacity: .7; } }
+
+/* Each tool's own light washes in under its title and fades into the page,
+   so a tool page opens with its colour rather than a hard header bar. */
+.main { position: relative; transition: padding-right var(--dur-3) var(--ease-out); }
+.main::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 340px; pointer-events: none; z-index: -1;
+  background:
+    radial-gradient(60% 100% at 18% 0%, color-mix(in srgb, var(--ambient-tint) 14%, transparent), transparent 70%),
+    linear-gradient(to bottom, color-mix(in srgb, var(--bg-elev) 30%, transparent), transparent);
+}
+
+/* ------------------------------------------------------------- glass */
+.rail { background: color-mix(in srgb, var(--bg-elev) 42%, transparent);
+  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  border-right-color: color-mix(in srgb, var(--line) 70%, transparent); }
+.card, .panel, .stat, .hm-card, .tr-wrap, .gr-wrap, #td-changes {
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
+  border-color: color-mix(in srgb, var(--line) 75%, transparent);
+}
+.panel, .tr-wrap, .gr-wrap, .hm-card { backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); }
+
+/* The top bar is part of the page until you scroll, then becomes glass. */
+.topbar { background: transparent; border-bottom-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
+  transition: background var(--dur-3), border-color var(--dur-3), box-shadow var(--dur-3); }
+body.is-scrolled .topbar {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--line) 70%, transparent);
+  backdrop-filter: saturate(1.5) blur(18px); -webkit-backdrop-filter: saturate(1.5) blur(18px);
+  box-shadow: 0 10px 30px -24px rgba(30,20,0,.4);
+}
+
+/* ------------------------------------------------------ view transitions */
+.rail     { view-transition-name: rail; }
+.topbar   { view-transition-name: topbar; }
+.dock     { view-transition-name: dock; }
+#v-panel  { view-transition-name: vanessa; }
+.v-float  { view-transition-name: v-float; }
+#view     { view-transition-name: workspace; }
+
+::view-transition-group(*) { animation-duration: .46s; animation-timing-function: cubic-bezier(.2,.8,.2,1); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .3s; }
+::view-transition-old(workspace) { animation: vt-leave .24s var(--ease) both; }
+::view-transition-new(workspace) { animation: vt-arrive .46s var(--ease-out) both; }
+@keyframes vt-leave  { to { opacity: 0; transform: translateY(-6px) scale(.995); filter: blur(2px); } }
+@keyframes vt-arrive { from { opacity: 0; transform: translateY(14px); filter: blur(3px); } }
+
+/* The morph: the tile grows into the workspace. Old and new both fill the
+   moving box and cross-fade inside it, so it reads as one thing unfolding. */
+.vt-morph::view-transition-group(workspace) { animation-duration: .56s; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.vt-morph::view-transition-old(workspace) { animation: vt-fade-out .26s ease both; height: 100%; object-fit: cover; }
+.vt-morph::view-transition-new(workspace) { animation: vt-fade-in .4s .12s ease both; height: 100%; object-fit: cover; }
+.vt-morph::view-transition-image-pair(workspace) { border-radius: var(--radius-lg); overflow: hidden; }
+.vt-morph #view-ico { view-transition-name: tool-ico; }
+::view-transition-group(tool-ico) { animation-duration: .56s; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-fade-in  { from { opacity: 0; } }
+
+/* ------------------------------------------------------------- reveal */
+.rv { opacity: 0; transform: translateY(18px) scale(.99); }
+.rv.rv-in { opacity: 1; transform: none;
+  transition: opacity .6s var(--ease-out) var(--rv-d, 0ms), transform .75s var(--ease-out) var(--rv-d, 0ms) !important; }
+
+/* ------------------------------------------------------------- loading */
+.loading-v { display: grid; justify-items: center; gap: 14px; padding: 72px 20px; }
+.loading-v .orb { animation-duration: 2.4s; }
+.loading-v p { font-weight: 650; color: var(--text-soft); }
+.skel-lines { display: grid; gap: 9px; width: min(420px, 80%); margin-top: 6px; }
+.skel-lines .skel { height: 12px; border-radius: 999px; }
+.skel-lines .skel:nth-child(2) { width: 82%; justify-self: center; }
+.skel-lines .skel:nth-child(3) { width: 60%; justify-self: center; }
+
+/* ------------------------------------------------------------- tabs */
+.tabs { position: relative; }
+.tab-glider {
+  position: absolute; left: 0; top: 0; border-radius: 999px; pointer-events: none;
+  background: var(--bg-elev); box-shadow: var(--shadow);
+  transition: transform .42s cubic-bezier(.3,1.3,.5,1), width .42s cubic-bezier(.3,1.3,.5,1), opacity .2s;
+}
+.tabs.has-glider .tab { position: relative; z-index: 1; }
+.tabs.has-glider .tab.is-active { background: transparent; box-shadow: none; }
+
+/* ------------------------------------------------------------- modals */
+.modal-root.is-leaving .modal { animation: lift .17s var(--ease) forwards; }
+.modal-root.is-leaving .modal-scrim { animation: fade-out .17s ease forwards; }
+@keyframes lift { to { opacity: 0; transform: translateY(8px) scale(.98); } }
+@keyframes fade-out { to { opacity: 0; } }
+@media (max-width: 620px) { .modal-root.is-leaving .modal { animation: sheet-out .2s var(--ease) forwards; } }
+@keyframes sheet-out { to { transform: translateY(40px); opacity: 0; } }
+
+/* ------------------------------------------------------------- press */
+.btn, .tab, .v-chip, .hm-chip, .navlink, .hm-act, .hm-tool { -webkit-tap-highlight-color: transparent; }
+.navlink { transition: background var(--dur-2) var(--ease), color var(--dur-2), transform var(--dur-2) var(--ease); }
+.navlink:active { transform: scale(.98); }
+.navlink.is-active::before { animation: rail-in .4s var(--ease-out); }
+@keyframes rail-in { from { transform: scaleY(.2); opacity: 0; } }
+
+/* ------------------------------------------------------------- orb moods
+   Every orb in the hub follows Vanessa's state, so when she is thinking the
+   whole interface quietly shows it. */
+:root[data-vanessa="thinking"] .orb { animation-duration: 2.2s; }
+:root[data-vanessa="thinking"] .orb > i { animation-duration: 1.4s; }
+:root[data-vanessa="speaking"] .orb { box-shadow:
+    inset 0 -6px 14px rgba(60,35,0,.22), inset 0 3px 8px rgba(255,255,255,.4),
+    0 0 0 1px color-mix(in srgb, var(--gold-deep) 30%, transparent),
+    0 0 26px -2px color-mix(in srgb, var(--v-1) 75%, transparent); }
+:root[data-vanessa="listening"] .orb { animation-duration: 6s; }
+:root[data-vanessa="listening"] .orb::after,
+:root[data-vanessa="thinking"] #v-orb::after,
+:root[data-vanessa="thinking"] .hm-orb .orb::after {
+  content: ""; position: absolute; inset: -6px; border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--v-1) 60%, transparent);
+  animation: ring 1.6s var(--ease-out) infinite;
+}
+@keyframes ring { from { transform: scale(.85); opacity: .9; } to { transform: scale(1.35); opacity: 0; } }
+
+/* ---------------------------------------------------- floating Vanessa
+   On a tool page she waits in the corner as a small glass pill that says
+   what she can help with here. It opens the same panel as everything else. */
+.v-float {
+  position: fixed; right: 22px; bottom: 22px; z-index: 45;
+  display: flex; align-items: center; gap: 10px; max-width: min(360px, calc(100vw - 44px));
+  padding: 7px 16px 7px 7px; border-radius: 999px; cursor: pointer;
+  font: inherit; color: var(--text); text-align: left;
+  background: var(--bg-glass); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: var(--shadow-lg);
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-3), box-shadow var(--dur-2), border-color var(--dur-2);
+  animation: float-in .6s .3s var(--ease-out) both;
+}
+.v-float:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--gold) 60%, var(--line)); }
+.v-float .orb { --size: 34px; }
+.v-float-text { display: grid; min-width: 0; line-height: 1.25; }
+.v-float-text b { font-size: var(--fs-sm); font-weight: 750; }
+.v-float-text span { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 0; opacity: 0; transition: max-width .4s var(--ease-out), opacity .3s; }
+.v-float:hover .v-float-text span, .v-float:focus-visible .v-float-text span { max-width: 280px; opacity: 1; }
+body[data-route="today"] .v-float { opacity: 0; pointer-events: none; transform: translateY(16px) scale(.9); }
+@keyframes float-in { from { opacity: 0; transform: translateY(18px) scale(.9); } }
+@media (max-width: 860px) { .v-float { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient i { animation: none !important; transform: none !important; }
+  .rv { opacity: 1 !important; transform: none !important; }
+}
+@media print { .ambient, .v-float { display: none !important; } }

@@ -87,7 +87,7 @@ async function handleMessage(question) {
   const resume=/^(?:resume|continue|finish)(?: my| the)? (?:eval|evaluation|draft)[.!]?$/i.test(q);
   const discard=/^discard (?:my |the )?saved draft[.!]?$/i.test(q);
   if (!flow && !wantsEvalFlow(q) && !resume && !discard) return null;
-  if (!state.me || !inTraining()) return {text:'Evaluation submission is available to signed-in training members.'};
+  if (!state.me || !inTraining()) return {text:"That tool isn't available for your account."};
   if (flow && (flow.owner !== state.me.id || flow.version !== state.sessionVersion)) resetEvalFlow();
   if (flow?.phase === 'submitting') return {text:'Submission has started. Please wait for the server result; it cannot be cancelled now.',evalDraft:true};
   if(discard){

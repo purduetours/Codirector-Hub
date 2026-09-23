@@ -2,7 +2,7 @@
    Modules register themselves; the router owns which one is mounted. Hash-based
    so it works on GitHub Pages with no server rewrites.
 ============================================================================ */
-import { $, $$, closeAllModals } from './ui.js';
+import { $, $$, closeAllModals, settle } from './ui.js';
 import { isAdmin, inTraining, inRecruitment } from './state.js';
 import { iconFor } from './icons.js';
 
@@ -92,33 +92,86 @@ export async function render() {
   }
 }
 
+/* ------------------------------------------------------------ transitions
+   Moving between screens should feel like one surface changing shape, not a
+   page being thrown away. Where the browser supports View Transitions the
+   rail and top bar hold still while the workspace glides; when a tool is
+   picked from Vanessa's home, the tile itself expands into the workspace.
+
+   Only the painting is wrapped. The data fetch (mount) happens after the
+   transition has captured the new frame, so a slow request can never hold
+   an animation hostage — the workspace arrives, then its content rises in.
+   Routes, hashes and the render queue are exactly as they were. */
+let pendingMorph = null;
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/** Navigate, growing the workspace out of `el` (a tile or action). */
+export function morphTo(id, el) {
+  pendingMorph = el || null;
+  go(id);
+}
+
+function tint(id) {
+  const root = document.documentElement;
+  const c = getComputedStyle(root).getPropertyValue(`--t-${id}`).trim();
+  if (c) root.style.setProperty('--ambient-tint', c);
+}
+
 async function renderOnce() {
   const id = currentId();
   if (!id) return;
   const mod = modules.get(id);
+  const changing = !current || current.id !== id;
+  const firstPaint = !current;
 
   if (current && current.id !== id && current.unmount) {
     try { current.unmount(); } catch { /* a broken teardown shouldn't block navigation */ }
   }
-
-  current = mod;
-  paintNav();
-
-  $('#view-title').textContent = mod.title;
-  $('#view-crumb').textContent = mod.crumb || '';
-  document.body.dataset.route = mod.id;
-  document.documentElement.style.setProperty('--tool', `var(--t-${mod.id}, var(--gold-deep))`);
-  const ico = $('#view-ico');
-  if (ico) ico.innerHTML = iconFor(mod);
 
   // Anything still open belongs to the outgoing view and is about to be wiped with
   // it. Close it properly first, or its scroll lock outlives it.
   closeAllModals();
 
   const view = $('#view');
-  view.classList.remove('is-entering');
-  view.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading…</p></div>';
-  routeListeners.forEach(fn => { try { fn(mod); } catch { /* a listener never blocks a page */ } });
+  const from = pendingMorph?.isConnected ? pendingMorph : null;
+  pendingMorph = null;
+
+  const swap = () => {
+    current = mod;
+    paintNav();
+    $('#view-title').textContent = mod.title;
+    $('#view-crumb').textContent = mod.crumb || '';
+    document.body.dataset.route = mod.id;
+    document.documentElement.style.setProperty('--tool', `var(--t-${mod.id}, var(--gold-deep))`);
+    tint(mod.id);
+    const ico = $('#view-ico');
+    if (ico) ico.innerHTML = iconFor(mod);
+
+    view.classList.remove('is-entering');
+    view.style.viewTransitionName = '';
+    view.innerHTML = `<div class="loading loading-v">
+        <span class="orb orb-sm"><i></i></span>
+        <p>Opening ${mod.title}…</p>
+        <div class="skel-lines"><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
+      </div>`;
+    if (changing) window.scrollTo({ top: 0, behavior: 'instant' });
+    if (from) document.documentElement.classList.add('vt-morph');
+    routeListeners.forEach(fn => { try { fn(mod); } catch { /* a listener never blocks a page */ } });
+  };
+
+  if (document.startViewTransition && changing && !firstPaint && !reducedMotion()) {
+    if (from) {
+      from.style.viewTransitionName = 'workspace';
+      const fromIco = from.querySelector('[data-morph-ico]');
+      if (fromIco) fromIco.style.viewTransitionName = 'tool-ico';
+      view.style.viewTransitionName = 'none';   // the tile is the workspace, for one frame
+    }
+    const vt = document.startViewTransition(swap);
+    vt.finished.finally(() => document.documentElement.classList.remove('vt-morph'));
+    try { await vt.updateCallbackDone; } catch { /* swap threw; fall through and mount anyway */ }
+  } else {
+    swap();
+  }
 
   try {
     await mod.mount(view);
@@ -129,6 +182,7 @@ async function renderOnce() {
   // Replay the entrance once the real content is in, not over the spinner.
   void view.offsetWidth;
   view.classList.add('is-entering');
+  settle(view);
 }
 
 export function paintNav() {

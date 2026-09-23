@@ -26,10 +26,10 @@ import { state, myName, isAdmin, inTraining, inRecruitment, termLabel } from '..
 import { select, update } from '../core/db.js';
 import { loadDesks, loadTours } from '../core/sheets.js';
 import { $, esc, injectStyle, initials, prettyTime, todayISO } from '../core/ui.js';
-import { go, visibleModules } from '../core/router.js';
+import { morphTo, visibleModules } from '../core/router.js';
 import { iconFor, ICONS } from '../core/icons.js';
 import { presenceSnapshot } from '../core/presence.js';
-import { vanessaSuggestions } from '../core/vanessa-ui.js';
+import { homeActions } from '../core/vanessa-context.js';
 import { loadRoster } from './evals.js';
 import interviews, { interviewData } from './interviews.js';
 
@@ -228,65 +228,121 @@ function paintChanges(list) {
   </details>`;
 }
 
-/* ---------------------------------------------------------------- launcher
-   Which tools come first. A tool with something waiting in it leads; after
-   that, the tool this person's committee lives in. The order is a guess at
-   relevance, never a gate — every tool they can reach is on the page. */
-const HOME_ORDER = ['evals', 'interviews', 'schedule', 'training', 'announcements', 'desks', 'directory', 'people', 'health'];
+/* ------------------------------------------------------------ vocabulary */
+const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const count = (n, one, many = one + 's') => `${n < 10 ? WORDS[n] : n} ${n === 1 ? one : many}`;
+const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 
-function toolLine(m) {
-  const c = state.counts || {};
-  if (m.id === 'evals' && state.guides?.length) {
-    const mine = state.guides.filter(g => g.evaluatorId === state.me?.id && g.status === 'claimed').length;
-    return `${c.open || 0} up for grabs${mine ? ` · ${mine} yours` : ''}`;
-  }
-  if (m.id === 'interviews') {
-    const cands = interviewData()?.candidates;
-    if (cands?.length) return `${cands.length} candidates · ${cands.filter(x => x.checkin === 'Yes').length} checked in`;
-  }
-  if (m.id === 'schedule' && toursToday) {
-    return toursToday.slots.length ? `${toursToday.slots.length} tour${toursToday.slots.length === 1 ? '' : 's'} today` : 'No tours today';
-  }
-  return m.crumb || '';
+/* Her greeting uses the name on the account — first word of full_name, since
+   that is all the members table stores — and simply drops it if there is none. */
+function firstName() {
+  return String(myName() || '').trim().split(/\s+/)[0] || '';
 }
 
-function rankTools(items) {
-  const waiting = new Map();
-  items.forEach(i => waiting.set(i.go, (waiting.get(i.go) || 0) + i.n));
-  const tools = visibleModules().filter(m => m.id !== 'today' && !m.soon);
-  const pos = id => { const i = HOME_ORDER.indexOf(id); return i < 0 ? 99 : i; };
-  return tools
-    .map(m => ({ m, waiting: waiting.get(m.id) || 0, badge: Number(m.badge?.() || 0) }))
-    .sort((a, b) => (b.waiting > 0) - (a.waiting > 0) || (b.badge > 0) - (a.badge > 0) || pos(a.m.id) - pos(b.m.id));
+function isoPlus(days) {
+  const d = new Date(); d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function tile(t, featured) {
-  const { m, waiting, badge } = t;
-  const count = waiting || badge;
-  return `<a class="hm-tool ${featured ? 'is-featured' : ''}" href="#/${esc(m.id)}" style="--tool:var(--t-${esc(m.id)}, var(--gold-deep))">
-    <span class="hm-tool-ico">${iconFor(m)}</span>
-    <span class="hm-tool-body">
-      <span class="hm-tool-name">${esc(m.title)}</span>
-      <span class="hm-tool-line" data-line="${esc(m.id)}">${esc(toolLine(m))}</span>
-    </span>
-    ${count ? `<span class="hm-tool-count" title="${waiting ? 'Waiting on you' : 'New'}">${count}</span>` : ''}
-    <span class="hm-tool-go">${ICONS.arrow}</span>
-  </a>`;
+/* ------------------------------------------------------------ agenda
+   What is coming up, built only from what the hub already knows: your own
+   claimed evals and their tour dates, today's tours from the workbook,
+   unread announcements, and the count of things waiting on you. */
+function agenda(items) {
+  const out = [];
+  const me = state.me?.id;
+  const today = todayISO(), tomorrow = isoPlus(1);
+  const mine = inTraining() ? (state.guides || []).filter(g => g.evaluatorId === me && g.status === 'claimed') : [];
+
+  mine.filter(g => g.date === today)
+    .sort((a, b) => (a.time || '').localeCompare(b.time || ''))
+    .forEach(g => out.push({ today: true, tone: 'gold', icon: 'evals', go: 'evals',
+      k: g.time ? prettyTime(g.time) : 'Today', t: `Eval · ${g.name}` }));
+
+  if (toursToday?.slots?.length) {
+    const now = nowHHMM();
+    const next = toursToday.slots.find(sl => (sl.start || '') >= now);
+    out.push({ today: true, icon: 'schedule', go: 'schedule',
+      k: next ? `Next ${prettyTime(next.start)}` : 'Done for today',
+      t: `${toursToday.slots.length} tour${toursToday.slots.length === 1 ? '' : 's'} today` });
+  }
+
+  const soon = mine.filter(g => g.date === tomorrow);
+  if (soon.length) out.push({ icon: 'evals', go: 'evals', k: 'Tomorrow',
+    t: soon.length === 1 ? `Eval · ${soon[0].name}` : `${soon.length} evals` });
+
+  const ann = visibleModules().find(m => m.id === 'announcements');
+  const unread = Number(ann?.badge?.() || 0);
+  if (unread) out.push({ icon: 'announcements', go: 'announcements', k: 'New', t: `${unread} announcement${unread === 1 ? '' : 's'}` });
+
+  if (items.length) out.push({ icon: 'spark', scroll: '#hm-attn', tone: 'warn', k: 'Waiting',
+    t: `${items.length} thing${items.length === 1 ? '' : 's'} to look at` });
+  return out;
 }
 
-function paintLauncher(items) {
-  const ranked = rankTools(items);
-  const box = $('#hm-tools');
+function vanessaLine(items, plan) {
+  const todayCount = plan.filter(p => p.today && p.icon === 'evals').length;
+  const bits = [];
+  if (todayCount) bits.push(`you have ${count(todayCount, 'eval')} coming up today`);
+  if (items.length) bits.push(`${count(items.length, 'thing')} ${items.length === 1 ? 'is' : 'are'} waiting on you`);
+  if (!bits.length) {
+    return toursToday?.slots?.length
+      ? `Nothing is waiting on you. ${cap(count(toursToday.slots.length, 'tour'))} ${toursToday.slots.length === 1 ? 'is' : 'are'} running today.`
+      : 'Nothing is waiting on you right now. Pick something below, or ask me anything.';
+  }
+  return cap(bits.join(', and ')) + '. Here is the day at a glance.';
+}
+
+function paintAgenda(plan) {
+  const box = $('#hm-agenda');
   if (!box) return;
-  if (!ranked.length) {
-    box.innerHTML = '<p class="muted">Your role does not include any tools yet. A codirector can change that in People.</p>';
-    return;
-  }
-  // Two featured on a normal role; three when there is enough to fill a row.
-  const lead = ranked.length >= 6 ? 3 : Math.min(2, ranked.length);
+  box.innerHTML = plan.map((p, i) => `
+    <button type="button" class="hm-plan ${p.tone ? 'is-' + p.tone : ''}" style="--i:${i}"
+      ${p.go ? `data-go="${esc(p.go)}"` : ''} ${p.scroll ? `data-scroll="${esc(p.scroll)}"` : ''}>
+      <span class="hm-plan-ico">${ICONS[p.icon] || ICONS.spark}</span>
+      <span class="hm-plan-body"><em>${esc(p.k)}</em><b>${esc(p.t)}</b></span>
+    </button>`).join('');
+  box.hidden = !plan.length;
+}
+
+/* ---------------------------------------------------------------- deck
+   What Vanessa can do for you — verbs, drawn from vanessa-context.js so the
+   deck, her panel and her hints all offer the same permission-checked set.
+   The first three are given room; the rest sit in a quieter row. */
+function paintDeck() {
+  const box = $('#hm-deck');
+  if (!box) return;
+  const acts = homeActions({ toursToday: toursToday ? toursToday.slots.length : null });
+  const lead = acts.filter(a => a.weight >= 2).slice(0, 3);
+  // Questions first, then places — every place is also in "All your tools".
+  const rest = acts.filter(a => !lead.includes(a))
+    .sort((x, y) => (x.kind === 'ask' ? 0 : 1) - (y.kind === 'ask' ? 0 : 1) || y.weight - x.weight)
+    .slice(0, 6);
+  const btn = (a, big) => {
+    const tool = a.kind === 'go' ? a.to : (a.icon || 'today');
+    const attrs = a.kind === 'go' ? `data-go="${esc(a.to)}"` : `data-ask="${esc(a.q)}"`;
+    return `<button type="button" class="hm-act ${big ? 'is-lead' : ''} ${a.kind === 'ask' ? 'is-ask' : ''}" ${attrs}
+        style="--tool:var(--t-${esc(tool)}, var(--gold-deep))">
+      <span class="hm-act-ico" data-morph-ico>${ICONS[a.icon] || ICONS.spark}</span>
+      <span class="hm-act-body"><b>${esc(a.label)}</b>${a.sub ? `<em>${esc(a.sub)}</em>` : ''}</span>
+      <span class="hm-act-go">${a.kind === 'ask' ? '<span class="orb orb-xs"><i></i></span>' : ICONS.arrow}</span>
+    </button>`;
+  };
   box.innerHTML =
-    `<div class="hm-featured hm-cols-${lead}">${ranked.slice(0, lead).map(t => tile(t, true)).join('')}</div>` +
-    (ranked.length > lead ? `<div class="hm-rest">${ranked.slice(lead).map(t => tile(t, false)).join('')}</div>` : '');
+    `<div class="hm-deck-lead hm-n${lead.length}">${lead.map(a => btn(a, true)).join('')}</div>` +
+    (rest.length ? `<div class="hm-deck-rest">${rest.map(a => btn(a, false)).join('')}</div>` : '');
+}
+
+/* All of this person's tools, as a quiet row of places at the foot of the
+   page. The rail has them too; this is for the person who scrolled here. */
+function paintPlaces() {
+  const box = $('#hm-places');
+  if (!box) return;
+  box.innerHTML = visibleModules().filter(m => m.id !== 'today' && !m.soon).map(m => {
+    const b = Number(m.badge?.() || 0);
+    return `<a class="hm-place" href="#/${esc(m.id)}" data-go="${esc(m.id)}" style="--tool:var(--t-${esc(m.id)}, var(--gold-deep))">
+      <span class="hm-place-ico" data-morph-ico>${iconFor(m)}</span><span>${esc(m.title)}</span>${b ? `<i>${b}</i>` : ''}</a>`;
+  }).join('');
 }
 
 /* ---------------------------------------------------------- on tour today */
@@ -320,97 +376,85 @@ function paintTours() {
     return;
   }
   const { slots } = toursToday;
-  if (!slots.length) {
-    box.innerHTML = `<p class="hm-quiet">No tours on the schedule today.</p>`;
-    return;
-  }
+  if (!slots.length) { box.innerHTML = `<p class="hm-quiet">No tours on the schedule today.</p>`; return; }
   const now = nowHHMM();
-  const next = slots.findIndex(s => (s.start || '') >= now);
-  box.innerHTML = `<ol class="hm-timeline">${slots.map((s, i) => {
-    const past = next === -1 ? true : i < next;
-    const cls = past ? 'is-past' : i === next ? 'is-next' : '';
+  const next = slots.findIndex(sl => (sl.start || '') >= now);
+  box.innerHTML = `<ol class="hm-timeline">${slots.map((sl, i) => {
+    const cls = next === -1 || i < next ? 'is-past' : i === next ? 'is-next' : '';
     return `<li class="${cls}">
-      <span class="hm-time">${esc(s.slot || prettyTime(s.start))}</span>
-      <span class="hm-guides">${s.guides.slice().sort().map(g => `<span>${esc(g)}</span>`).join('')}</span>
+      <span class="hm-time">${esc(sl.slot || prettyTime(sl.start))}</span>
+      <span class="hm-guides">${sl.guides.slice().sort().map(g => `<span>${esc(g)}</span>`).join('')}</span>
     </li>`;
   }).join('')}</ol>`;
-  const line = $('[data-line="schedule"]');
-  if (line) line.textContent = `${slots.length} tour${slots.length === 1 ? '' : 's'} today`;
 }
 
-/* ------------------------------------------------------------- active now */
+/* ------------------------------------------------------------- active now
+   A quiet line under Vanessa rather than a panel: a few faces and a count. */
 function paintPresence(snap) {
-  const box = $('#hm-active');
+  const box = $('#hm-presence');
   if (!box) return;
-  if (!snap) { box.innerHTML = '<p class="hm-quiet">Checking who is around…</p>'; return; }
-  if (snap.error) { box.innerHTML = '<p class="hm-quiet">Could not load who is active. Retrying automatically.</p>'; return; }
-  const users = snap.users || [];
-  $('#hm-active-n').textContent = users.length ? String(users.length) : '';
-  box.innerHTML = users.length
-    ? `<ul class="hm-people">${users.slice(0, 12).map(u => `<li title="${esc(u.full_name)}">
-        <span class="hm-av">${esc(initials(u.full_name))}</span>
-        <span>${esc(u.full_name)}${u.member_id === state.me?.id ? ' <em>(you)</em>' : ''}</span></li>`).join('')}</ul>` +
-      (users.length > 12 ? `<p class="hm-quiet">and ${users.length - 12} more</p>` : '')
-    : '<p class="hm-quiet">Nobody else is on right now.</p>';
+  const users = snap && !snap.error ? (snap.users || []) : [];
+  if (!users.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const faces = users.slice(0, 5).map((u, i) =>
+    `<span class="hm-face" style="--i:${i}" title="${esc(u.full_name)}">${esc(initials(u.full_name))}</span>`).join('');
+  box.innerHTML = `<span class="hm-faces">${faces}</span>
+    <span>${users.length === 1 ? 'Just you here right now' : `${count(users.length, 'team member')} active now`}</span>`;
 }
 
-/* ---------------------------------------------------------------- greeting */
+/* ---------------------------------------------------------------- shell */
 function dayPart() {
   const h = new Date().getHours();
   return h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 }
 
-function vanessaLine(items) {
-  if (!items.length) return 'Nothing is waiting on you right now. Pick a tool, or ask me anything about the hub.';
-  const total = items.reduce((n, i) => n + i.n, 0);
-  const top = items[0];
-  return items.length === 1
-    ? `One thing needs a look: ${top.what.toLowerCase()}.`
-    : `${items.length} things are waiting — ${total} item${total === 1 ? '' : 's'} in all. The most pressing: ${top.what.toLowerCase()}.`;
-}
-
 function shell() {
-  const first = myName().split(' ')[0] || 'there';
+  const name = firstName();
   const date = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-  const role = state.role?.name || '';
-  const chips = vanessaSuggestions();
   return `
-  <section class="hm-hero">
-    <div class="hm-hero-glow" aria-hidden="true"></div>
-    <div class="hm-orb" aria-hidden="true"><span class="orb orb-lg"><i></i></span></div>
-    <div class="hm-hero-body">
-      <p class="hm-eyebrow"><span>${esc(dayPart())}</span><span>${esc(date)}</span>${termLabel() ? `<span>${esc(termLabel())}</span>` : ''}${role ? `<span>${esc(role)}</span>` : ''}</p>
-      <h1 class="hm-title">Hi, ${esc(first)}. <em>What are we working on today?</em></h1>
+  <section class="hm-stage" data-reveal>
+    <div class="hm-orb" aria-hidden="true"><span class="hm-halo"></span><span class="orb orb-lg"><i></i></span></div>
+    <div class="hm-stage-body">
+      <p class="hm-eyebrow"><span>${esc(dayPart())}</span><span>${esc(date)}</span>${termLabel() ? `<span>${esc(termLabel())}</span>` : ''}</p>
+      <h1 class="hm-title">${name ? `Welcome back, <span class="hm-name">${esc(name)}</span>.` : 'Welcome back.'}
+        <em>What are we working on today?</em></h1>
       <p class="hm-says" id="hm-says"><span class="skel" style="display:inline-block;width:min(420px,70%);height:1em;vertical-align:middle"></span></p>
+      <div class="hm-agenda" id="hm-agenda" hidden></div>
       <form class="hm-ask" id="hm-ask">
         <span class="hm-ask-ico">${ICONS.spark}</span>
         <input id="hm-ask-input" autocomplete="off" aria-label="Ask Vanessa" placeholder="Ask Vanessa anything about the hub…">
         <button class="btn btn-primary btn-sm" type="submit">Ask ${ICONS.send}</button>
       </form>
-      <div class="hm-chips">${chips.map(q => `<button type="button" class="hm-chip" data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+      <p class="hm-presence" id="hm-presence" hidden></p>
     </div>
   </section>
 
-  <section class="hm-section">
-    <header class="hm-head"><h2>Your tools</h2><p>Everything your role can open. Tap one to go straight there.</p></header>
-    <div id="hm-tools" class="hm-tools"><div class="hm-featured hm-cols-2"><div class="skel" style="height:132px"></div><div class="skel" style="height:132px"></div></div></div>
-  </section>
-
-  <div class="hm-split">
-    <section class="hm-card hm-attn">
-      <header class="hm-card-head"><span class="hm-card-ico">${ICONS.spark}</span><h3>Waiting on you</h3><span class="hm-card-n" id="hm-attn-n"></span></header>
-      <div id="td-list"><div class="skel" style="height:58px;margin-bottom:8px"></div><div class="skel" style="height:58px"></div></div>
+  <div class="hm-sheet">
+    <svg class="hm-wave" viewBox="0 0 1200 60" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 60 L0 34 C 180 6, 360 2, 560 18 S 940 54, 1200 20 L1200 60 Z"/>
+    </svg>
+    <section class="hm-block" data-reveal>
+      <header class="hm-head"><h2>What can I help with?</h2><p>Pick one — I'll take you there, or do it with you.</p></header>
+      <div id="hm-deck" class="hm-deck">
+        <div class="hm-deck-lead hm-n3"><div class="skel" style="height:118px"></div><div class="skel" style="height:118px"></div><div class="skel" style="height:118px"></div></div>
+      </div>
     </section>
-    <div class="hm-side">
-      <section class="hm-card">
-        <header class="hm-card-head"><span class="hm-card-ico">${ICONS.clock}</span><h3>On tour today</h3></header>
+
+    <div class="hm-flow">
+      <section class="hm-col" id="hm-attn" data-reveal>
+        <header class="hm-col-head"><span class="hm-card-ico">${ICONS.spark}</span><h3>Waiting on you</h3><span class="hm-card-n" id="hm-attn-n"></span></header>
+        <div id="td-list"><div class="skel" style="height:58px;margin-bottom:8px"></div><div class="skel" style="height:58px"></div></div>
+      </section>
+      <section class="hm-col" data-reveal>
+        <header class="hm-col-head"><span class="hm-card-ico">${ICONS.clock}</span><h3>On tour today</h3></header>
         <div id="hm-tours"><div class="skel" style="height:40px"></div></div>
       </section>
-      <section class="hm-card">
-        <header class="hm-card-head"><span class="hm-card-ico hm-live">${ICONS.users}</span><h3>Active now</h3><span class="hm-card-n" id="hm-active-n"></span></header>
-        <div id="hm-active"></div>
-      </section>
     </div>
+
+    <section class="hm-block hm-places-block" data-reveal>
+      <header class="hm-head"><h2>All your tools</h2></header>
+      <nav class="hm-places" id="hm-places" aria-label="Your tools"></nav>
+    </section>
   </div>`;
 }
 
@@ -436,27 +480,32 @@ export default {
       e.preventDefault();
       const input = $('#hm-ask-input');
       const q = input.value.trim();
-      if (!q) return ask('');
       input.value = '';
       ask(q);
     });
-    view.querySelector('.hm-chips').addEventListener('click', e => {
-      const chip = e.target.closest('[data-ask]');
-      if (chip) ask(chip.dataset.ask);
+
+    /* One delegate for everything clickable on home. Going somewhere grows
+       the clicked element into the workspace; asking hands it to Vanessa. */
+    view.addEventListener('click', e => {
+      const q = e.target.closest('[data-ask]');
+      if (q) { ask(q.dataset.ask); return; }
+      const to = e.target.closest('[data-scroll]');
+      if (to) { $(to.dataset.scroll)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      const dest = e.target.closest('[data-go]');
+      if (dest) { e.preventDefault(); morphTo(dest.dataset.go, dest); }
     });
 
     paintPresence(presenceSnapshot());
     onPresence = e => paintPresence(e.detail);
     document.addEventListener('hub:presence', onPresence);
 
-    // The launcher paints at once from what is already known, then again
-    // once the roster and interviews have arrived with their counts.
-    paintLauncher([]);
-    const tours = loadToursToday().then(paintTours);
+    paintPlaces();
+    const tours = loadToursToday();
 
     await Promise.allSettled([
       inTraining() && !state.guides.length ? loadRoster() : null,
-      inRecruitment() ? interviews.prefetch?.() : null
+      inRecruitment() ? interviews.prefetch?.() : null,
+      tours
     ]);
     if (!view.isConnected || document.body.dataset.route !== 'today') return;
 
@@ -466,20 +515,35 @@ export default {
                            why: 'Nobody is down for these', go: 'desks' });
     if (!view.isConnected || document.body.dataset.route !== 'today') return;
 
-    $('#hm-says').textContent = vanessaLine(items);
+    const plan = agenda(items);
+    $('#hm-says').textContent = vanessaLine(items, plan);
+    paintAgenda(plan);
+    paintDeck();
+    paintPlaces();
+    paintTours();
     $('#hm-attn-n').textContent = items.length ? String(items.length) : '';
-    paintLauncher(items);
-    tours.then(() => { if (view.isConnected) paintTours(); });
 
-    $('#td-list').innerHTML = items.length
-      ? items.map(i => `
-          <button class="td-row hm-row ${i.tone === 'warn' ? 'is-warn' : ''}" data-go="${esc(i.go)}">
-            <span class="td-n">${i.n}</span>
+    const row = (i, n) => `
+          <button class="td-row hm-row ${i.tone === 'warn' ? 'is-warn' : ''}" data-go="${esc(i.go)}" style="--i:${n}">
+            <span class="td-n" data-morph-ico>${i.n}</span>
             <span class="td-what"><b>${esc(i.what)}</b><em>${esc(i.why)}</em></span>
             <span class="td-go">${ICONS.arrow}</span>
-          </button>`).join('')
+          </button>`;
+    const SHOWN = 5;
+    $('#td-list').innerHTML = items.length
+      ? items.slice(0, SHOWN).map(row).join('') +
+        (items.length > SHOWN
+          ? `<div class="hm-more-list" id="hm-more-list"><div>${items.slice(SHOWN).map(row).join('')}</div></div>
+             <button type="button" class="hm-more" aria-expanded="false" aria-controls="hm-more-list">${items.length - SHOWN} more ${ICONS.arrow}</button>`
+          : '')
       : `<div class="hm-clear"><span class="hm-clear-mark">${ICONS.check}</span>
          <p><b>All clear.</b> Nothing needs you right now.</p></div>`;
+    $('.hm-more')?.addEventListener('click', e => {
+      const b = e.currentTarget, openNow = b.getAttribute('aria-expanded') !== 'true';
+      b.setAttribute('aria-expanded', String(openNow));
+      $('#hm-more-list').classList.toggle('is-open', openNow);
+      b.firstChild.textContent = openNow ? 'Show fewer ' : `${items.length - SHOWN} more `;
+    });
 
     /* Admin only: this names who changed what, which is oversight rather than
        something a committee member needs on their landing screen. */
@@ -487,7 +551,7 @@ export default {
       const box = document.createElement('div');
       box.id = 'td-changes';
       box.hidden = true;
-      view.querySelector('.hm-split').after(box);
+      view.querySelector('.hm-places-block').before(box);
       recentChanges().then(list => {
         paintChanges(list);
         $('#td-changes')?.addEventListener('click', async e => {
@@ -505,10 +569,5 @@ export default {
         });
       }).catch(() => {});
     }
-
-    $('#td-list').addEventListener('click', e => {
-      const row = e.target.closest('[data-go]');
-      if (row) go(row.dataset.go);
-    });
   }
 };

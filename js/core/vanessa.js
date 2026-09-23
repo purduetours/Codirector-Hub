@@ -461,7 +461,7 @@ function scheduleAnswers(q) {
 
 function deskAnswers(q) {
   if (!has(q, 'desk', 'desks', 'coverage', 'uncovered desk')) return null;
-  if (!inTraining()) return 'Desk Coverage is available to the training team. Your current role does not include it.';
+  if (!inTraining()) return "That tool isn't available for your account.";
   const desks = shared.desks;
   if (!desks) return 'Desk coverage has not loaded yet. Try Refresh before checking coverage.';
   const range = dateRange(q);
@@ -517,7 +517,7 @@ function navigation(q) {
         (['training', 'people'].includes(d.to) && !isAdmin()) ||
         (d.to === 'interviews' && !inRecruitment()) ||
         false;
-      if (barred) return { say: 'Your current role does not include that tool.' };
+      if (barred) return { say: "That tool isn't available for your account." };
       const NICE = { evals: 'Eval Tracker', training: 'Training', people: 'People', desks: 'Desk Coverage', today: 'Home' };
       return { go: d.to, say: `Opening ${NICE[d.to] || d.to}.` };
     }
@@ -947,6 +947,8 @@ export function ask(question) {
   if (handbookTopic) return { text: earlyTopic.a };
   if (/\bwho\b.*\b(?:still|gotta)\b.*\b(?:look|evaluate|eval)\b/i.test(q)) {
     if (inTraining() && inRecruitment() && !/\bevals?\b/i.test(q)) return { text: 'Do you mean guides needing an eval, or candidates needing interview scores?', stuck: false };
+    // Rewritten only into a question this account may ask; otherwise a plain no.
+    if (!inTraining() && (/\bevals?\b/i.test(q) || !inRecruitment())) return { text: "That tool isn't available for your account." };
     q = inTraining() ? 'who still needs an eval' : 'who is ungraded';
   }
   /* "anything for me", "whos free", "idk what to do" -- all one question. */
@@ -987,6 +989,14 @@ export function ask(question) {
     if (candidateHits.length) return { text: interviewAnswers(q) };
     if (/^tell me about\s+/i.test(q) && !earlyTopic) return { text: 'I could not identify that person in your loaded hub data. Try their full name.' };
   }
+  /* A question about data behind a tool this account cannot open gets a
+     plain, polite no — not a near-miss answer from somewhere else, and not an
+     explanation of roles. Only questions that are unmistakably about that
+     data: the how-to and handbook answers above have already had their turn,
+     so "what are the absence rules" never reaches this. */
+  const refused = restrictedTopic(q, aboutPeople, interviewy);
+  if (refused) return { text: refused };
+
   const answer = trainingAnswers(q)
     || deskAnswers(q)
     || scheduleAnswers(q)
@@ -1043,10 +1053,24 @@ export function ask(question) {
 
   // `stuck` tells the caller the keyword matcher gave up. That is the only
   // moment the model tier is allowed to have an opinion.
+  // Suggestions only for what this account can actually use.
+  const tryThese = inTraining() ? '"who still needs an eval"'
+                 : inRecruitment() ? '"who is worth discussing"'
+                 : '"who is leading tours tomorrow"';
   return { stuck: true, text: vary(
     'I did not follow that one.', 'Sorry — not sure what you mean there.', 'That one is beyond me.') +
-    ' I can tell you who still needs an eval, who is worth discussing, how the scoring works, ' +
-    'or take you to a tab. Try "who still needs an eval" or "open interviews".' };
+    ` Try ${tryThese}, ask about the handbook, or pick one of the suggestions below.` };
+}
+
+/** The polite refusal, when a question is plainly about data this account cannot see. */
+function restrictedTopic(q, aboutPeople, interviewy) {
+  const NO = "That tool isn't available for your account.";
+  const dataQ = aboutPeople || /\b(how many|how far|progress|status|summar\w*|list|show|count|my|mine|what are|which)\b/i.test(q);
+  const aboutInterviews = interviewy || /\b(discuss\w*|ungraded|scored|scores?|candidates?|interview\w*)\b/i.test(q);
+  if (!inRecruitment() && aboutInterviews && dataQ) return NO;
+  if (!inTraining() && dataQ && has(q, 'eval', 'evals', 'claimed', 'unclaimed', 'desk', 'coverage')) return NO;
+  if (!isAdmin() && dataQ && has(q, 'makeup', 'make up', 'owes', 'attendance', 'filed an absence', 'absent')) return NO;
+  return null;
 }
 
 /* ------------------------------------------------------------ small talk
@@ -1116,7 +1140,7 @@ function greetText() {
 function capabilityText() {
   const can = [];
   if (inTraining())     can.push('• Evals — who still needs one, what you have claimed, how far along we are, who has no tour scheduled');
-  if (inTraining())     can.push('• Training — who owes a makeup, who filed an absence, how a session went');
+  if (isAdmin())        can.push('• Training — who owes a makeup, who filed an absence, how a session went');
   if (inRecruitment())  can.push('• Interviews — who is ungraded, who is worth discussing, the top candidates, how many are undecided');
   can.push('• The schedule — who is leading tours today, tomorrow, or this week');
   if (inTraining()) can.push('• Desks — weekly coverage and uncovered slots');
