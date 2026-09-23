@@ -66,7 +66,14 @@ injectStyle('people-css', `
  * A refusal naming the setting means it is off; any other complaint (about the
  * address) means the door is open.
  */
-async function signupsOpen() {
+/* The setting does not change mid-session, so it is asked once. */
+let signupsAnswer = null;
+function signupsOpen() {
+  if (!signupsAnswer) signupsAnswer = probeSignups().then(v => { if (v === null) signupsAnswer = null; return v; });
+  return signupsAnswer;
+}
+
+async function probeSignups() {
   const { SUPABASE_URL: url, SUPABASE_KEY: key } = window.CONFIG || {};
   try {
     const res = await fetch(`${url}/auth/v1/signup`, {

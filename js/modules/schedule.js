@@ -14,7 +14,7 @@ injectStyle('sch-css', `
 .sch-day { margin-bottom: 18px; }
 .sch-date { font-size:.82rem; font-weight:700; color:var(--text-soft); margin-bottom:7px;
   position:sticky; top:var(--topbar); padding:6px 10px; margin-left:-10px; margin-right:-10px; z-index:1; border-radius:12px;
-  background:color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+  background:color-mix(in srgb, var(--bg) 94%, transparent); }
 .sch-date .rel { font-weight:500; color:var(--text-faint); margin-left:7px; }
 .sch-slot { display:flex; gap:12px; align-items:flex-start; padding:10px 13px;
   border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--bg-elev);

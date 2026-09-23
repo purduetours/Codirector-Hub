@@ -7,6 +7,8 @@ export function createPresence({call,draw,visible,now=Date.now,schedule=setInter
  async function tick(){
   if(stopped||busy)return;busy=true;
   try{await call('hub_heartbeat',{p_tab:tabId,p_active:active()});if(stopped)return;
+   // Nobody is looking at a hidden tab, so it keeps its heartbeat but skips fetching the list.
+   if(!visible())return;
    const rows=await call('hub_active_users');if(!stopped)draw({users:rows,error:false});
   }catch{if(!stopped)draw({users:[],error:true});}finally{busy=false;}
  }
@@ -17,9 +19,9 @@ export function createPresence({call,draw,visible,now=Date.now,schedule=setInter
   stop(){stopped=true;if(timer!==null)unschedule(timer);timer=null;draw({users:[],error:false});}
  };
 }
-let cleanup=null,lastPresence=null;
+let cleanup=null,lastPresence=null,lastKey=null;
 export const presenceSnapshot=()=>lastPresence;
-export function resetPresence(){cleanup?.();cleanup=null;lastPresence=null;}
+export function resetPresence(){cleanup?.();cleanup=null;lastPresence=null;lastKey=null;}
 export function initPresence(){
  resetPresence();if(!state.me)return;
  const host=document.querySelector('.topbar-actions');if(!host)return;
@@ -37,6 +39,9 @@ export function initPresence(){
   },
   draw:({users,error})=>{
    if(!current())return;
+   // Every 30 seconds the same answer usually comes back; only a change repaints.
+   const key=error?'!':(users||[]).map(u=>u.member_id).sort().join(',');
+   if(key===lastKey)return;lastKey=key;
    // The home screen shows the same list; it listens rather than polling twice.
    lastPresence={users,error};document.dispatchEvent(new CustomEvent('hub:presence',{detail:lastPresence}));
    summary.replaceChildren(Object.assign(document.createElement('span'),{className:'au-lbl',textContent:'Active now · '}),error?'unavailable':String(users.length));summary.setAttribute('aria-label',error?'Active now: unavailable':`Active now: ${users.length}`);body.replaceChildren();

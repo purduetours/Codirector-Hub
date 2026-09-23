@@ -8,11 +8,6 @@
 /* ============================================================ environment
    Near-black with slow pink light. The ambient layer from pass two now
    glows magenta and violet; each workspace still tints it with its own hue. */
-.ambient { background:
-  radial-gradient(120% 80% at 70% -10%, rgba(255,79,163,.10), transparent 60%),
-  radial-gradient(90% 70% at -10% 100%, rgba(142,91,255,.08), transparent 60%),
-  var(--bg); }
-.ambient::after { opacity: .22; }
 :root[data-theme="light"] .ambient::after { opacity: .35; }
 .main::before { height: 420px; background:
   radial-gradient(55% 100% at 16% 0%, color-mix(in srgb, var(--ambient-tint) 16%, transparent), transparent 70%); }
@@ -22,16 +17,6 @@
    when idle, quickens when she thinks, brightens as she responds, sweeps
    when she opens a workspace, and turns green or red briefly for done or
    wrong — then settles. */
-.orb {
-  background:
-    radial-gradient(circle at 30% 26%, var(--orb-hi) 0 7%, transparent 30%),
-    radial-gradient(circle at 70% 78%, color-mix(in srgb, var(--v-2) 70%, transparent) 0 12%, transparent 46%),
-    conic-gradient(from var(--orb-turn, 0deg), var(--v-1), var(--v-3) 20%, var(--pink-bright) 40%, var(--v-2) 62%, var(--v-1) 82%, var(--v-3));
-  box-shadow:
-    inset 0 -6px 14px rgba(40,0,25,.45), inset 0 3px 8px rgba(255,255,255,.28),
-    0 0 0 1px rgba(255,79,163,.35),
-    0 0 24px -4px var(--pink-glow);
-}
 .hm-orb .orb { box-shadow:
     inset 0 -10px 22px rgba(40,0,25,.5), inset 0 4px 12px rgba(255,255,255,.3),
     0 0 0 1px rgba(255,79,163,.4), 0 0 60px -6px var(--pink-glow), 0 0 140px -30px var(--pink); }
@@ -39,9 +24,8 @@
 .hm-halo::before, .hm-halo::after { border-color: rgba(255,79,163,.35); }
 .hm-thread { background: linear-gradient(to bottom, var(--pink), rgba(142,91,255,.45) 40%, transparent 85%); box-shadow: 0 0 12px var(--pink-glow); }
 
-:root[data-vanessa="thinking"] .orb   { animation-duration: 2s; filter: saturate(1.25); }
 :root[data-vanessa="responding"] .orb { box-shadow: inset 0 -6px 14px rgba(40,0,25,.35), 0 0 0 1px rgba(255,79,163,.5), 0 0 44px -2px var(--pink-glow); }
-:root[data-vanessa="opening"] .orb    { animation-duration: 1.4s; box-shadow: 0 0 0 1px rgba(255,79,163,.55), 0 0 70px 0 var(--pink-glow); }
+:root[data-vanessa="opening"] .orb    { box-shadow: 0 0 0 1px rgba(255,79,163,.55), 0 0 70px 0 var(--pink-glow); }
 :root[data-vanessa="ready"] .hm-orb .orb { box-shadow: 0 0 0 1px rgba(255,79,163,.45), 0 0 80px -4px var(--pink-glow), 0 0 160px -30px var(--pink); }
 
 /* The thinking sweep along her panel's top edge, and the thread, run pink. */
@@ -65,7 +49,7 @@
 .modal { background: color-mix(in srgb, var(--bg-elev) 94%, transparent); border-color: var(--hairline); border-radius: var(--radius-xl); }
 .modal::before { background: linear-gradient(90deg, transparent, var(--pink) 25%, var(--v-2) 55%, var(--pink) 80%, transparent); height: 2px; }
 .modal-foot { background: rgba(255,255,255,.02); }
-.modal-scrim { background: rgba(4,3,6,.66); backdrop-filter: blur(8px) saturate(1.2); -webkit-backdrop-filter: blur(8px) saturate(1.2); }
+.modal-scrim { background: rgba(4,3,6,.66); }
 
 /* The home sheet: a darker plane rising out of her light, with a pink seam. */
 .hm-sheet { background: linear-gradient(to bottom, rgba(20,19,24,.78), rgba(14,13,17,.5) 55%, transparent); }
@@ -195,7 +179,7 @@ textarea.is-filled { box-shadow: 0 0 0 3px rgba(255,79,163,.35), var(--glow-sm);
 .vt-morph::view-transition-group(workspace) { animation-duration: .6s; }
 .vt-morph::view-transition-image-pair(workspace) { border-radius: var(--radius-xl); box-shadow: 0 0 0 1px rgba(255,79,163,.35), 0 0 80px -10px var(--pink-glow); }
 ::view-transition-old(root) { animation: noir-dim .32s var(--ease) both; }
-@keyframes noir-dim { to { opacity: 0; filter: brightness(.6); } }
+@keyframes noir-dim { to { opacity: 0; } }
 .is-chosen { box-shadow: 0 0 0 2px var(--pink), 0 0 50px -8px var(--pink-glow), var(--shadow-lg) !important; }
 .is-handing::after {
   content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 5;

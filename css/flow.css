@@ -16,26 +16,30 @@
 @property --ambient-tint { syntax: "<color>"; inherits: true; initial-value: #ff4fa3; }
 :root { transition: --ambient-tint 1.1s var(--ease-out); }
 
-/* ------------------------------------------------------------- ambient */
+/* ------------------------------------------------------------- ambient
+   The environment behind everything. It LOOKS like slow light drifting
+   across the app; it is actually three static radial gradients on one fixed
+   layer, painted once. No blur filter (a radial falloff reads the same), no
+   infinite animation, no scroll parallax — the old version re-styled the
+   whole page on every scroll frame and repainted four blurred full-screen
+   layers forever. The one moving part is the tool tint, which eases for a
+   second when you change workspace and then stops. */
 .ambient {
   position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden;
-  background: var(--bg);
+  background:
+    radial-gradient(50vw 50vw at 88% -8%, color-mix(in srgb, var(--v-1) 22%, transparent), transparent 70%),
+    radial-gradient(40vw 40vw at -6% 62%, color-mix(in srgb, var(--v-2) 13%, transparent), transparent 70%),
+    radial-gradient(36vw 36vw at 78% 118%, color-mix(in srgb, var(--v-3) 9%, transparent), transparent 70%),
+    var(--bg);
+  contain: strict;
 }
-.ambient i {
-  position: absolute; border-radius: 50%; filter: blur(70px); opacity: .55;
-  will-change: transform;
-  transform: translate3d(0, calc(var(--scroll, 0) * var(--depth, -.08px)), 0);
+.ambient i { display: none; }
+.ambient .a4 {   /* the workspace's own hue, the one part that changes */
+  display: block; position: absolute; left: 12vw; top: -14vw; width: 76vw; height: 34vw; border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--ambient-tint) 20%, transparent), transparent);
 }
-.ambient .a1 { --depth: -.06px; width: 56vw; height: 56vw; right: -14vw; top: -22vw;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--v-1) 34%, transparent), transparent); animation: drift-a 26s ease-in-out infinite alternate; }
-.ambient .a2 { --depth: -.12px; width: 44vw; height: 44vw; left: -12vw; top: 38vh;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--v-3) 24%, transparent), transparent); animation: drift-b 32s ease-in-out infinite alternate; }
-.ambient .a3 { --depth: -.18px; width: 40vw; height: 40vw; right: 8vw; top: 90vh;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--v-2) 20%, transparent), transparent); animation: drift-a 38s ease-in-out infinite alternate-reverse; }
-.ambient .a4 { --depth: -.04px; width: 70vw; height: 30vw; left: 20vw; top: -12vw; opacity: .5;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--ambient-tint) 26%, transparent), transparent); }
-.ambient::after {  /* the fine paper grain that ties it to the sign-in page */
-  content: ""; position: absolute; inset: 0; opacity: .35;
+.ambient::after {  /* the fine grid that ties it to the sign-in page */
+  content: ""; position: absolute; inset: 0; opacity: .22;
   background-image:
     linear-gradient(color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px);
@@ -43,11 +47,7 @@
   -webkit-mask: radial-gradient(ellipse 80% 60% at 70% 0%, #000, transparent 70%);
           mask: radial-gradient(ellipse 80% 60% at 70% 0%, #000, transparent 70%);
 }
-@keyframes drift-a { to { translate: -6vw 4vh; scale: 1.08; } }
-@keyframes drift-b { to { translate: 5vw -5vh; scale: .94; } }
 body { background: transparent; }
-.ambient i { opacity: .72; }
-:root[data-theme="light"] .ambient i { opacity: .5; }
 
 /* Each tool's own light washes in under its title and fades into the page,
    so a tool page opens with its colour rather than a hard header bar. */
@@ -61,13 +61,13 @@ body { background: transparent; }
 
 /* ------------------------------------------------------------- glass */
 .rail { background: color-mix(in srgb, var(--bg-elev) 42%, transparent);
-  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
+
   border-right-color: color-mix(in srgb, var(--line) 70%, transparent); }
 .card, .panel, .stat, .hm-card, .tr-wrap, .gr-wrap, #td-changes {
   background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
   border-color: color-mix(in srgb, var(--line) 75%, transparent);
 }
-.panel, .tr-wrap, .gr-wrap, .hm-card { backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); }
+.panel, .tr-wrap, .gr-wrap, .hm-card { }
 
 /* The top bar is part of the page until you scroll, then becomes glass. */
 .topbar { background: transparent; border-bottom-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
@@ -91,8 +91,8 @@ body.is-scrolled .topbar {
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .3s; }
 ::view-transition-old(workspace) { animation: vt-leave .24s var(--ease) both; }
 ::view-transition-new(workspace) { animation: vt-arrive .46s var(--ease-out) both; }
-@keyframes vt-leave  { to { opacity: 0; transform: translateY(-6px) scale(.995); filter: blur(2px); } }
-@keyframes vt-arrive { from { opacity: 0; transform: translateY(14px); filter: blur(3px); } }
+@keyframes vt-leave  { to { opacity: 0; transform: translateY(-6px); } }
+@keyframes vt-arrive { from { opacity: 0; transform: translateY(12px); } }
 
 /* The morph: the tile grows into the workspace. Old and new both fill the
    moving box and cross-fade inside it, so it reads as one thing unfolding. */
@@ -147,13 +147,10 @@ body.is-scrolled .topbar {
 /* ------------------------------------------------------------- orb moods
    Every orb in the hub follows Vanessa's state, so when she is thinking the
    whole interface quietly shows it. */
-:root[data-vanessa="thinking"] .orb { animation-duration: 2.2s; }
-:root[data-vanessa="thinking"] .orb > i { animation-duration: 1.4s; }
-:root[data-vanessa="speaking"] .orb { box-shadow:
+:root[data-vanessa="responding"] .orb { box-shadow:
     inset 0 -6px 14px rgba(40,0,25,.3), inset 0 3px 8px rgba(255,255,255,.4),
     0 0 0 1px color-mix(in srgb, var(--gold-deep) 30%, transparent),
     0 0 26px -2px color-mix(in srgb, var(--v-1) 75%, transparent); }
-:root[data-vanessa="listening"] .orb { animation-duration: 6s; }
 :root[data-vanessa="listening"] .orb::after,
 :root[data-vanessa="thinking"] #v-orb::after,
 :root[data-vanessa="thinking"] .hm-orb .orb::after {
@@ -189,7 +186,6 @@ body[data-route="today"] .v-float { opacity: 0; pointer-events: none; transform:
 @media (max-width: 860px) { .v-float { display: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .ambient i { animation: none !important; transform: none !important; }
   .rv { opacity: 1 !important; transform: none !important; }
 }
 @media print { .ambient, .v-float { display: none !important; } }

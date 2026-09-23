@@ -192,7 +192,10 @@ export function reveal(root) {
     .forEach(el => { el.classList.add('rv'); io.observe(el); });
 }
 
+let tabObservers = [];
 export function glideTabs(root) {
+  // The previous screen's tabs are gone; so are their observers.
+  tabObservers.forEach(o => o.disconnect()); tabObservers = [];
   $$('.tabs', root).forEach(tabs => {
     if (tabs.querySelector(':scope > .tab-glider')) return;
     const glider = document.createElement('span');
@@ -211,8 +214,10 @@ export function glideTabs(root) {
     glider.style.transition = 'none';
     place();
     requestAnimationFrame(() => { glider.style.transition = ''; });
-    new MutationObserver(place).observe(tabs, { attributes: true, subtree: true, attributeFilter: ['class', 'hidden'] });
-    new ResizeObserver(place).observe(tabs);
+    const mo = new MutationObserver(place), ro = new ResizeObserver(place);
+    mo.observe(tabs, { attributes: true, subtree: true, attributeFilter: ['class', 'hidden'] });
+    ro.observe(tabs);
+    tabObservers.push(mo, ro);
   });
 }
 

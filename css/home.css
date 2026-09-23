@@ -25,17 +25,19 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
 .hm-halo {
   position: absolute; inset: -46px; border-radius: 50%; pointer-events: none;
   background: radial-gradient(closest-side, color-mix(in srgb, var(--v-1) 30%, transparent), transparent 72%);
-  animation: halo 6s ease-in-out infinite;
+  opacity: .85;
 }
 .hm-halo::before, .hm-halo::after {
   content: ""; position: absolute; inset: 38px; border-radius: 50%;
   border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
-  animation: halo-ring 6s ease-out infinite;
+  opacity: 0;
 }
-.hm-halo::after { animation-delay: 3s; }
 @keyframes halo { 50% { transform: scale(1.08); opacity: .8; } }
 @keyframes halo-ring { from { transform: scale(.8); opacity: .8; } to { transform: scale(1.5); opacity: 0; } }
-:root[data-vanessa="thinking"] .hm-halo { animation-duration: 1.8s; }
+/* Her halo only moves when she does: a ring goes out as she wakes or opens a workspace. */
+:root[data-vanessa="ready"] .hm-halo::before, :root[data-vanessa="opening"] .hm-halo::before,
+:root[data-vanessa="thinking"] .hm-halo::before { animation: halo-ring 1.1s var(--ease-out) 1; }
+:root[data-vanessa="thinking"] .hm-halo::after { animation: halo-ring 1.1s .4s var(--ease-out) 2; }
 
 .hm-stage-body { min-width: 0; display: grid; gap: 16px; }
 
@@ -68,7 +70,7 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
   display: flex; align-items: center; gap: 11px; text-align: left; cursor: pointer;
   padding: 9px 16px 9px 9px; border-radius: 18px; font: inherit; color: var(--text);
   background: var(--bg-glass); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3);
+
   box-shadow: var(--shadow);
   animation: plan-in .6s calc(.15s + var(--i, 0) * 70ms) var(--ease-out) both;
   transition: transform var(--dur-2) var(--ease), box-shadow var(--dur-2), border-color var(--dur-2);
@@ -89,7 +91,7 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
   display: flex; align-items: center; gap: 8px; margin-top: 4px; max-width: 660px;
   padding: 6px 6px 6px 16px; border-radius: 999px;
   background: var(--bg-glass); border: 1px solid color-mix(in srgb, var(--line-strong) 80%, transparent);
-  backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3);
+
   box-shadow: var(--shadow-md);
   transition: border-color var(--dur-2), box-shadow var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
 }
@@ -116,14 +118,14 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
 .hm-face:first-child { margin-left: 0; }
 @keyframes face-in { from { opacity: 0; transform: scale(.6); } }
 .hm-presence::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--good); order: 3;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent); animation: live 2.4s ease-in-out infinite; }
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent); }
 
 /* ================================================================= sheet
    Rises out of the stage on a curved edge and runs to the foot of the page. */
 .hm-sheet {
   position: relative; margin: -22px -32px -72px; padding: 22px 32px 72px;
   background: linear-gradient(to bottom, color-mix(in srgb, var(--bg-elev) 72%, transparent), color-mix(in srgb, var(--bg-elev) 40%, transparent) 60%, transparent);
-  backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2);
+
   border-radius: 0; isolation: isolate;
 }
 .hm-wave { position: absolute; left: 0; right: 0; top: -44px; width: 100%; height: 46px; pointer-events: none; }
@@ -131,7 +133,6 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
 .hm-sheet::before {  /* a soft gold seam along the curve */
   content: ""; position: absolute; left: 10%; right: 10%; top: -26px; height: 40px; z-index: -1; pointer-events: none;
   background: radial-gradient(50% 100% at 50% 100%, color-mix(in srgb, var(--gold) 18%, transparent), transparent 70%);
-  filter: blur(10px);
 }
 
 .hm-block { margin-bottom: 40px; }
@@ -176,7 +177,7 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
 .hm-act.is-focus {
   padding: 16px 16px 15px; border-radius: var(--radius-lg); overflow: hidden; isolation: isolate;
   background: var(--glass-2); border-color: color-mix(in srgb, var(--gold) 28%, var(--hairline));
-  backdrop-filter: var(--blur-2); -webkit-backdrop-filter: var(--blur-2); box-shadow: var(--shadow);
+ box-shadow: var(--shadow);
 }
 .hm-act.is-focus::before {
   content: ""; position: absolute; inset: auto -30% -80% auto; width: 90%; height: 160%; z-index: -1;
@@ -228,7 +229,7 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
 /* the handoff: the choice lifts, everything else steps back */
 .is-handing .hm-act:not(.is-chosen), .is-handing .hm-plan:not(.is-chosen), .is-handing .hm-row:not(.is-chosen),
 .is-handing .hm-ask, .is-handing .hm-flow, .is-handing .hm-presence {
-  opacity: .35; filter: saturate(.6); transition: opacity .24s var(--ease), filter .24s var(--ease);
+  opacity: .35; transition: opacity .18s var(--ease);
 }
 .is-chosen { transform: translateY(-3px) scale(1.015) !important; z-index: 2;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 70%, transparent), var(--shadow-lg) !important; }
@@ -300,7 +301,7 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
 .hm-timeline li:last-child::after { display: none; }
 .hm-timeline li.is-past { opacity: .5; }
 .hm-timeline li.is-next::before { border-color: var(--gold); background: var(--gold);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 30%, transparent); animation: live 2.4s ease-in-out infinite; }
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 30%, transparent); }
 .hm-time { font-size: var(--fs-sm); font-weight: 750; font-variant-numeric: tabular-nums; color: var(--text); padding-top: 1px; }
 .hm-timeline li.is-next .hm-time { color: var(--gold-deep); }
 .hm-guides { display: flex; flex-wrap: wrap; gap: 5px; }

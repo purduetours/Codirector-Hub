@@ -145,7 +145,17 @@ async function deskGaps() {
    Deliberately read-only and deliberately short. It is a smoke alarm, not an
    audit system: if something here is a surprise, go and look properly.
 -------------------------------------------------------------------------- */
+/* Held for a minute: Home is visited constantly, and this is three queries
+   that change rarely. Refresh (bust) clears it. */
+let changesCache = null;
 async function recentChanges() {
+  if (changesCache && Date.now() - changesCache.at < 60000) return changesCache.list;
+  const list = await loadChanges();
+  changesCache = { at: Date.now(), list };
+  return list;
+}
+
+async function loadChanges() {
   const out = [];
   const name = new Map();
 
@@ -501,6 +511,7 @@ export default {
 
   /* Drawn inside the route transition, so her orb has somewhere to land. */
   prepaint(view) { view.innerHTML = shell(); },
+  bust: () => { changesCache = null; },
 
   unmount() {
     if (onPresence) document.removeEventListener('hub:presence', onPresence);

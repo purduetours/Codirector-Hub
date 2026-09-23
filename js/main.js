@@ -200,23 +200,29 @@ $('#dock-menu-ico').innerHTML = ICONS.menu;
   $(sel).addEventListener('click', () => { app.classList.remove('nav-open'); toggleVanessa(); }));
 onVanessaToggle(isOpen => $('#v-top').setAttribute('aria-expanded', String(isOpen)));
 
-/* Depth and glass: the ambient light drifts at its own pace as the page
-   scrolls, and the top bar turns to glass once content passes under it.
-   One passive listener, throttled to the frame. */
+/* The top bar turns to glass once content passes under it, and the corner
+   pill tucks away on the way down. One passive listener, throttled to the
+   frame, and it only ever flips two classes — and only when they change —
+   so scrolling never re-styles the page. (It used to write a --scroll
+   variable on <html> each frame for parallax, which invalidated every
+   element's style while scrolling.) */
 let scrollTick = false;
 window.addEventListener('scroll', () => {
   if (scrollTick) return;
   scrollTick = true;
   requestAnimationFrame(() => {
     scrollTick = false;
-    document.documentElement.style.setProperty('--scroll', String(Math.round(window.scrollY)));
-    document.body.classList.toggle('is-scrolled', window.scrollY > 8);
-    // Which way you are going: the corner pill tucks away on the way down.
     const y = window.scrollY;
-    if (Math.abs(y - lastY) > 6) { document.body.classList.toggle('is-scrolling-down', y > lastY && y > 120); lastY = y; }
+    const scrolled = y > 8;
+    if (scrolled !== wasScrolled) { wasScrolled = scrolled; document.body.classList.toggle('is-scrolled', scrolled); }
+    if (Math.abs(y - lastY) > 6) {
+      const down = y > lastY && y > 120;
+      if (down !== wasDown) { wasDown = down; document.body.classList.toggle('is-scrolling-down', down); }
+      lastY = y;
+    }
   });
 }, { passive: true });
-let lastY = 0;
+let lastY = 0, wasScrolled = false, wasDown = false;
 
 /* Fold the rail to icons on a big screen, for people who know the way. */
 const paintFold = () => {
@@ -231,6 +237,12 @@ $('#rail-fold').addEventListener('click', () => {
   paintFold();
 });
 paintFold();
+
+/* A background tab does nothing: every CSS animation pauses (perf.css) until
+   the person comes back. */
+const paintHidden = () => document.documentElement.classList.toggle('is-hidden', document.hidden);
+document.addEventListener('visibilitychange', paintHidden);
+paintHidden();
 
 /* The corner control names the page and her best question for it. Arriving
    from Home, she introduces herself for a moment — "here with you in Eval

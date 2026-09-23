@@ -58,7 +58,7 @@ injectStyle('evals-css', `
 .ev-day { margin-bottom:18px; }
 .ev-day-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
   padding:0 2px 7px; border-bottom:1px solid var(--line); margin-bottom:8px; position:sticky; top:var(--topbar);
-  background:color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); z-index:1; }
+  background:color-mix(in srgb, var(--bg) 94%, transparent); z-index:1; }
 .ev-day-name { font-size:.95rem; font-weight:650; letter-spacing:-.01em; }
 .ev-day-name .soon { color:var(--accent); }
 .ev-day-count { font-size:.75rem; color:var(--text-faint); flex:none; }

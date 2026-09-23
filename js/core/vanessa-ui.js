@@ -80,19 +80,21 @@ injectStyle('vanessa-css', `
 .v-panel { transform-origin:calc(100% - 40px) 24px; }
 .v-panel.is-closing { animation:v-out .19s var(--ease) forwards; }
 @keyframes v-out { to { opacity:0; transform:translateX(18px) scale(.985); } }
-.v-head::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; opacity:0;
+/* A light sweeps her top edge while she works: a transform on a 2px line,
+   so it never repaints the panel. */
+.v-head::after { content:""; position:absolute; left:-50%; width:200%; bottom:-1px; height:2px; opacity:0;
   background:linear-gradient(90deg, transparent, var(--v-1), var(--v-2), var(--v-3), transparent);
-  background-size:200% 100%; transition:opacity .3s; }
-:root[data-vanessa="thinking"] .v-head::after, :root[data-vanessa="speaking"] .v-head::after { opacity:1; animation:v-sweep 1.4s linear infinite; }
-@keyframes v-sweep { to { background-position:-200% 0; } }
+  transition:opacity .25s; }
+:root[data-vanessa="thinking"] .v-head::after, :root[data-vanessa="responding"] .v-head::after { opacity:1; animation:v-sweep 1.2s linear infinite; }
+@keyframes v-sweep { from { transform:translateX(-25%); } to { transform:translateX(25%); } }
 .v-wave { display:inline-flex; align-items:center; gap:3px; height:18px; margin-left:auto; margin-right:4px; opacity:.25; transition:opacity .3s; }
-.v-wave i { width:3px; height:5px; border-radius:3px; background:var(--gold-deep); transition:height .2s; }
-:root[data-vanessa="thinking"] .v-wave, :root[data-vanessa="speaking"] .v-wave, :root[data-vanessa="listening"] .v-wave { opacity:1; }
+.v-wave i { width:3px; height:16px; border-radius:3px; background:var(--gold-deep); transform:scaleY(.3); transform-origin:center; }
+:root[data-vanessa="thinking"] .v-wave, :root[data-vanessa="responding"] .v-wave, :root[data-vanessa="listening"] .v-wave { opacity:1; }
 :root[data-vanessa="thinking"] .v-wave i { animation:v-bar 1s ease-in-out infinite; }
-:root[data-vanessa="speaking"] .v-wave i { animation:v-bar .6s ease-in-out infinite; }
+:root[data-vanessa="responding"] .v-wave i { animation:v-bar .6s ease-in-out infinite; }
 :root[data-vanessa="listening"] .v-wave i { animation:v-bar .45s ease-in-out infinite; background:var(--good); }
 .v-wave i:nth-child(2) { animation-delay:.12s !important; } .v-wave i:nth-child(3) { animation-delay:.24s !important; } .v-wave i:nth-child(4) { animation-delay:.36s !important; }
-@keyframes v-bar { 50% { height:16px; } }
+@keyframes v-bar { 50% { transform:scaleY(1); } }
 
 .v-log { padding-left:46px; scroll-behavior:smooth; }
 .v-msg { transform-origin:left bottom; animation:v-msg-in .42s var(--ease-out) both; }
@@ -150,7 +152,7 @@ injectStyle('vanessa-css', `
 .v-msg.v-k-error { background:var(--danger-bg); border-color:color-mix(in srgb, var(--danger) 25%, transparent); }
 .v-msg.v-k-error .v-kind { color:var(--danger); }
 .v-msg.v-k-nav { border-style:dashed; border-color:color-mix(in srgb, var(--gold) 55%, transparent); }
-.v-msg.v-k-nav .v-kind svg { animation:nav-nudge .9s var(--ease-out) infinite; }
+.v-msg.v-k-nav .v-kind svg { animation:nav-nudge .9s var(--ease-out) 2; }
 @keyframes nav-nudge { 50% { transform:translateX(3px); } }
 .v-msg.v-k-explain { background:linear-gradient(180deg, var(--gold-wash), color-mix(in srgb, var(--gold-wash) 40%, var(--bg-sunken))); }
 .v-head .v-live { font-size:var(--fs-2xs); font-weight:700; color:var(--text-faint); display:inline-flex; gap:5px; align-items:center; margin-left:8px; }

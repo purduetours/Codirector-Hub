@@ -1,0 +1,99 @@
+/* ============================================================ performance
+   Pass five. The look stays; the cost goes. Loaded last.
+
+   The rule the whole file serves: when nobody is doing anything, the
+   interface does almost nothing. When someone acts, it may be expressive
+   for a moment — then it settles.
+
+   Budget, as measured in a headless profile before this pass (Home, idle):
+     60 style recalcs a second and ~14% of the main thread (24% on a phone)
+     spent doing nothing — spinning orb gradients by custom property, four
+     blurred full-screen blobs, and a scroll variable re-styling the page.
+   Those are gone at the source (shell.css, flow.css, main.js). What is
+   here is the consolidation that keeps it that way.
+============================================================================ */
+
+/* ---------------------------------------------------------------- motion
+   One language. Small interaction 120–180ms, interface 220–320ms, the
+   Vanessa → workspace morph ~420ms. Faster than before on purpose: smooth
+   should never mean slow. */
+:root { --dur-1: .12s; --dur-2: .18s; --dur-3: .28s; --dur-4: .42s; }
+
+/* ------------------------------------------------------ view transitions
+   Ordinary navigation cross-fades the viewport (a screen-sized snapshot).
+   Only the two moments that deserve a shape change — Vanessa handing you a
+   workspace, and coming home to her — give the workspace its own name and
+   so its own snapshot. Before, every route change captured the entire
+   scrolling page, however long. */
+#view { view-transition-name: none; }
+.vt-morph #view, .vt-home #view { view-transition-name: workspace; }
+::view-transition-group(*) { animation-duration: .32s; }
+::view-transition-old(root) { animation: noir-dim .18s var(--ease) both; }
+::view-transition-new(root) { animation: vt-arrive .26s var(--ease-out) both; }
+.vt-morph::view-transition-group(workspace) { animation-duration: .42s; }
+.vt-morph::view-transition-old(workspace) { animation-duration: .2s; }
+.vt-morph::view-transition-new(workspace) { animation-duration: .3s; animation-delay: .08s; }
+.vt-home::view-transition-old(workspace) { animation-duration: .24s; }
+.vt-home::view-transition-new(workspace) { animation-duration: .36s; animation-delay: .04s; }
+::view-transition-group(vanessa-orb), ::view-transition-group(tool-ico) { animation-duration: .42s; }
+
+/* Entrances: shorter, and never longer than the thing they introduce. */
+.rv.rv-in { transition: opacity .42s var(--ease-out) var(--rv-d, 0ms), transform .48s var(--ease-out) var(--rv-d, 0ms) !important; }
+.view.is-entering { animation-duration: .28s; }
+.v-panel { animation-duration: .26s; }
+
+/* Hover is immediate and cheap: colour and a small lift, no lingering. */
+.hm-act, .hm-plan, .hm-row, .v-opt, .v-chip, .navlink, .btn, .card, .ev-card, .stat {
+  transition-duration: var(--dur-2) !important;
+}
+
+/* ----------------------------------------------------- surfaces sans blur
+   Where the frosted blur was removed, a slightly denser fill keeps the
+   same read on black. */
+.rail { background: rgba(12,11,15,.92) !important; }
+:root[data-theme="light"] .rail { background: rgba(252,249,251,.94) !important; }
+.hm-plan, .hm-ask { background: rgba(24,22,29,.86); }
+:root[data-theme="light"] .hm-plan, :root[data-theme="light"] .hm-ask { background: rgba(255,255,255,.9); }
+.modal-scrim { background: rgba(4,3,6,.76); }
+.nav-scrim { background: rgba(4,3,6,.6); }
+.stats, .ev-cal { background: rgba(22,20,27,.82); }
+:root[data-theme="light"] .stats, :root[data-theme="light"] .ev-cal { background: rgba(255,255,255,.85); }
+
+/* ------------------------------------------------------------ offscreen
+   Long lists skip layout and paint for rows you cannot see. The browser
+   renders them as you scroll to them; nothing about them changes. */
+.ev-card, .dir-row, .sch-day, .pp-row, .hz-card, .tr-owe, .tr-abs, .ann, .dec-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+.dir-row, .pp-row, .dec-row { contain-intrinsic-size: auto 62px; }
+.sch-day { contain-intrinsic-size: auto 260px; }
+/* A long chat with Vanessa keeps old messages cheap too. */
+.v-msg:not(:nth-last-child(-n+8)) { content-visibility: auto; contain-intrinsic-size: auto 80px; }
+
+/* ------------------------------------------------------------ effects levels
+   full     capable desktop — everything above
+   reduced  phones and touch screens — less blur, smaller glow, no hover
+            lifts; the same design, lighter to draw on a small GPU
+   minimal  prefers-reduced-motion — no morphs, parallax or pulses at all */
+@media (max-width: 860px), (pointer: coarse) {
+  :root { --glow-sm: 0 0 10px -4px var(--pink-glow); --glow: 0 0 18px -6px var(--pink-glow); }
+  body.is-scrolled .topbar { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .dock { backdrop-filter: blur(12px) saturate(1.2); -webkit-backdrop-filter: blur(12px) saturate(1.2); background: rgba(14,13,17,.9); }
+  .hm-orb .orb { box-shadow: inset 0 -8px 16px rgba(40,0,25,.45), 0 0 0 1px rgba(255,79,163,.4), 0 0 34px -6px var(--pink-glow); }
+  .hm-halo { opacity: .6; }
+  .hm-act:hover, .hm-plan:hover, .hm-row:hover, .ev-card:hover, .card:hover { transform: none; }
+  .ambient::after { display: none; }                  /* the fine grid is invisible at this size anyway */
+  .panel::after, .stats::after { display: none; }     /* edge lighting: desktop detail */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb > i, .hm-orb .orb > i { animation: none !important; }
+  .hm-halo::before, .hm-halo::after, .hm-thread { animation: none !important; }
+  .rv { opacity: 1 !important; transform: none !important; }
+  .hm-act, .hm-plan, .hm-row, .v-msg, .v-opt, .v-chip, .hm-face, .hm-timeline li { animation: none !important; }
+}
+
+/* A hidden tab never animates. The browser already throttles, but this
+   also stops infinite CSS indicators (a spinner left in a background tab). */
+html.is-hidden *, html.is-hidden *::before, html.is-hidden *::after { animation-play-state: paused !important; }
