@@ -46,7 +46,20 @@ function currentId() {
   const id = location.hash.replace(/^#\/?/, '').split('?')[0];
   const mods = visibleModules().filter(m => !m.soon);
   if (modules.has(id) && mods.some(m => m.id === id)) return id;
-  return mods[0]?.id || null;
+
+  /* Bounced somewhere else, so say so.
+
+     Asking for a tab your role cannot see used to land you on Eval Tracker
+     while the address bar still read #/interviews — so bookmarking it, copying
+     the link to somebody, or pressing Back all did something other than what
+     the URL promised. Rewriting the hash costs nothing and keeps the address
+     honest. `replace` rather than assignment, so the route you cannot reach
+     does not become a Back-button trap. */
+  const fallback = mods[0]?.id || null;
+  if (fallback && id && id !== fallback) {
+    location.replace(`${location.pathname}${location.search}#/${fallback}`);
+  }
+  return fallback;
 }
 
 let rendering = false;

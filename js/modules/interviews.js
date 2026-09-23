@@ -8,6 +8,8 @@
 import { select, update, upsert, insert, remove, toCandidate } from '../core/db.js';
 import { state, myName, isAdmin } from '../core/state.js';
 import { shareInterviews } from '../core/vanessa-ui.js';
+import { downloadCsv } from '../core/csv.js';
+import { takeJumpTarget } from '../core/quicksearch.js';
 import {
   $, $$, esc, sameName, toast, showError, debounce, injectStyle,
   openModal, closeModal, wireModal, SEARCH_ICON
@@ -35,7 +37,8 @@ let pending = [];                // parsed roster rows awaiting Add/Replace
    removing an interviewer left a tab grading as a ghost. You are whoever signed
    in, and the database refuses a score written under anyone else's name. */
 const local = { tab: 'checkin', search: '', group: '', decision: '',
-                decFilter: '__undecided', target: null, detail: null };
+                decFilter: '__undecided', target: null, detail: null,
+                sort: 'final', sortAsc: false };
 
 injectStyle('gr-css', `
 .gr-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
@@ -80,6 +83,10 @@ injectStyle('gr-css', `
 .gr-group i { width:9px; height:9px; border-radius:50%; flex:none; display:inline-block;
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.14); }
 .gr-clickrow { cursor:pointer; }
+.gr-sort { cursor:pointer; user-select:none; white-space:nowrap; }
+.gr-sort:hover { color:var(--accent); }
+.gr-sort.on { color:var(--accent); }
+.gr-sort:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .gr-brk { width:100%; border-collapse:collapse; font-size:.83rem; }
 .gr-brk th, .gr-brk td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; }
 .gr-brk th { font-size:.68rem; text-transform:uppercase; letter-spacing:.05em;
@@ -458,10 +465,62 @@ function gradeView() {
     </div>`;
 }
 
+/* Which column the Results table is sorted by. Final score descending is the
+   right default — it is the question the room is usually asking — but "who has
+   nobody scored yet" and "show me the strong speakers" are real questions too,
+   and re-sorting by hand in a spreadsheet afterwards defeats the point of the
+   table being here. */
+const RESULT_COLS = {
+  name:   { label: 'Name',    get: r => r.c.name || '',      text: true },
+  group:  { label: 'Group',   get: r => r.c.group || '',     text: true },
+  year:   { label: 'Year',    get: r => r.c.year || '',      text: true },
+  grad:   { label: 'Grad',    get: r => r.c.grad || '',      text: true },
+  raters: { label: 'Raters',  get: r => r.t.raters ?? -1 },
+  spk:    { label: 'Speak',   get: r => r.t.spk ?? -1 },
+  per:    { label: 'Person',  get: r => r.t.per ?? -1 },
+  imp:    { label: 'Impress', get: r => r.t.imp ?? -1 },
+  final:  { label: 'Final',   get: r => r.t.final ?? -1 }
+};
+
+function sortResults(rows) {
+  const key = local.sort || 'final';
+  const col = RESULT_COLS[key] || RESULT_COLS.final;
+  const dir = local.sortAsc ? 1 : -1;
+  return rows.sort((a, b) => col.text
+    ? String(col.get(a)).localeCompare(String(col.get(b))) * dir
+    : (col.get(a) - col.get(b)) * dir);
+}
+
+const sortableHead = () => Object.entries(RESULT_COLS).map(([k, c]) => {
+  const on = (local.sort || 'final') === k;
+  const arrow = on ? (local.sortAsc ? ' ▲' : ' ▼') : '';
+  return `<th class="gr-sort${on ? ' on' : ''}" data-sort="${k}" role="button" tabindex="0"
+    aria-sort="${on ? (local.sortAsc ? 'ascending' : 'descending') : 'none'}"
+    title="Sort by ${c.label}">${c.label}${arrow}</th>`;
+}).join('');
+
+/* The record of a hiring decision, and until now it existed only inside the
+   database. One bad afternoon and there is no copy. Includes each criterion
+   and the rater count, because a final score with no workings behind it is not
+   much use to whoever inherits the file. */
+function exportResults() {
+  let rows = filtered(data.candidates).map(c => ({ c, t: averages(c) }));
+  if (local.decision) rows = rows.filter(r => (r.c.decision || '') === local.decision);
+  sortResults(rows);
+
+  const head = ['Name', 'Group', 'Year', 'Grad', 'Major', 'Email',
+                'Raters', 'Speaking', 'Personable', 'Impression', 'Final', 'Decision'];
+  const body = rows.map(({ c, t }) => [
+    c.name, c.group || '', c.year || '', c.grad || '', c.major || '', c.email || '',
+    t.raters, fmt(t.spk), fmt(t.per), fmt(t.imp), fmt(t.final), c.decision || ''
+  ]);
+  toast(`Downloaded ${downloadCsv('interview-results', [head, ...body])} candidates.`);
+}
+
 function resultsView() {
   let rows = filtered(data.candidates).map(c => ({ c, t: averages(c) }));
   if (local.decision) rows = rows.filter(r => (r.c.decision || '') === local.decision);
-  rows.sort((a, b) => (b.t.final ?? -1) - (a.t.final ?? -1));
+  sortResults(rows);
 
   return `
     <div class="gr-bar">
@@ -471,10 +530,10 @@ function resultsView() {
         ${['Yes', 'Maybe', 'No'].map(d => `<option value="${d}" ${local.decision === d ? 'selected' : ''}>${d}</option>`).join('')}
       </select>
       <button class="btn btn-ghost btn-sm" id="gr-copy">Copy emails (${rows.length})</button>
+      <button class="btn btn-ghost btn-sm" id="gr-export" title="Download these results, including every interviewer's scores">Download CSV</button>
     </div>
     <div class="gr-wrap"><table class="gr-tbl">
-      <thead><tr><th>Name</th><th>Group</th><th>Year</th><th>Grad</th><th>Raters</th>
-        <th>Speak</th><th>Person</th><th>Impress</th><th>Final</th><th>Decision</th></tr></thead>
+      <thead><tr>${sortableHead()}<th>Decision</th></tr></thead>
       <tbody>${rows.length ? rows.map(({ c, t }) => `
         <tr class="gr-clickrow" data-open="${esc(c.key)}">
           <td><strong>${esc(c.name)}</strong><br><span class="gr-sub">${esc(c.major || '')}</span></td>
@@ -975,6 +1034,9 @@ export default {
     // Re-entering the tab shouldn't cost another 6-second round trip; the toolbar's
     // Refresh is there when someone wants the sheet re-read.
     if (!data) await refresh();
+    // Sent here by the search box; show that candidate rather than everybody.
+    const jump = takeJumpTarget();
+    if (jump) { local.search = jump; local.tab = 'results'; }
     paint();
 
     $('#gr-tabs').addEventListener('click', e => {
@@ -985,6 +1047,18 @@ export default {
     });
 
     const body = $('#gr-body');
+
+    /* A sortable heading is a button, so it must answer the keyboard too.
+       Declared after `body` on purpose — putting it above the const threw
+       "Cannot access 'body' before initialization" and silently killed every
+       handler below it, which left the whole Interviews tab inert. */
+    body.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const th = e.target.closest?.('.gr-sort');
+      if (!th) return;
+      e.preventDefault();
+      th.click();
+    });
 
     body.addEventListener('input', debounce(e => {
       if (e.target.id === 'gr-search') { local.search = e.target.value; paint(); }
@@ -1058,6 +1132,19 @@ export default {
     });
 
     body.addEventListener('click', async e => {
+      /* Clicking a column heading sorts by it; clicking the same one again
+         reverses. Default direction per column is the useful one: highest
+         score first for numbers, A–Z for names. */
+      if (e.target.id === 'gr-export') return exportResults();
+
+      const th = e.target.closest('.gr-sort');
+      if (th) {
+        const key = th.dataset.sort;
+        if (local.sort === key) local.sortAsc = !local.sortAsc;
+        else { local.sort = key; local.sortAsc = !!RESULT_COLS[key]?.text; }
+        return paint();
+      }
+
       const openRow = e.target.closest('[data-open]');
       if (openRow && !e.target.closest('[data-noopen]')) {
         const c = data.candidates.find(x => x.key === openRow.dataset.open);

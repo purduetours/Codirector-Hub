@@ -5,8 +5,9 @@
 ============================================================================ */
 import { select, update, rpc, toGuide } from '../core/db.js';
 import { loadTours } from '../core/sheets.js';
-import { state, myName, isAdmin } from '../core/state.js';
+import { state, myName, isAdmin, termId, nextTermId } from '../core/state.js';
 import { paintNav } from '../core/router.js';
+import { downloadCsv } from '../core/csv.js';
 import {
   $, $$, esc, sameName, prettyDate, prettyTime, todayISO, toast, showError,
   openModal, closeModal, wireModal, debounce, injectStyle, SEARCH_ICON
@@ -19,6 +20,11 @@ const TOUR_PREVIEW = 5;
 const local = { tab: 'open', search: '', priority: '', month: null, day: null, target: null, toursExpanded: false };
 
 const isMine = g => !!g.evaluatorId && g.evaluatorId === state.me?.id;
+
+/* Who may read submitted feedback: admins, plus the Developer (read only, see
+   supabase/17-developer-reads-evals.sql). Mirrors the database, which is the
+   rule that actually matters. */
+const canReadEvals = () => isAdmin() || state.role?.name === 'Developer';
 
 injectStyle('evals-css', `
 .ev-cal { border:1px solid var(--line); border-radius:var(--radius); background:var(--bg-elev);
@@ -43,8 +49,9 @@ injectStyle('evals-css', `
 .ev-cal-day.none { color:var(--text-faint); cursor:default; }
 .ev-cal-day.off { visibility:hidden; }
 .ev-cal-day.today { border-color:var(--accent); }
-.ev-cal-day.sel { background:var(--accent); border-color:var(--accent); color:#fff; }
-.ev-cal-day.sel .n { color:#fff; }
+.ev-cal-day.sel { background:var(--accent); border-color:var(--accent); color:var(--accent-text); }
+/* Gold on the black selected day; white would read as any old calendar. */
+.ev-cal-day.sel .n { color:var(--gold); }
 .ev-cal-day:not(.none):not(.sel):hover { border-color:var(--accent); }
 .ev-day { margin-bottom:18px; }
 .ev-day-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
@@ -101,7 +108,7 @@ injectStyle('evals-css', `
   border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:9px 4px;
   font-size:.85rem; font-weight:600; color:var(--text-soft); transition:all .13s; user-select:none; }
 .rating label:hover { border-color:var(--accent); color:var(--text); }
-.rating input:checked + label { background:var(--accent); border-color:var(--accent); color:#fff; }
+.rating input:checked + label { background:var(--accent); border-color:var(--accent); color:var(--accent-text); }
 .checkline { display:flex; gap:10px; align-items:flex-start; border:1px solid var(--line-strong);
   border-radius:var(--radius-sm); padding:12px 14px; cursor:pointer; }
 .checkline input { width:17px; height:17px; margin-top:2px; flex:none; accent-color:var(--accent); }
@@ -115,6 +122,14 @@ injectStyle('evals-css', `
 .preview-row:last-child { border-bottom:0; }
 .preview-row .n { font-variant-numeric:tabular-nums; font-weight:650; flex:none; }
 .preview-note { margin-top:9px; color:var(--text-soft); font-size:.8rem; }
+.ev-resp { display:grid; gap:14px; }
+.ev-resp-rating { display:flex; align-items:baseline; gap:8px; }
+.ev-resp-rating .n { font-size:1.6rem; font-weight:700; color:var(--accent); font-variant-numeric:tabular-nums; }
+.ev-resp h4 { margin:0 0 5px; font-size:.74rem; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--text-faint); font-weight:700; }
+.ev-resp-text { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--bg-sunken);
+  border-radius:var(--radius-sm); padding:11px 13px; font-size:.88rem; line-height:1.5; }
+.ev-resp-text.none { color:var(--text-faint); font-style:italic; }
 `);
 
 /* ---------------------------------------------------------------- markup */
@@ -140,13 +155,14 @@ function shell() {
     <button class="tab" data-tab="days">By day</button>
     <button class="tab" data-tab="mine">My evals <span class="tab-badge" id="ev-badge" hidden>0</span></button>
     <button class="tab" data-tab="claimed">Claimed</button>
-    <button class="tab" data-tab="done" ${admin ? '' : 'hidden'}>Done</button>
+    <button class="tab" data-tab="done" ${canReadEvals() ? '' : 'hidden'}>Done</button>
     <button class="tab" data-tab="all">Everyone</button>
   </nav>
 
   <div class="filters" style="margin-bottom:16px">
     <label class="search">${SEARCH_ICON}<input type="search" id="ev-search" placeholder="Search a guide's name…" autocomplete="off"></label>
     <select id="ev-priority" class="select" aria-label="Filter by priority"><option value="">All priorities</option></select>
+    <button type="button" class="btn btn-ghost btn-sm" id="ev-export" title="Download whatever this tab is currently showing">Download CSV</button>
   </div>
 
   <div id="ev-banner" class="callout" style="margin-bottom:14px" hidden></div>
@@ -209,6 +225,7 @@ function shell() {
           <textarea id="ev-improve" rows="4" placeholder="Concrete, actionable suggestions…"></textarea></label>
         <label class="field"><span>Other notes <em class="muted">(optional)</em></span>
           <textarea id="ev-notes" rows="2"></textarea></label>
+        <p class="hint" id="ev-draft-note" hidden style="color:var(--good)"></p>
         <p class="hint">Submitting writes to the Submissions tab and drops this guide to Last Priority.</p>
         <p class="form-error" id="ev-eval-error" hidden></p>
       </div>
@@ -217,6 +234,21 @@ function shell() {
         <button type="submit" class="btn btn-primary" id="ev-eval-submit">Submit eval</button>
       </footer>
     </form>
+  </div>
+
+  <!-- view a submitted eval (read-only) -->
+  <div class="modal-root" id="ev-modal-view" hidden>
+    <div class="modal-scrim" data-close></div>
+    <div class="modal modal-lg">
+      <header class="modal-head">
+        <div><h2 id="ev-view-title">Eval responses</h2><p class="muted" id="ev-view-sub"></p></div>
+        <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body"><div id="ev-view-body" class="ev-resp"></div></div>
+      <footer class="modal-foot">
+        <button type="button" class="btn btn-ghost" data-close>Close</button>
+      </footer>
+    </div>
   </div>
 
   ${admin ? rolloverModal() : ''}`;
@@ -292,6 +324,10 @@ function card(g) {
     actions.push(b('submit', 'Submit eval', 'btn-primary'), b('edit', 'Edit', 'btn-ghost'), b('unclaim', '✕', 'btn-quiet', 'Release this claim'));
   } else if (g.status === 'claimed' && admin) {
     actions.push(b('unclaim', 'Release', 'btn-ghost'), b('submit', 'Submit eval', 'btn-ghost'));
+  }
+  // The database only hands the feedback to admins and to whoever wrote it.
+  if ((g.status === 'submitted' || g.status === 'reviewed') && (canReadEvals() || mine)) {
+    actions.push(b('view', 'View responses', 'btn-primary'));
   }
   if ((g.status === 'submitted' || g.status === 'reviewed') && admin) {
     actions.push(b('review', g.status === 'reviewed' ? 'Undo reviewed' : 'Mark reviewed', 'btn-ghost'));
@@ -449,6 +485,19 @@ function dayView() {
   </section>`;
 }
 
+/* The eval roster as it stands — who is claimed, by whom, when the tour is and
+   whether feedback has been submitted. Not the written feedback itself: that
+   is somebody's candid opinion of a colleague and does not belong in a file
+   that gets emailed around. */
+function exportEvals() {
+  const head = ['Guide', 'Priority', 'Status', 'Evaluator', 'Tour date', 'Tour time', 'Notes', 'Upcoming tours'];
+  const rows = visible().map(g => [
+    g.name, g.priority || '', STATUS_LABEL[g.status] || g.status, g.evaluator || '',
+    g.date || '', g.time || '', g.notes || '', (g.tours || []).length
+  ]);
+  toast(`Downloaded ${downloadCsv('eval-tracker', [head, ...rows])} guides.`);
+}
+
 function paint() {
   const c = state.counts || {};
   const open = c.open || 0, claimed = c.claimed || 0;
@@ -517,10 +566,32 @@ function paint() {
  * read and comes back in well under a second, so there is no prefetching, no
  * caching and no retry policy to get wrong.
  */
+/**
+ * Claim a guide for the signed-in person.
+ *
+ * Exported so Vanessa can do it without keeping her own copy of the write. The
+ * `evaluator_id=is.null` filter is the important part and must not be
+ * duplicated loosely: it is what makes two people claiming at the same instant
+ * safe, because Postgres hands the row to exactly one of them and the other
+ * gets nothing back rather than quietly overwriting.
+ */
+export async function claimGuide(g, { date = null, time = null } = {}) {
+  const rows = await update('evals', `id=eq.${g.id}&evaluator_id=is.null`, {
+    evaluator_id: state.me.id,
+    claimed_at:   new Date().toISOString(),
+    tour_date:    date,
+    tour_time:    time
+  });
+  if (!rows || !rows.length) throw new Error(`${g.name} was just claimed by somebody else.`);
+  await loadRoster();
+  paintNav();
+  return rows[0];
+}
+
 export async function loadRoster() {
   const version = state.sessionVersion;
   const rows = await select('eval_roster',
-    'select=*&term_id=eq.fall-2026&order=priority_rank.asc,last_name.asc');
+    `select=*&term_id=eq.${termId()}&order=priority_rank.asc,last_name.asc`);
   state.guides = (rows || []).map(toGuide);
 
   // Counts cover the WHOLE roster so the progress bar stays truthful even for
@@ -701,6 +772,59 @@ function openClaim(g, editing, preset) {
   openModal($('#ev-modal-claim'));
 }
 
+/* ---------------------------------------------------------- form drafts
+   An eval is the longest thing anybody types into this hub — several
+   paragraphs of considered feedback about a colleague. The modal already
+   survives a failed submit, but not a closed tab, a flat battery or a stray
+   Escape, and losing it means writing the whole thing again from memory.
+
+   So it is saved to this browser as it is typed, per guide and per person, and
+   offered back the next time that eval is opened. It is deliberately local: an
+   unfinished, unsubmitted opinion about somebody is not something to be
+   pushing to a shared database on every keystroke.
+-------------------------------------------------------------------------- */
+const DRAFT_KEY = id => `hub2.evaldraft.${state.me?.id || 'anon'}.${id}`;
+const DRAFT_FIELDS = ['#ev-well', '#ev-improve', '#ev-notes'];
+
+function saveDraft() {
+  const g = local.target;
+  if (!g) return;
+  const checked = $('#ev-rating input:checked');
+  const draft = {
+    well:   $('#ev-well').value,
+    improve:$('#ev-improve').value,
+    notes:  $('#ev-notes').value,
+    rating: checked ? checked.value : null,
+    at:     Date.now()
+  };
+  // Nothing typed yet is not a draft; do not litter storage with empties.
+  const empty = !draft.well.trim() && !draft.improve.trim() && !draft.notes.trim() && !draft.rating;
+  try {
+    if (empty) localStorage.removeItem(DRAFT_KEY(g.id));
+    else localStorage.setItem(DRAFT_KEY(g.id), JSON.stringify(draft));
+  } catch { /* private window, or full — the form still works */ }
+  paintDraftNote();
+}
+
+function readDraft(id) {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY(id));
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    return (d && typeof d.well === 'string') ? d : null;
+  } catch { return null; }
+}
+
+const clearDraft = id => { try { localStorage.removeItem(DRAFT_KEY(id)); } catch {} };
+
+function paintDraftNote() {
+  const note = $('#ev-draft-note');
+  if (!note || !local.target) return;
+  const d = readDraft(local.target.id);
+  note.hidden = !d;
+  if (d) note.textContent = 'Saved on this device — you can close this and come back.';
+}
+
 function openEval(g) {
   local.target = g;
   $('#ev-eval-sub').textContent = `${g.name} · ${g.priority || ''}`;
@@ -709,8 +833,57 @@ function openEval(g) {
   ['#ev-well', '#ev-improve', '#ev-notes'].forEach(s => ($(s).value = ''));
   $$('#ev-rating input').forEach(i => (i.checked = false));
   $('#ev-eval-error').hidden = true;
+
+  // Hand back whatever was typed last time and never submitted.
+  const draft = readDraft(g.id);
+  if (draft) {
+    $('#ev-well').value    = draft.well    || '';
+    $('#ev-improve').value = draft.improve || '';
+    $('#ev-notes').value   = draft.notes   || '';
+    if (draft.rating) {
+      const hit = $$('#ev-rating input').find(i => i.value === draft.rating);
+      if (hit) hit.checked = true;
+    }
+  }
+  paintDraftNote();
   openModal($('#ev-modal-eval'));
   setTimeout(() => $('#ev-well').focus(), 60);
+}
+
+/* Read-only view of what was submitted. Fetched on open rather than with the
+   roster: the feedback is the sensitive part and there is no reason to pull
+   every guide's into the browser just to draw the cards. */
+async function openView(g) {
+  const body = $('#ev-view-body');
+  $('#ev-view-title').textContent = g.name;
+  const when = [prettyDate(g.date), prettyTime(g.time)].filter(Boolean).join(' · ');
+  $('#ev-view-sub').textContent = [g.priority, g.evaluator && `Evaluated by ${isMine(g) ? 'you' : g.evaluator}`, when]
+    .filter(Boolean).join(' · ');
+  body.innerHTML = '<p class="muted">Loading…</p>';
+  openModal($('#ev-modal-view'));
+
+  try {
+    const rows = await select('eval_submissions',
+      `select=rating,went_well,improve,notes,created_at&eval_id=eq.${g.id}&limit=1`);
+    const s = rows && rows[0];
+    if (!s) {
+      body.innerHTML = '<p class="muted">No written feedback was found for this eval. It may have been submitted outside the hub.</p>';
+      return;
+    }
+    const text = (label, v) => `<div><h4>${label}</h4>${
+      v && v.trim()
+        ? `<div class="ev-resp-text">${esc(v)}</div>`
+        : '<div class="ev-resp-text none">Nothing written.</div>'}</div>`;
+    body.innerHTML = `
+      <div class="ev-resp-rating"><h4 style="margin:0">Overall rating</h4>
+        <span class="n">${s.rating != null ? esc(String(s.rating)) : '—'}</span></div>
+      ${text('What went well', s.went_well)}
+      ${text('Areas to improve', s.improve)}
+      ${text('Other notes', s.notes)}
+      <p class="hint">Submitted ${esc(new Date(s.created_at).toLocaleString())}${g.status === 'reviewed' ? ' · Reviewed ✓' : ''}</p>`;
+  } catch (err) {
+    body.innerHTML = `<p class="form-error">${esc(err.message)}</p>`;
+  }
 }
 
 /* ---------------------------------------------------------------- module */
@@ -742,12 +915,14 @@ export default {
     view.querySelector('.stats').addEventListener('click', e => {
       const s = e.target.closest('.stat');
       if (!s) return;
-      if (s.dataset.jump === 'done' && !isAdmin()) return;
+      if (s.dataset.jump === 'done' && !canReadEvals()) return;
       $$('#ev-tabs .tab').find(t => t.dataset.tab === s.dataset.jump)?.click();
     });
 
     $('#ev-search').addEventListener('input', debounce(e => { local.search = e.target.value; paint(); }));
     $('#ev-priority').addEventListener('change', e => { local.priority = e.target.value; paint(); });
+
+    $('#ev-export').addEventListener('click', exportEvals);
 
     $('#ev-list').addEventListener('click', async e => {
       const day = e.target.closest('[data-day]');
@@ -776,6 +951,7 @@ export default {
       }
       if (b.dataset.act === 'edit')   return openClaim(g, true);
       if (b.dataset.act === 'submit') return openEval(g);
+      if (b.dataset.act === 'view')   return openView(g);
 
       if (b.dataset.act === 'unclaim') {
         if (!confirm(`Release ${g.name} back to the open list?`)) return;
@@ -846,6 +1022,12 @@ export default {
       } finally { go.disabled = false; go.textContent = label; }
     });
 
+    /* Saved as it is typed, so closing the tab is not a disaster. Debounced —
+       this runs on every keystroke across three textareas. */
+    const stash = debounce(saveDraft, 400);
+    DRAFT_FIELDS.forEach(sel => $(sel).addEventListener('input', stash));
+    $('#ev-rating').addEventListener('change', saveDraft);
+
     $('#ev-eval-form').addEventListener('submit', async e => {
       e.preventDefault();
       const go = $('#ev-eval-submit'), err = $('#ev-eval-error');
@@ -868,6 +1050,7 @@ export default {
           p_improve:   $('#ev-improve').value,
           p_notes:     $('#ev-notes').value
         });
+        clearDraft(local.target.id);      // it is on the server now
         closeModal($('#ev-modal-eval'));
         toast(r?.message || 'Eval submitted.');
         await reload();
@@ -904,7 +1087,7 @@ function wireRollover() {
     const err = $('#ev-roll-error');
     this.disabled = true; this.textContent = 'Checking…'; err.hidden = true;
     try {
-      const s = await rpc('run_rollover', { p_from_term: 'fall-2026', p_to_term: 'spring-2027', p_dry_run: true });
+      const s = await rpc('run_rollover', { p_from_term: termId(), p_to_term: nextTermId(), p_dry_run: true });
       const moves = Object.keys(s.moves || {}).sort();
       $('#ev-roll-preview').innerHTML = '<h4>What will happen</h4>' +
         (moves.length
@@ -929,7 +1112,7 @@ function wireRollover() {
     const go = $('#ev-roll-go'), err = $('#ev-roll-error');
     go.disabled = true; go.textContent = 'Running…'; err.hidden = true;
     try {
-      const r = await rpc('run_rollover', { p_from_term: 'fall-2026', p_to_term: 'spring-2027', p_dry_run: false });
+      const r = await rpc('run_rollover', { p_from_term: termId(), p_to_term: nextTermId(), p_dry_run: false });
       closeModal($('#ev-modal-roll'));
       toast(r.message);
       await reload();

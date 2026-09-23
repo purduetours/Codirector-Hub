@@ -73,8 +73,29 @@ export async function loadMe() {
     throw new Error('That account is not set up for the hub yet. Ask a codirector to add you.');
   }
   state.me = me;
+
+  // Which term is current, so nothing has to hardcode it. A missing row is not
+  // fatal — termId() falls back — but the hub would then be stuck on one term.
+  try {
+    const terms = await select('terms', 'select=id,label&is_current=is.true&limit=1');
+    if (terms && terms[0]) state.term = terms[0];
+  } catch { /* the fallback covers it */ }
   const roles = await select('roles', `select=*&name=eq.${encodeURIComponent(me.role)}`);
   state.role = (roles && roles[0]) || { name: me.role, is_admin: false, in_recruitment: false, in_training: false };
+
+  /* Remember on THIS DEVICE that a Developer signed in here, so the sign-in
+     page can show them what has come in while they were away.
+     
+     The sign-in page runs before anybody has identified themselves, so it
+     cannot ask the database who is looking. A role kept on the device is the
+     only thing available — and it is a role, not an email, so nothing
+     identifying goes into the code or the browser store. Anyone else signing
+     in on the same machine clears it again. */
+  try {
+    if (state.role?.name === 'Developer') localStorage.setItem('hub2.dev', '1');
+    else localStorage.removeItem('hub2.dev');
+  } catch { /* private window */ }
+
   return me;
 }
 

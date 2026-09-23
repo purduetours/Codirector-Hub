@@ -10,6 +10,42 @@
 
 const SHEET_ID = '1XIfi_T4G1tkc_8D28cQWXUtCgk7Cb-BuyLrEvhfAzno';
 
+/* The training absence form writes to its own workbook, so it needs its own id.
+   Read live rather than copied into the database: it is a Google Form's
+   responses, it only ever grows, and nobody edits it here — showing a stale
+   copy of who will be missing on Monday would be worse than useless. */
+const ABSENCE_SHEET_ID = '1zlbSaty-ZCSY9wvoa8p_yPbWVm604hCl-hw1IRYpQ4s';
+
+/* What each guide studies. Someone else maintains this workbook, one tab per
+   college plus tabs for minors, certificates and learning communities, so it
+   is read live rather than copied — an import would need re-running every time
+   they touch it.
+
+   It is INCOMPLETE and that is expected: 40 of 103 guides were not on it when
+   this was written. Anything built on it has to say "not listed" rather than
+   imply the person has no major. */
+const MAJORS_SHEET_ID = '1MAvO2LuBeH-tLZrreZJtMWS20FCQst1XQF_YDhuz7R4';
+
+/* Tabs are addressed by gid, not name: gviz silently returns the FIRST sheet
+   for a name it does not recognise, so a renamed tab would look like it worked
+   and quietly serve the search page instead. A wrong gid returns an error. */
+const MAJOR_TABS = [
+  ['557729920',  'College of Engineering',     'major'],
+  ['228619136',  'College of Ag',              'major'],
+  ['1003728803', 'College of Science',         'major'],
+  ['977522203',  'College of Education',       'major'],
+  ['1436328471', 'College of Liberal Arts',    'major'],
+  ['1776857249', 'College of HHS',             'major'],
+  ['1487641033', 'College of Pharmacy',        'major'],
+  ['1266692342', 'Polytech Institute',         'major'],
+  ['1865914261', 'Daniels School of Business', 'major'],
+  ['1894913634', 'Exploratory Studies',        'college-only'],
+  ['40021789',   'Honors College',             'college-only'],
+  ['1452629004', 'Minors',                     'minor'],
+  ['1729934637', 'Certificates',               'certificate'],
+  ['919235276',  'Learning Communities',       'learning community']
+];
+
 /**
  * Which month tabs belong to the term we are in, and what year they are.
  *
@@ -123,11 +159,12 @@ const tabCache = new Map();
 /** Forget everything read from the workbook; the next ask goes to Google. */
 export const bustSheets = () => tabCache.clear();
 
-function fetchTab(tab) {
-  if (tabCache.has(tab)) return tabCache.get(tab);
+function fetchTab(tab, book = SHEET_ID, extra = '') {
+  const cacheKey = `${book}|${tab}|${extra}`;
+  if (tabCache.has(cacheKey)) return tabCache.get(cacheKey);
 
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
-              `?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+  const url = `https://docs.google.com/spreadsheets/d/${book}/gviz/tq` +
+              `?tqx=out:csv&sheet=${encodeURIComponent(tab)}${extra}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
@@ -139,14 +176,14 @@ function fetchTab(tab) {
     })
     .then(text => (text === null ? null : parseCSV(text)))
     .then(rows => {
-      if (rows === null && tabCache.get(tab) === pending) tabCache.delete(tab);
+      if (rows === null && tabCache.get(cacheKey) === pending) tabCache.delete(cacheKey);
       return rows;
     }).catch(err => {
-      if (tabCache.get(tab) === pending) tabCache.delete(tab);
+      if (tabCache.get(cacheKey) === pending) tabCache.delete(cacheKey);
       throw err;
     }).finally(() => clearTimeout(timer));
 
-  tabCache.set(tab, pending);
+  tabCache.set(cacheKey, pending);
   return pending;
 }
 
@@ -162,7 +199,10 @@ export async function loadTours() {
   const today = todayISO();
   const out = [], seen = new Set();
   const { tabs: months, year } = termTabs();
-  const tabs = await Promise.all(months.map(fetchTab));
+  /* `map(fetchTab)` passes (value, index, array), so once fetchTab grew a
+     second parameter the index started arriving as the workbook id and every
+     month tab 404'd. Call it with one argument on purpose. */
+  const tabs = await Promise.all(months.map(m => fetchTab(m)));
   if (tabs.every(rows => !rows)) throw new Error('No semester tabs could be loaded from the schedule workbook.');
 
   tabs.forEach(rows => {
@@ -282,7 +322,7 @@ export async function loadDesks() {
   const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   const PAIRS = [[3, 4], [5, 6], [7, 8], [9, 10], [11, 12]];
   const out = [];
-  const tabs = await Promise.all(DESK_TABS.map(fetchTab));
+  const tabs = await Promise.all(DESK_TABS.map(t => fetchTab(t)));   // see loadTours
   if (tabs.some(rows => !rows)) throw new Error('The desk workbook tabs could not all be loaded.');
 
   tabs.forEach((rows, t) => {
@@ -304,4 +344,92 @@ export async function loadDesks() {
     });
   });
   return out;
+}
+
+/**
+ * Training absence form responses, newest first.
+ *
+ * Straight off the form's own sheet. `headers=0` matters: gviz otherwise
+ * guesses how many rows are headers and, on a sheet with wrapped question text,
+ * folds several rows into one — the tracking sheet came back as two rows of
+ * glued-together nonsense until this was set.
+ *
+ * The columns are the form's questions, which somebody may reword at any time,
+ * so they are found by looking for the question rather than by position.
+ */
+export async function loadAbsences() {
+  const rows = await fetchTab('Form Responses 1', ABSENCE_SHEET_ID, '&headers=0');
+  if (!rows || rows.length < 2) return [];
+
+  const head = rows[0].map(h => String(h || '').toLowerCase());
+  const find = (...bits) => head.findIndex(h => bits.every(b => h.includes(b)));
+
+  const iWhen   = find('timestamp') >= 0 ? find('timestamp') : 0;
+  const iName   = find('name') >= 0 ? find('name') : 1;
+  const iWhich  = find('which') >= 0 ? find('which') : find('training') >= 0 ? find('training') : 2;
+  const iReason = find('reason') >= 0 ? find('reason') : 3;
+
+  return rows.slice(1)
+    .filter(r => String(r[iName] || '').trim())
+    .map(r => ({
+      when:     String(r[iWhen]   || '').trim(),
+      name:     String(r[iName]   || '').trim(),
+      sessions: String(r[iWhich]  || '').split(',').map(x => x.trim()).filter(Boolean),
+      reason:   String(r[iReason] || '').trim()
+    }))
+    .reverse();                       // newest first; the form appends
+}
+
+/** "9/11/2026 13:20:07" — the form's own format, which Date() misreads. */
+export function formStamp(text) {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(text || '').trim());
+  if (!m) return 0;
+  return new Date(+m[3], +m[1] - 1, +m[2], +m[4], +m[5], +(m[6] || 0)).getTime();
+}
+
+/**
+ * What each guide studies, keyed by the name as written on that workbook.
+ *
+ * Fourteen tabs, fetched at once rather than one after another — in sequence
+ * it is about four seconds, in parallel about four hundred milliseconds.
+ */
+export async function loadMajors() {
+  const tabs = await Promise.all(MAJOR_TABS.map(([gid]) =>
+    fetchTab('', MAJORS_SHEET_ID, `&headers=0&gid=${gid}`)));
+
+  const people = new Map();
+  const get = name => {
+    if (!people.has(name)) people.set(name, {
+      name, colleges: [], majors: [], minors: [], certificates: [],
+      learningCommunities: [], email: '', year: ''
+    });
+    return people.get(name);
+  };
+  const push = (list, v) => { if (v && !list.includes(v)) list.push(v); };
+
+  tabs.forEach((rows, i) => {
+    if (!rows || rows.length < 2) return;
+    const [, tabName, kind] = MAJOR_TABS[i];
+
+    for (const r of rows.slice(1)) {
+      const name = `${String(r[0] || '').trim()} ${String(r[1] || '').trim()}`.trim();
+      if (!name) continue;
+      const p = get(name);
+      const third = String(r[2] || '').trim();
+
+      if (kind === 'major')            { push(p.colleges, tabName); push(p.majors, third); }
+      else if (kind === 'college-only') push(p.colleges, tabName);
+      else if (kind === 'minor')        push(p.minors, third);
+      else if (kind === 'certificate')  push(p.certificates, third);
+      else                              push(p.learningCommunities, third);
+
+      // Email and year sit in different columns per tab, so find them by shape.
+      for (const cell of r.slice(2, 6)) {
+        const c = String(cell || '').trim();
+        if (!p.email && c.includes('@')) p.email = c;
+        else if (!p.year && /^(Fresh|Soph|Jun|Sen|Super|Grad)/i.test(c)) p.year = c;
+      }
+    }
+  });
+  return [...people.values()];
 }

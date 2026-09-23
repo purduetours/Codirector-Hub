@@ -1,10 +1,16 @@
 /* Vanessa panel, model controls, and session-scoped data loading. */
+import { handbookContext, topicNote } from './vanessa.js';
+import {
+  llmReady, llmSupported, llmStatus, llmWanted, loadLlm, unloadLlm,
+  resumeLlmIfWanted, buildMessages, splitThinking, askLlm, onLlmChange, numbersCheckOut, usableLeadIn
+} from './vanessa-llm.js';
 import { ask, greeting, shareInterviews, shareOther, resetVanessaData } from './vanessa.js';
 import { modelStatus, onModelChange, checkAvailability, enableModel, cancelModel, disableModel, resetModel, interpret, resumeIfEnabled } from './vanessa-model.js';
-import { state as appState, inTraining, inRecruitment } from './state.js';
+import { state as appState, inTraining, inRecruitment, myName } from './state.js';
 import { $, esc, injectStyle } from './ui.js';
 import { go } from './router.js';
 import { handleEvalMessage, evalDraft, resetEvalFlow, editEvalDraft, savedEvalSummary, bufferEvalDraft } from './vanessa-eval.js';
+import { handleAction, resetActions } from './vanessa-actions.js';
 import { voiceSupported, voiceState, onVoiceChange, startVoice, stopVoice, resetVoice, setVoiceText } from './vanessa-voice.js';
 let voiceDraftRef=null;
 export { shareInterviews };
@@ -12,7 +18,7 @@ export const shareData = (kind, rows) => shareOther(kind, rows);
 injectStyle('vanessa-css', `
 .v-launch { position:fixed; right:18px; bottom:18px; z-index:60;
   width:52px; height:52px; border-radius:50%; border:0; cursor:pointer;
-  background:var(--accent); color:#fff; font-size:22px; line-height:1;
+  background:var(--accent); color: var(--accent-text); font-size:22px; line-height:1;
   box-shadow:var(--shadow-lg); transition:transform .15s; }
 .v-launch:hover { transform:scale(1.06); }
 .v-panel { position:fixed; right:18px; bottom:80px; z-index:61; width:min(380px, calc(100vw - 36px));
@@ -27,12 +33,14 @@ injectStyle('vanessa-css', `
 .v-msg { font-size:.85rem; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere;
   padding:9px 12px; border-radius:12px; max-width:92%; }
 .v-msg.her { background:var(--bg-sunken); color:var(--text); align-self:flex-start; border-bottom-left-radius:4px; }
-.v-msg.you { background:var(--accent); color:#fff; align-self:flex-end; border-bottom-right-radius:4px; }
+.v-msg.you { background:var(--accent); color: var(--accent-text); align-self:flex-end; border-bottom-right-radius:4px; }
 .v-chips { display:flex; flex-wrap:wrap; gap:6px; padding:0 14px 10px; }
 .v-chip { font:inherit; font-size:.74rem; cursor:pointer; padding:5px 10px; border-radius:999px;
   border:1px solid var(--line-strong); background:var(--bg-elev); color:var(--text-soft); }
 .v-chip:hover { border-color:var(--accent); color:var(--text); }
 .v-model-on { font-size:.74rem; color:var(--good); align-self:center; }
+.v-model-note { font-size:.72rem; color:var(--text-faint); line-height:1.45; flex-basis:100%; }
+.v-msg.her.streaming::after { content:'▍'; opacity:.5; }
 .v-ask { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line); }
 .v-ask input { flex:1; min-width:0; }
 .v-log { min-height:60px; }
@@ -82,9 +90,46 @@ function say(who, text) {
   log.appendChild(el); log.scrollTop = log.scrollHeight;
   return el;
 }
+function paintLlmRow() {
+  const row = $('#v-llm');
+  if (!row || !appState.me) return;
+
+  if (!llmSupported()) {
+    row.innerHTML = '<span class="v-model-note">This browser cannot run a model in the tab (no WebGPU). Chrome or Edge on a laptop can.</span>';
+    return;
+  }
+  const st = llmStatus();
+  if (st.phase === 'loading') {
+    const pct = st.progress ? ` ${Math.round(st.progress * 100)}%` : '';
+    row.innerHTML = `<span class="v-model-note">Downloading Vanessa's model${pct} — once only, then it stays on this laptop. ` +
+      `${esc(st.message || '')}</span><button type="button" class="v-chip" id="v-llm-off">Cancel</button>`;
+    return;
+  }
+  if (st.phase === 'ready') {
+    row.innerHTML = '<span class="v-model-on">Vanessa is writing her own answers</span>' +
+      '<button type="button" class="v-chip" id="v-llm-off">Turn off</button>';
+    return;
+  }
+  const failed = st.phase === 'failed';
+  row.innerHTML =
+    `<button type="button" class="v-chip" id="v-llm-on">${failed ? 'Retry' : 'Let Vanessa write her own answers'}</button>` +
+    `<span class="v-model-note">${failed ? esc(st.message) :
+      'A one-time download of about a gigabyte. It then runs on this laptop — no student data ever leaves it.'}</span>`;
+}
+
+onLlmChange(() => paintLlmRow());
+
 function paintModelRow() {
   const row = $('#v-model');
   if (!row || !appState.me) return;
+
+  /* Two model systems in one drawer, each reporting its own download failure,
+     read as one broken feature. WebLLM does the actual answering; the Chrome
+     tier only ever maps a question onto a phrase the matcher already knows. So
+     where WebLLM can run, it is the only control on show. The Chrome one keeps
+     working underneath and reappears on machines without WebGPU. */
+  if (llmSupported()) { row.hidden = true; return; }
+  row.hidden = false;
   const status = modelStatus();
   let button;
   if (status.state === 'loading') button = '<button type="button" class="v-chip" id="v-model-cancel">Cancel</button>';
@@ -182,6 +227,92 @@ function readEvalEdits(all=false) {
   return editEvalDraft(Number(root.dataset.draftId),Number(root.dataset.revision),patch);
 }
 
+/* The last few turns, so "what about her?" works for the model too. */
+let llmHistory = [];
+export function resetLlmHistory() { llmHistory = []; }
+
+/**
+ * Let the model write the answer. Returns true if it actually said something.
+ *
+ * It is handed the figures the hub already computed and told not to do
+ * arithmetic, the handbook passage if the question is a handbook one, and the
+ * written note on how the relevant part of the hub works. Anything it cannot
+ * support from those it is told to decline rather than invent.
+ */
+async function generate(q, deterministic, ticket, user) {
+  const bubble = say('her', '');
+  if (!bubble) return false;
+  bubble.classList.add('streaming');
+
+  /* Frame only what is worth framing.
+     
+     A computed answer full of counts and names reads like a printout and is
+     better for an opening line. A written answer -- the dress code, how
+     claiming works, a hello -- is already good prose, and putting the model in
+     front of it only invites trouble: asked about a hoodie it opened with
+     "Don't wear your university hoodie, or any hoodie at all", and asked about
+     the weather it invented "it's a cloudy day". Both sailed past the digit
+     and name guards because the problem was not a figure, it was an assertion.
+     
+     So prose answers are shown exactly as written and the model never sees
+     them. It frames figures, and it answers questions nothing else could. */
+  /* A count leads the answer: "52 guides are unclaimed", "0 of 59 evals are
+     submitted", "7 guide assignments for Saturday". Prose answers open with
+     words. Looking only at the opening keeps the dress code out of framing —
+     it is a bulleted list with a page number at the bottom, so anything
+     looser counted it as data and let the model editorialise over it
+     ("Don't show up without your name tag, or you'll be out"). */
+  const looksLikeData = /\d/.test(deterministic.text.slice(0, 80));
+  const hasFacts = !deterministic.stuck && looksLikeData;
+  if (!deterministic.stuck && !looksLikeData) { bubble.remove(); return false; }
+  const book  = hasFacts ? null : handbookContext(q);   // framing needs no passage
+  const notes = topicNote(q);
+
+  const messages = buildMessages(q, {
+    facts: hasFacts ? deterministic.text : null,
+    book,
+    notes,
+    who:   { name: myName(), role: appState.role?.name || 'member' },
+    history: llmHistory
+  });
+
+  let raw = '';
+  try {
+    await askLlm(messages, delta => {
+      if (ticket !== epoch || user !== appState.me?.id) return;
+      raw += delta;
+      const { answer } = splitThinking(raw);
+      // While framing, the sentence is short and lands at once; streaming a
+      // half-written lead-in above figures that are not there yet reads oddly.
+      if (answer && !hasFacts) { bubble.textContent = answer; $('#v-log').scrollTop = $('#v-log').scrollHeight; }
+    });
+  } catch {
+    /* fall through to the deterministic answer below */
+  }
+  bubble.classList.remove('streaming');
+  if (ticket !== epoch || user !== appState.me?.id) { bubble.remove(); return false; }
+
+  const answer = splitThinking(raw).answer.trim();
+  if (!answer) { bubble.remove(); return false; }
+
+  if (hasFacts) {
+    /* She introduced the computed answer; the figures themselves are shown
+       untouched underneath. A lead-in carrying any digit is thrown away — see
+       usableLeadIn — and the computed answer stands on its own. */
+    if (!usableLeadIn(answer, deterministic.text)) { bubble.remove(); return false; }
+    bubble.textContent = `${answer}\n\n${deterministic.text}`;
+  } else {
+    /* Nothing computed, so nothing to contradict — but it still may not invent
+       a figure that was in neither the handbook nor the question. */
+    if (!numbersCheckOut(answer, book?.text, notes, q)) { bubble.remove(); return false; }
+    bubble.textContent = answer;
+  }
+
+  llmHistory.push({ role: 'user', content: q }, { role: 'assistant', content: answer });
+  llmHistory = llmHistory.slice(-6);
+  return true;
+}
+
 function send(question) {
   const q = question.trim();
   if (!q || !appState.me) return;
@@ -195,9 +326,21 @@ function send(question) {
     try {
       const failures = await warmUp();
       if (ticket !== epoch || user !== appState.me?.id) return;
+      /* Doing something comes before answering: "claim Noah" is a request,
+         not a question, and must not be routed to the roster matcher. */
+      const acted = await handleAction(q);
+      if (acted) {
+        note?.remove();
+        say('her', acted.text);
+        if (acted.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(acted.go); }, 500);
+        return;
+      }
+
       const reply = handleEvalMessage(q);
       paintEvalDraft();
       let r = await reply;
+      // `reply` is a promise, so it is always truthy — test what it resolved to.
+      const evalFlowHandled = !!r;
       if (ticket !== epoch || user !== appState.me?.id) return;
       if (!r) r = ask(q);
       paintEvalDraft();
@@ -209,6 +352,19 @@ function send(question) {
       }
       note?.remove();
       if (failures.length) say('her', `Could not load ${failures.join(', ')}. I will retry on your next question; answers may be limited until it loads.`);
+
+      /* With the model loaded she writes the reply herself, from the numbers
+         the hub just worked out. The deterministic text stays as the safety
+         net: if the model fails, stalls or produces nothing usable, that is
+         what gets shown, so turning this on can never make her worse. */
+      if (llmReady() && !evalFlowHandled) {
+        const shown = await generate(q, r, ticket, user);
+        if (shown) {
+          if (r.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(r.go); }, 400);
+          return;
+        }
+      }
+
       say('her', r.text);
       if (r.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(r.go); }, 400);
     } catch (err) {
@@ -219,6 +375,8 @@ function send(question) {
 }
 
 export function resetVanessa() {
+  resetLlmHistory();
+  resetActions();
   resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
   $('#v-launch')?.remove(); $('#v-panel')?.remove();
 }
@@ -240,7 +398,9 @@ export function initVanessa() {
     <div id="v-saved" class="v-saved" hidden></div>
     <div class="v-log" id="v-log" role="log" aria-live="polite"></div>
     <div class="v-chips" data-suggestions>${suggestions.map(s => `<button type="button" class="v-chip" data-question="${esc(s)}">${esc(s)}</button>`).join('')}</div>
-    <details><summary style="padding:8px 14px;cursor:pointer;font-size:.8rem">Optional model</summary><div class="v-chips" id="v-model"></div></details>
+    <details><summary style="padding:8px 14px;cursor:pointer;font-size:.8rem">Smarter answers (optional)</summary>
+      <div class="v-chips" id="v-llm"></div>
+      <div class="v-chips" id="v-model"></div></details>
     <details id="v-voice"><summary style="padding:8px 14px;cursor:pointer;font-size:.875rem">Voice notes</summary>
     <div id="v-voice-body" class="v-voice-body"><p style="margin:0">Your browser may send audio to its speech service. Review the transcript before using it.</p>
       <p id="v-voice-status" role="status" style="margin:0"></p>
@@ -253,7 +413,9 @@ export function initVanessa() {
     <button class="btn btn-primary btn-sm" type="submit">Ask</button></form>`;
   document.body.appendChild(panel);
   const ticket = epoch;
-  paintModelRow();paintSavedDraft();paintVoice();
+  paintLlmRow();paintModelRow();paintSavedDraft();paintVoice();
+  // Weights are cached after the first time, so this needs no click.
+  resumeLlmIfWanted().catch(() => {});
   if(!voiceSupported())$('#v-voice-status').textContent='Dictation is not supported in this browser. You can still type.';
   checkAvailability().then(() => { if (ticket === epoch && appState.me) resumeIfEnabled(); });
   const close = () => { readEvalEdits(); resetVoice(); voiceDraftRef=null; open = false; panel.hidden = true; launch.setAttribute('aria-expanded','false'); };
@@ -301,6 +463,8 @@ export function initVanessa() {
       }
       if(action.dataset.evalAction==='submit') {send('submit it');return;}
     }
+    if (e.target.id === 'v-llm-on')  { loadLlm().catch(() => {}); return; }
+    if (e.target.id === 'v-llm-off') { unloadLlm(); return; }
     if (e.target.id === 'v-model-on') { enableModel().catch(() => {}); return; }
     if (e.target.id === 'v-model-cancel') { cancelModel(); return; }
     if (e.target.id === 'v-model-off') { disableModel(); return; }
