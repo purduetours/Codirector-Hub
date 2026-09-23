@@ -210,14 +210,47 @@ window.addEventListener('scroll', () => {
     scrollTick = false;
     document.documentElement.style.setProperty('--scroll', String(Math.round(window.scrollY)));
     document.body.classList.toggle('is-scrolled', window.scrollY > 8);
+    // Which way you are going: the corner pill tucks away on the way down.
+    const y = window.scrollY;
+    if (Math.abs(y - lastY) > 6) { document.body.classList.toggle('is-scrolling-down', y > lastY && y > 120); lastY = y; }
   });
 }, { passive: true });
+let lastY = 0;
 
-/* The corner control names the page and her best question for it. */
+/* Fold the rail to icons on a big screen, for people who know the way. */
+const paintFold = () => {
+  const folded = document.documentElement.classList.contains('rail-folded');
+  $('#rail-fold').setAttribute('aria-pressed', String(folded));
+  $('#rail-fold').setAttribute('aria-label', folded ? 'Unfold the sidebar' : 'Fold the sidebar');
+};
+$('#rail-fold').innerHTML = ICONS.arrow;
+$('#rail-fold').addEventListener('click', () => {
+  const folded = document.documentElement.classList.toggle('rail-folded');
+  try { localStorage.setItem('hub2.rail', folded ? 'folded' : 'open'); } catch { /* private window */ }
+  paintFold();
+});
+paintFold();
+
+/* The corner control names the page and her best question for it. Arriving
+   from Home, she introduces herself for a moment — "here with you in Eval
+   Tracker" — then settles into the corner. */
+let lastRoute = null, peekTimer = null;
 onRoute(mod => {
   const [first] = hintsFor(mod.id);
+  const float = $('#v-float');
   $('#v-float-title').textContent = `Ask Vanessa about ${mod.title}`;
   $('#v-float-sub').textContent = first ? `Try “${first}”` : 'Questions, tours, the handbook';
+  clearTimeout(peekTimer);
+  float.classList.remove('is-peek');
+  if (lastRoute === 'today' && mod.id !== 'today') {
+    $('#v-float-sub').textContent = `Here with you in ${mod.title}${first ? ` · try “${first}”` : ''}`;
+    float.classList.add('is-peek');
+    peekTimer = setTimeout(() => {
+      float.classList.remove('is-peek');
+      $('#v-float-sub').textContent = first ? `Try “${first}”` : 'Questions, tours, the handbook';
+    }, 3200);
+  }
+  lastRoute = mod.id;
 });
 
 /* Her one contextual question for the page you are on. */

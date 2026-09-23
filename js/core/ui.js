@@ -1,3 +1,4 @@
+import { setVanessaState } from './vanessa-state.js';
 /* ============================================================ UI helpers
    Small, dependency-free utilities every module reaches for.
 ============================================================================ */
@@ -45,6 +46,10 @@ export function todayISO() {
 
 /* --- toasts ------------------------------------------------------------ */
 export function toast(message, kind) {
+  // Every confirmation and failure in the hub comes through here, so this is
+  // where Vanessa's orb learns about them: a brief glow for done, a tint for
+  // something wrong.
+  setVanessaState(kind === 'err' ? 'error' : 'success');
   const el = document.createElement('div');
   el.className = 'toast ' + (kind === 'err' ? 'err' : 'ok');
   el.textContent = message;

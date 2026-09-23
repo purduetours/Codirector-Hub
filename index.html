@@ -14,7 +14,8 @@
    Private windows can throw on localStorage, hence the try. */
 window.__hubLoadedAt = Date.now();
 try { var t = localStorage.getItem('hub2.theme');
-      if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) {}
+      if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      if (localStorage.getItem('hub2.rail') === 'folded') document.documentElement.classList.add('rail-folded'); } catch (e) {}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -24,6 +25,7 @@ try { var t = localStorage.getItem('hub2.theme');
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/home.css">
 <link rel="stylesheet" href="css/flow.css">
+<link rel="stylesheet" href="css/workspaces.css">
 </head>
 <body>
 <div class="ambient" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i><i class="a4"></i></div>
@@ -78,6 +80,7 @@ try { var t = localStorage.getItem('hub2.theme');
         <span class="sub" id="hub-term"></span>
       </span>
     </a>
+    <button class="icon-btn rail-fold" id="rail-fold" type="button" aria-label="Fold the sidebar" aria-pressed="false"></button>
 
     <button class="rail-ask" id="rail-ask" type="button" title="Ask Vanessa">
       <span class="rail-ask-orb"><span class="orb orb-xs"><i></i></span></span>

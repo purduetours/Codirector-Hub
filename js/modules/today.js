@@ -27,9 +27,10 @@ import { select, update } from '../core/db.js';
 import { loadDesks, loadTours } from '../core/sheets.js';
 import { $, esc, injectStyle, initials, prettyTime, todayISO } from '../core/ui.js';
 import { morphTo, visibleModules } from '../core/router.js';
-import { iconFor, ICONS } from '../core/icons.js';
+import { ICONS } from '../core/icons.js';
 import { presenceSnapshot } from '../core/presence.js';
-import { homeActions } from '../core/vanessa-context.js';
+import { resolveActions } from '../core/vanessa-context.js';
+import { setVanessaState } from '../core/vanessa-state.js';
 import { loadRoster } from './evals.js';
 import interviews, { interviewData } from './interviews.js';
 
@@ -230,124 +231,25 @@ function paintChanges(list) {
 
 /* ------------------------------------------------------------ vocabulary */
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
-const count = (n, one, many = one + 's') => `${n < 10 ? WORDS[n] : n} ${n === 1 ? one : many}`;
+const count = (k, one, many = one + 's') => `${k < 10 ? WORDS[k] : k} ${k === 1 ? one : many}`;
 const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-/* Her greeting uses the name on the account — first word of full_name, since
-   that is all the members table stores — and simply drops it if there is none. */
-function firstName() {
-  return String(myName() || '').trim().split(/\s+/)[0] || '';
-}
+/* Her greeting uses the name on the account — the first word of full_name,
+   which is all the members table stores — and drops it when there is none. */
+const firstName = () => String(myName() || '').trim().split(/\s+/)[0] || '';
 
 function isoPlus(days) {
   const d = new Date(); d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-
-/* ------------------------------------------------------------ agenda
-   What is coming up, built only from what the hub already knows: your own
-   claimed evals and their tour dates, today's tours from the workbook,
-   unread announcements, and the count of things waiting on you. */
-function agenda(items) {
-  const out = [];
-  const me = state.me?.id;
-  const today = todayISO(), tomorrow = isoPlus(1);
-  const mine = inTraining() ? (state.guides || []).filter(g => g.evaluatorId === me && g.status === 'claimed') : [];
-
-  mine.filter(g => g.date === today)
-    .sort((a, b) => (a.time || '').localeCompare(b.time || ''))
-    .forEach(g => out.push({ today: true, tone: 'gold', icon: 'evals', go: 'evals',
-      k: g.time ? prettyTime(g.time) : 'Today', t: `Eval · ${g.name}` }));
-
-  if (toursToday?.slots?.length) {
-    const now = nowHHMM();
-    const next = toursToday.slots.find(sl => (sl.start || '') >= now);
-    out.push({ today: true, icon: 'schedule', go: 'schedule',
-      k: next ? `Next ${prettyTime(next.start)}` : 'Done for today',
-      t: `${toursToday.slots.length} tour${toursToday.slots.length === 1 ? '' : 's'} today` });
-  }
-
-  const soon = mine.filter(g => g.date === tomorrow);
-  if (soon.length) out.push({ icon: 'evals', go: 'evals', k: 'Tomorrow',
-    t: soon.length === 1 ? `Eval · ${soon[0].name}` : `${soon.length} evals` });
-
-  const ann = visibleModules().find(m => m.id === 'announcements');
-  const unread = Number(ann?.badge?.() || 0);
-  if (unread) out.push({ icon: 'announcements', go: 'announcements', k: 'New', t: `${unread} announcement${unread === 1 ? '' : 's'}` });
-
-  if (items.length) out.push({ icon: 'spark', scroll: '#hm-attn', tone: 'warn', k: 'Waiting',
-    t: `${items.length} thing${items.length === 1 ? '' : 's'} to look at` });
-  return out;
-}
-
-function vanessaLine(items, plan) {
-  const todayCount = plan.filter(p => p.today && p.icon === 'evals').length;
-  const bits = [];
-  if (todayCount) bits.push(`you have ${count(todayCount, 'eval')} coming up today`);
-  if (items.length) bits.push(`${count(items.length, 'thing')} ${items.length === 1 ? 'is' : 'are'} waiting on you`);
-  if (!bits.length) {
-    return toursToday?.slots?.length
-      ? `Nothing is waiting on you. ${cap(count(toursToday.slots.length, 'tour'))} ${toursToday.slots.length === 1 ? 'is' : 'are'} running today.`
-      : 'Nothing is waiting on you right now. Pick something below, or ask me anything.';
-  }
-  return cap(bits.join(', and ')) + '. Here is the day at a glance.';
-}
-
-function paintAgenda(plan) {
-  const box = $('#hm-agenda');
-  if (!box) return;
-  box.innerHTML = plan.map((p, i) => `
-    <button type="button" class="hm-plan ${p.tone ? 'is-' + p.tone : ''}" style="--i:${i}"
-      ${p.go ? `data-go="${esc(p.go)}"` : ''} ${p.scroll ? `data-scroll="${esc(p.scroll)}"` : ''}>
-      <span class="hm-plan-ico">${ICONS[p.icon] || ICONS.spark}</span>
-      <span class="hm-plan-body"><em>${esc(p.k)}</em><b>${esc(p.t)}</b></span>
-    </button>`).join('');
-  box.hidden = !plan.length;
-}
-
-/* ---------------------------------------------------------------- deck
-   What Vanessa can do for you — verbs, drawn from vanessa-context.js so the
-   deck, her panel and her hints all offer the same permission-checked set.
-   The first three are given room; the rest sit in a quieter row. */
-function paintDeck() {
-  const box = $('#hm-deck');
-  if (!box) return;
-  const acts = homeActions({ toursToday: toursToday ? toursToday.slots.length : null });
-  const lead = acts.filter(a => a.weight >= 2).slice(0, 3);
-  // Questions first, then places — every place is also in "All your tools".
-  const rest = acts.filter(a => !lead.includes(a))
-    .sort((x, y) => (x.kind === 'ask' ? 0 : 1) - (y.kind === 'ask' ? 0 : 1) || y.weight - x.weight)
-    .slice(0, 6);
-  const btn = (a, big) => {
-    const tool = a.kind === 'go' ? a.to : (a.icon || 'today');
-    const attrs = a.kind === 'go' ? `data-go="${esc(a.to)}"` : `data-ask="${esc(a.q)}"`;
-    return `<button type="button" class="hm-act ${big ? 'is-lead' : ''} ${a.kind === 'ask' ? 'is-ask' : ''}" ${attrs}
-        style="--tool:var(--t-${esc(tool)}, var(--gold-deep))">
-      <span class="hm-act-ico" data-morph-ico>${ICONS[a.icon] || ICONS.spark}</span>
-      <span class="hm-act-body"><b>${esc(a.label)}</b>${a.sub ? `<em>${esc(a.sub)}</em>` : ''}</span>
-      <span class="hm-act-go">${a.kind === 'ask' ? '<span class="orb orb-xs"><i></i></span>' : ICONS.arrow}</span>
-    </button>`;
-  };
-  box.innerHTML =
-    `<div class="hm-deck-lead hm-n${lead.length}">${lead.map(a => btn(a, true)).join('')}</div>` +
-    (rest.length ? `<div class="hm-deck-rest">${rest.map(a => btn(a, false)).join('')}</div>` : '');
-}
-
-/* All of this person's tools, as a quiet row of places at the foot of the
-   page. The rail has them too; this is for the person who scrolled here. */
-function paintPlaces() {
-  const box = $('#hm-places');
-  if (!box) return;
-  box.innerHTML = visibleModules().filter(m => m.id !== 'today' && !m.soon).map(m => {
-    const b = Number(m.badge?.() || 0);
-    return `<a class="hm-place" href="#/${esc(m.id)}" data-go="${esc(m.id)}" style="--tool:var(--t-${esc(m.id)}, var(--gold-deep))">
-      <span class="hm-place-ico" data-morph-ico>${iconFor(m)}</span><span>${esc(m.title)}</span>${b ? `<i>${b}</i>` : ''}</a>`;
-  }).join('');
+function nowHHMM() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 /* ---------------------------------------------------------- on tour today */
 let toursToday = null;
-
 async function loadToursToday() {
   try {
     const rows = await loadTours();
@@ -362,34 +264,143 @@ async function loadToursToday() {
   } catch { toursToday = null; }
   return toursToday;
 }
+const nextSlot = () => toursToday?.slots?.find(sl => (sl.start || '') >= nowHHMM()) || null;
 
-function nowHHMM() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+/* ------------------------------------------------------------ context
+   What the action registry is told about the day. Every value is one the
+   hub already had in hand. */
+function homeContext(gaps) {
+  const iv = interviewData();
+  const unscoredForMe = inRecruitment() && iv?.candidates?.length
+    ? iv.candidates.filter(c => c.checkin === 'Yes' && !c.scores?.[myName()]).length : 0;
+  const ann = visibleModules().find(m => m.id === 'announcements');
+  const next = nextSlot();
+  return {
+    toursToday: toursToday ? toursToday.slots.length : null,
+    nextTour: next ? prettyTime(next.start) : null,
+    unread: Number(ann?.badge?.() || 0),
+    deskGaps: gaps || 0,
+    unscoredForMe
+  };
 }
 
+/* ------------------------------------------------------------ agenda */
+function agenda(items) {
+  const out = [];
+  const me = state.me?.id;
+  const today = todayISO(), tomorrow = isoPlus(1);
+  const mine = inTraining() ? (state.guides || []).filter(g => g.evaluatorId === me && g.status === 'claimed') : [];
+
+  mine.filter(g => g.date === today)
+    .sort((a, b) => (a.time || '').localeCompare(b.time || ''))
+    .forEach(g => out.push({ today: true, tone: 'gold', icon: 'evals', go: 'evals',
+      k: g.time ? prettyTime(g.time) : 'Today', t: `Eval · ${g.name}` }));
+
+  if (toursToday?.slots?.length) {
+    const next = nextSlot();
+    out.push({ today: true, icon: 'schedule', go: 'schedule',
+      k: next ? `Next ${prettyTime(next.start)}` : 'Done for today',
+      t: `${toursToday.slots.length} tour${toursToday.slots.length === 1 ? '' : 's'} today` });
+  }
+  const soon = mine.filter(g => g.date === tomorrow);
+  if (soon.length) out.push({ icon: 'evals', go: 'evals', k: 'Tomorrow',
+    t: soon.length === 1 ? `Eval · ${soon[0].name}` : `${soon.length} evals` });
+  if (items.length) out.push({ icon: 'spark', scroll: '#hm-attn', tone: 'warn', k: 'Waiting',
+    t: `${items.length} thing${items.length === 1 ? '' : 's'} to look at` });
+  return out;
+}
+
+function vanessaLine(items, plan) {
+  const evalsToday = plan.filter(p => p.today && p.icon === 'evals').length;
+  const bits = [];
+  if (evalsToday) bits.push(`you have ${count(evalsToday, 'eval')} coming up today`);
+  if (items.length) bits.push(`${count(items.length, 'thing')} ${items.length === 1 ? 'is' : 'are'} waiting on you`);
+  if (!bits.length) {
+    return toursToday?.slots?.length
+      ? `Nothing is waiting on you. ${cap(count(toursToday.slots.length, 'tour'))} ${toursToday.slots.length === 1 ? 'is' : 'are'} running today.`
+      : 'Nothing is waiting on you right now. Pick something below, or ask me anything.';
+  }
+  return cap(bits.join(', and ')) + '.';
+}
+
+function paintAgenda(plan) {
+  const box = $('#hm-agenda');
+  if (!box) return;
+  box.innerHTML = plan.map((p, i) => `
+    <button type="button" class="hm-plan ${p.tone ? 'is-' + p.tone : ''}" style="--i:${i}"
+      ${p.go ? `data-go="${esc(p.go)}"` : ''} ${p.scroll ? `data-scroll="${esc(p.scroll)}"` : ''}>
+      <span class="hm-plan-ico" data-morph-ico>${ICONS[p.icon] || ICONS.spark}</span>
+      <span class="hm-plan-body"><em>${esc(p.k)}</em><b>${esc(p.t)}</b></span>
+    </button>`).join('');
+  box.hidden = !plan.length;
+}
+
+/* ---------------------------------------------------------------- actions
+   Rendered straight from the registry's tiers:
+     primary    in her stage, beside her — what needs you now, with why
+     secondary  the tools you usually reach for, on the sheet
+     more       folded away, a click to open */
+function attrs(a) {
+  return a.kind === 'open' ? `data-go="${esc(a.to)}"` : `data-ask="${esc(a.q)}"`;
+}
+function actButton(a, size, i = 0) {
+  const tool = a.kind === 'open' ? a.to : (a.icon || 'today');
+  const line = a.reason || a.status || a.description;
+  return `<button type="button" class="hm-act is-${size} ${a.kind === 'ask' ? 'is-ask' : ''}" ${attrs(a)}
+      style="--tool:var(--t-${esc(tool)}, var(--gold-deep)); --n:${i}">
+    <span class="hm-act-ico" data-morph-ico>${ICONS[a.icon] || ICONS.spark}</span>
+    <span class="hm-act-body"><b>${esc(a.title)}</b>${line ? `<em>${esc(line)}</em>` : ''}</span>
+    ${a.badge ? `<span class="hm-act-badge">${esc(a.badge)}</span>` : ''}
+    <span class="hm-act-go">${a.kind === 'ask' ? '<span class="orb orb-xs"><i></i></span>' : ICONS.arrow}</span>
+  </button>`;
+}
+
+function paintActions(ctx) {
+  const acts = resolveActions('today', ctx);
+  let primary = acts.filter(a => a.tier === 'primary').slice(0, 3);
+  // Always something to hand you, even on a quiet day.
+  if (!primary.length) primary = acts.slice(0, 2);
+  const rest = acts.filter(a => !primary.includes(a));
+  // A small role gets everything in plain view; "More" is only for a lot.
+  const secondary = rest.length <= 6 ? rest : rest.filter(a => a.tier !== 'more').slice(0, 6);
+  const more = rest.filter(a => !secondary.includes(a));
+
+  const focus = $('#hm-focus');
+  if (focus) focus.innerHTML = primary.map((a, i) => actButton(a, 'focus', i)).join('');
+
+  const deck = $('#hm-deck');
+  if (deck) deck.innerHTML = secondary.map((a, i) => actButton(a, 'deck', i)).join('');
+  const block = deck?.closest('.hm-block');
+  if (block) block.hidden = !secondary.length && !more.length;
+  return primary;
+
+  const box = $('#hm-more');
+  if (box) {
+    box.hidden = !more.length;
+    $('#hm-more-n').textContent = String(more.length);
+    $('#hm-more-body').innerHTML = more.map((a, i) => actButton(a, 'mini', i)).join('');
+  }
+}
+
+/* ---------------------------------------------------------------- tours */
 function paintTours() {
   const box = $('#hm-tours');
   if (!box) return;
-  if (!toursToday) {
-    box.innerHTML = `<p class="hm-quiet">The schedule workbook could not be reached. The Schedule tab will retry.</p>`;
-    return;
-  }
+  if (!toursToday) { box.innerHTML = `<p class="hm-quiet">The schedule workbook could not be reached. The Schedule tab will retry.</p>`; return; }
   const { slots } = toursToday;
   if (!slots.length) { box.innerHTML = `<p class="hm-quiet">No tours on the schedule today.</p>`; return; }
   const now = nowHHMM();
   const next = slots.findIndex(sl => (sl.start || '') >= now);
   box.innerHTML = `<ol class="hm-timeline">${slots.map((sl, i) => {
     const cls = next === -1 || i < next ? 'is-past' : i === next ? 'is-next' : '';
-    return `<li class="${cls}">
+    return `<li class="${cls}" style="--i:${i}">
       <span class="hm-time">${esc(sl.slot || prettyTime(sl.start))}</span>
       <span class="hm-guides">${sl.guides.slice().sort().map(g => `<span>${esc(g)}</span>`).join('')}</span>
     </li>`;
   }).join('')}</ol>`;
 }
 
-/* ------------------------------------------------------------- active now
-   A quiet line under Vanessa rather than a panel: a few faces and a count. */
+/* ------------------------------------------------------------- active now */
 function paintPresence(snap) {
   const box = $('#hm-presence');
   if (!box) return;
@@ -399,7 +410,7 @@ function paintPresence(snap) {
   const faces = users.slice(0, 5).map((u, i) =>
     `<span class="hm-face" style="--i:${i}" title="${esc(u.full_name)}">${esc(initials(u.full_name))}</span>`).join('');
   box.innerHTML = `<span class="hm-faces">${faces}</span>
-    <span>${users.length === 1 ? 'Just you here right now' : `${count(users.length, 'team member')} active now`}</span>`;
+    <span>${users.length === 1 ? 'Just you here right now' : `${cap(count(users.length, 'teammate'))} active now`}</span>`;
 }
 
 /* ---------------------------------------------------------------- shell */
@@ -411,18 +422,20 @@ function dayPart() {
 function shell() {
   const name = firstName();
   const date = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const sk = h => `<div class="skel" style="height:${h}px"></div>`;
   return `
-  <section class="hm-stage" data-reveal>
-    <div class="hm-orb" aria-hidden="true"><span class="hm-halo"></span><span class="orb orb-lg"><i></i></span></div>
+  <section class="hm-stage">
+    <div class="hm-orb" aria-hidden="true"><span class="hm-halo"></span><span class="orb orb-lg"><i></i></span><span class="hm-thread"></span></div>
     <div class="hm-stage-body">
       <p class="hm-eyebrow"><span>${esc(dayPart())}</span><span>${esc(date)}</span>${termLabel() ? `<span>${esc(termLabel())}</span>` : ''}</p>
       <h1 class="hm-title">${name ? `Welcome back, <span class="hm-name">${esc(name)}</span>.` : 'Welcome back.'}
         <em>What are we working on today?</em></h1>
-      <p class="hm-says" id="hm-says"><span class="skel" style="display:inline-block;width:min(420px,70%);height:1em;vertical-align:middle"></span></p>
+      <p class="hm-says" id="hm-says" aria-live="polite"><span class="skel" style="display:inline-block;width:min(420px,70%);height:1em;vertical-align:middle"></span></p>
+      <div class="hm-focus" id="hm-focus">${sk(96)}${sk(96)}</div>
       <div class="hm-agenda" id="hm-agenda" hidden></div>
-      <form class="hm-ask" id="hm-ask">
+      <form class="hm-ask" id="hm-ask" role="search">
         <span class="hm-ask-ico">${ICONS.spark}</span>
-        <input id="hm-ask-input" autocomplete="off" aria-label="Ask Vanessa" placeholder="Ask Vanessa anything about the hub…">
+        <input id="hm-ask-input" autocomplete="off" aria-label="Ask Vanessa" placeholder="Or ask me anything about the hub…">
         <button class="btn btn-primary btn-sm" type="submit">Ask ${ICONS.send}</button>
       </form>
       <p class="hm-presence" id="hm-presence" hidden></p>
@@ -434,28 +447,45 @@ function shell() {
       <path d="M0 60 L0 34 C 180 6, 360 2, 560 18 S 940 54, 1200 20 L1200 60 Z"/>
     </svg>
     <section class="hm-block" data-reveal>
-      <header class="hm-head"><h2>What can I help with?</h2><p>Pick one — I'll take you there, or do it with you.</p></header>
-      <div id="hm-deck" class="hm-deck">
-        <div class="hm-deck-lead hm-n3"><div class="skel" style="height:118px"></div><div class="skel" style="height:118px"></div><div class="skel" style="height:118px"></div></div>
-      </div>
+      <header class="hm-head"><h2>Your usual</h2><p>The tools you reach for most.</p></header>
+      <div id="hm-deck" class="hm-deck">${sk(64)}${sk(64)}${sk(64)}</div>
+      <details class="hm-more" id="hm-more" hidden>
+        <summary><span>More</span><span class="hm-card-n" id="hm-more-n"></span>${ICONS.arrow}</summary>
+        <div class="hm-more-body" id="hm-more-body"></div>
+      </details>
     </section>
 
     <div class="hm-flow">
       <section class="hm-col" id="hm-attn" data-reveal>
         <header class="hm-col-head"><span class="hm-card-ico">${ICONS.spark}</span><h3>Waiting on you</h3><span class="hm-card-n" id="hm-attn-n"></span></header>
-        <div id="td-list"><div class="skel" style="height:58px;margin-bottom:8px"></div><div class="skel" style="height:58px"></div></div>
+        <div id="td-list">${sk(58)}${sk(58)}</div>
       </section>
       <section class="hm-col" data-reveal>
         <header class="hm-col-head"><span class="hm-card-ico">${ICONS.clock}</span><h3>On tour today</h3></header>
-        <div id="hm-tours"><div class="skel" style="height:40px"></div></div>
+        <div id="hm-tours">${sk(40)}</div>
       </section>
     </div>
-
-    <section class="hm-block hm-places-block" data-reveal>
-      <header class="hm-head"><h2>All your tools</h2></header>
-      <nav class="hm-places" id="hm-places" aria-label="Your tools"></nav>
-    </section>
   </div>`;
+}
+
+/* ---------------------------------------------------------------- handoff
+   Choosing a tool: she says she is opening it, the choice lifts while the
+   rest of the page steps back, then the router grows it into the workspace.
+   The pause is short and the navigation always happens — the animation
+   sells continuity, it never stands in the way. */
+let handing = false;
+function handoff(dest, el) {
+  if (handing) return;
+  const mod = visibleModules().find(m => m.id === dest);
+  if (!mod) return;                                // the router would refuse it anyway
+  if (reduced()) { morphTo(dest, el); return; }
+  handing = true;
+  setVanessaState('opening');
+  const says = $('#hm-says');
+  if (says) says.textContent = `Opening ${mod.title} for you…`;
+  el.classList.add('is-chosen');
+  $('#view')?.classList.add('is-handing');
+  setTimeout(() => { handing = false; morphTo(dest, el); }, 240);
 }
 
 let onPresence = null;
@@ -467,13 +497,18 @@ export default {
   icon: '👋',
   section: 'Hub',
 
+  /* Drawn inside the route transition, so her orb has somewhere to land. */
+  prepaint(view) { view.innerHTML = shell(); },
+
   unmount() {
     if (onPresence) document.removeEventListener('hub:presence', onPresence);
     onPresence = null;
+    handing = false;
   },
 
   async mount(view) {
-    view.innerHTML = shell();
+    if (!view.querySelector('.hm-stage')) view.innerHTML = shell();
+    setVanessaState('ready');
 
     const ask = q => document.dispatchEvent(new CustomEvent('hub:ask', { detail: { question: q } }));
     $('#hm-ask').addEventListener('submit', e => {
@@ -484,28 +519,23 @@ export default {
       ask(q);
     });
 
-    /* One delegate for everything clickable on home. Going somewhere grows
-       the clicked element into the workspace; asking hands it to Vanessa. */
     view.addEventListener('click', e => {
       const q = e.target.closest('[data-ask]');
       if (q) { ask(q.dataset.ask); return; }
       const to = e.target.closest('[data-scroll]');
-      if (to) { $(to.dataset.scroll)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      if (to) { $(to.dataset.scroll)?.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }); return; }
       const dest = e.target.closest('[data-go]');
-      if (dest) { e.preventDefault(); morphTo(dest.dataset.go, dest); }
+      if (dest) { e.preventDefault(); handoff(dest.dataset.go, dest); }
     });
 
     paintPresence(presenceSnapshot());
     onPresence = e => paintPresence(e.detail);
     document.addEventListener('hub:presence', onPresence);
 
-    paintPlaces();
-    const tours = loadToursToday();
-
     await Promise.allSettled([
       inTraining() && !state.guides.length ? loadRoster() : null,
       inRecruitment() ? interviews.prefetch?.() : null,
-      tours
+      loadToursToday()
     ]);
     if (!view.isConnected || document.body.dataset.route !== 'today') return;
 
@@ -517,14 +547,15 @@ export default {
 
     const plan = agenda(items);
     $('#hm-says').textContent = vanessaLine(items, plan);
-    paintAgenda(plan);
-    paintDeck();
-    paintPlaces();
+    const primary = paintActions(homeContext(gaps));
+    // A chip that only repeats a primary action would be saying it twice.
+    const handed = new Set(primary.filter(a => a.kind === 'open').map(a => a.to));
+    paintAgenda(plan.filter(p => !(p.go && handed.has(p.go) && !p.today) && !(p.go === 'schedule' && handed.has('schedule'))));
     paintTours();
     $('#hm-attn-n').textContent = items.length ? String(items.length) : '';
 
-    const row = (i, n) => `
-          <button class="td-row hm-row ${i.tone === 'warn' ? 'is-warn' : ''}" data-go="${esc(i.go)}" style="--i:${n}">
+    const row = (i, k) => `
+          <button class="td-row hm-row ${i.tone === 'warn' ? 'is-warn' : ''}" data-go="${esc(i.go)}" style="--i:${k}">
             <span class="td-n" data-morph-ico>${i.n}</span>
             <span class="td-what"><b>${esc(i.what)}</b><em>${esc(i.why)}</em></span>
             <span class="td-go">${ICONS.arrow}</span>
@@ -534,11 +565,11 @@ export default {
       ? items.slice(0, SHOWN).map(row).join('') +
         (items.length > SHOWN
           ? `<div class="hm-more-list" id="hm-more-list"><div>${items.slice(SHOWN).map(row).join('')}</div></div>
-             <button type="button" class="hm-more" aria-expanded="false" aria-controls="hm-more-list">${items.length - SHOWN} more ${ICONS.arrow}</button>`
+             <button type="button" class="hm-more-btn" aria-expanded="false" aria-controls="hm-more-list">${items.length - SHOWN} more ${ICONS.arrow}</button>`
           : '')
       : `<div class="hm-clear"><span class="hm-clear-mark">${ICONS.check}</span>
-         <p><b>All clear.</b> Nothing needs you right now.</p></div>`;
-    $('.hm-more')?.addEventListener('click', e => {
+         <p><b>All clear.</b> Nothing is waiting on you right now.</p></div>`;
+    $('.hm-more-btn')?.addEventListener('click', e => {
       const b = e.currentTarget, openNow = b.getAttribute('aria-expanded') !== 'true';
       b.setAttribute('aria-expanded', String(openNow));
       $('#hm-more-list').classList.toggle('is-open', openNow);
@@ -551,7 +582,7 @@ export default {
       const box = document.createElement('div');
       box.id = 'td-changes';
       box.hidden = true;
-      view.querySelector('.hm-places-block').before(box);
+      view.querySelector('.hm-flow').after(box);
       recentChanges().then(list => {
         paintChanges(list);
         $('#td-changes')?.addEventListener('click', async e => {
@@ -564,8 +595,9 @@ export default {
           try {
             await update('training_attendance', `id=eq.${c.undo.id}`, { [c.undo.field]: c.undo.value || null });
             btn.textContent = 'undone';
+            setVanessaState('success');
             // Reverting is itself a change, so the feed will show it next time.
-          } catch (err) { btn.disabled = false; alert(err.message); }
+          } catch (err) { btn.disabled = false; alert(err.message); setVanessaState('error'); }
         });
       }).catch(() => {});
     }

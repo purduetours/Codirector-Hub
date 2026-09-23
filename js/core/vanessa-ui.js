@@ -9,7 +9,10 @@ import { modelStatus, onModelChange, checkAvailability, enableModel, cancelModel
 import { state as appState, inTraining, inRecruitment, myName } from './state.js';
 import { $, esc, injectStyle } from './ui.js';
 import { go, onRoute, currentModule } from './router.js';
-import { actionsFor } from './vanessa-context.js';
+import { actionsFor, explainTool } from './vanessa-context.js';
+import { presenceSnapshot } from './presence.js';
+import { visibleModules } from './router.js';
+import { setVanessaState } from './vanessa-state.js';
 import { ICONS } from './icons.js';
 import { handleEvalMessage, evalDraft, resetEvalFlow, editEvalDraft, savedEvalSummary, bufferEvalDraft } from './vanessa-eval.js';
 import { handleAction, resetActions } from './vanessa-actions.js';
@@ -123,6 +126,34 @@ injectStyle('vanessa-css', `
 .v-chips .v-chip:nth-child(4) { animation-delay:.09s; } .v-chips .v-chip:nth-child(n+5) { animation-delay:.12s; }
 .v-panel.has-chat [data-suggestions] { display:none; }
 .v-ask:focus-within { box-shadow:inset 0 1px 0 var(--line), 0 -10px 30px -20px color-mix(in srgb, var(--v-1) 60%, transparent); }
+/* ---- 3.0: reply types ---- */
+.v-msg.her p { margin:0; white-space:pre-wrap; }
+.v-kind { display:flex; align-items:center; gap:6px; margin:-1px 0 7px; font-size:var(--fs-2xs); font-weight:800;
+  letter-spacing:.07em; text-transform:uppercase; color:var(--gold-deep); }
+.v-kind svg { width:13px; height:13px; }
+.v-lead { font-weight:600; margin-bottom:8px !important; }
+.v-list { list-style:none; margin:0; padding:0; display:grid; gap:4px; }
+.v-list li { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:7px 10px; border-radius:10px;
+  background:color-mix(in srgb, var(--bg-elev) 70%, transparent); animation:v-msg-in .4s var(--ease-out) both; }
+.v-list li:nth-child(2) { animation-delay:.03s; } .v-list li:nth-child(3) { animation-delay:.06s; } .v-list li:nth-child(n+4) { animation-delay:.09s; }
+.v-list b { font-weight:650; font-size:var(--fs-sm); min-width:0; overflow-wrap:anywhere; }
+.v-list span { font-size:var(--fs-xs); color:var(--text-faint); text-align:right; flex:none; max-width:55%; }
+.v-tail { margin-top:8px !important; color:var(--text-soft); font-size:var(--fs-sm); }
+.v-inline-acts { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.v-msg.v-k-confirm { background:linear-gradient(180deg, color-mix(in srgb, var(--good-bg) 80%, var(--bg-sunken)), var(--bg-sunken));
+  border-color:color-mix(in srgb, var(--good) 25%, transparent); }
+.v-msg.v-k-confirm .v-kind { color:var(--good); }
+.v-msg.v-k-alert { background:linear-gradient(180deg, var(--warn-bg), color-mix(in srgb, var(--warn-bg) 50%, var(--bg-sunken)));
+  border-color:color-mix(in srgb, var(--warn) 25%, transparent); }
+.v-msg.v-k-alert .v-kind { color:var(--warn); }
+.v-msg.v-k-error { background:var(--danger-bg); border-color:color-mix(in srgb, var(--danger) 25%, transparent); }
+.v-msg.v-k-error .v-kind { color:var(--danger); }
+.v-msg.v-k-nav { border-style:dashed; border-color:color-mix(in srgb, var(--gold) 55%, transparent); }
+.v-msg.v-k-nav .v-kind svg { animation:nav-nudge .9s var(--ease-out) infinite; }
+@keyframes nav-nudge { 50% { transform:translateX(3px); } }
+.v-msg.v-k-explain { background:linear-gradient(180deg, var(--gold-wash), color-mix(in srgb, var(--gold-wash) 40%, var(--bg-sunken))); }
+.v-head .v-live { font-size:var(--fs-2xs); font-weight:700; color:var(--text-faint); display:inline-flex; gap:5px; align-items:center; margin-left:8px; }
+.v-head .v-live::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--good); }
 /* On a wide screen she docks beside the workspace instead of covering it. */
 @media (min-width:1280px){
   .v-panel { top:10px; bottom:10px; right:10px; width:420px; }
@@ -198,16 +229,92 @@ function collapse(el) {
 /* Her mood, shared by every orb in the hub — the rail, the top bar, the dock,
    the home stage and her own. Idle drifts; thinking turns quickly; speaking
    glows; listening pulses. One attribute on <html>, so they all agree. */
-let moodTimer = null;
-function setMood(mood) {
-  clearTimeout(moodTimer);
-  document.documentElement.dataset.vanessa = mood;
-  if (mood === 'speaking') moodTimer = setTimeout(() => setMood('idle'), 1400);
-}
+// Her panel speaks in the older mood words; the state module owns the rest.
+const MOOD = { speaking: 'responding' };
+const setMood = mood => setVanessaState(MOOD[mood] || mood);
 
 /* ------------------------------------------------------- context & actions */
 const routeId = () => currentModule()?.id || 'today';
 const routeTitle = () => currentModule()?.title || 'Home';
+
+/* ------------------------------------------------------------ reply types
+   Not everything she says is a chat bubble. A reply is one of:
+
+     message   an ordinary answer
+     result    data from one of her existing lookups — a lead line and a list
+     alert     something that needs attention (a refusal, a partial load)
+     confirm   an action she carried out
+     nav       she is opening a tool for you
+     explain   what a tool is, with the way in
+     error     it went wrong
+
+   Every type is the same bubble underneath, so collapse, avatars and
+   follow-ups keep working. Only the head, the body layout and any buttons
+   inside it change. */
+const NO_ACCESS = "That tool isn't available for your account.";
+const KIND_HEAD = { result: ['spark', 'Here is what I found'], alert: ['spark', 'Heads up'], confirm: ['check', 'Done'],
+  nav: ['arrow', 'Opening'], explain: ['spark', 'About'], error: ['close', 'Something went wrong'] };
+
+function classify(r, { acted } = {}) {
+  const text = String(r?.text || '');
+  if (r?.kind) return r.kind;
+  if (text === NO_ACCESS) return 'alert';
+  if (acted) return /could ?n.?t|cannot|can't|not available|failed|error|sorry|isn't|no longer/i.test(text) ? 'alert' : 'confirm';
+  if (r?.go) return 'nav';
+  if (/^\s*[-•]\s/m.test(text)) return 'result';
+  return 'message';
+}
+
+function sayRich(r, opts = {}) {
+  const kind = classify(r, opts);
+  const text = String(r?.text || '');
+  const el = say('her', '');
+  if (!el) return null;
+  el.classList.add('v-k-' + kind);
+  const head = KIND_HEAD[kind];
+  const toolTitle = r?.go || r?.to ? visibleModules().find(m => m.id === (r.go || r.to))?.title : '';
+  let html = '';
+  if (head && kind !== 'message') {
+    const label = kind === 'nav' ? `Opening ${toolTitle || 'that'}` : kind === 'explain' ? (r.title || toolTitle || 'About') : head[1];
+    html += `<span class="v-kind">${ICONS[head[0]] || ''}<span>${esc(label)}</span></span>`;
+  }
+  const lines = text.split('\n');
+  const listStart = lines.findIndex(l => /^\s*[-•]\s/.test(l));
+  if (kind === 'result' && listStart >= 0) {
+    const lead = lines.slice(0, listStart).join('\n').trim();
+    const items = [], tail = [];
+    lines.slice(listStart).forEach(l => (/^\s*[-•]\s/.test(l) ? items.push(l.replace(/^\s*[-•]\s/, '')) : l.trim() && tail.push(l)));
+    html += (lead ? `<p class="v-lead">${esc(lead)}</p>` : '') +
+      `<ul class="v-list">${items.map(i => {
+        const m = /^(.+?)\s+[—–-]\s+(.+)$/.exec(i);
+        return m ? `<li><b>${esc(m[1])}</b><span>${esc(m[2])}</span></li>` : `<li><b>${esc(i)}</b></li>`;
+      }).join('')}</ul>` +
+      (tail.length ? `<p class="v-tail">${esc(tail.join('\n'))}</p>` : '');
+  } else {
+    html += `<p class="v-text">${esc(text)}</p>`;
+  }
+  const dest = r?.go || r?.to;
+  if (dest && (kind === 'nav' || kind === 'explain') && visibleModules().some(m => m.id === dest)) {
+    html += `<div class="v-inline-acts"><button type="button" class="v-chip is-go" data-go="${esc(dest)}">Open ${esc(toolTitle)}${ICONS.arrow}</button></div>`;
+  }
+  el.innerHTML = html;
+  collapse(el);
+  if (kind === 'confirm') setVanessaState('success');
+  else if (kind === 'error') setVanessaState('error');
+  else if (kind === 'nav') setVanessaState('opening');
+  return el;
+}
+
+/* "Who is active?" — the same heartbeat the top bar shows, names only. */
+function presenceAnswer(q) {
+  if (!/\b(who(?:'s| is)? (?:online|active|on|around|here)|active (?:now|users|members|people)|how many (?:people )?(?:are )?(?:online|active|on))\b/i.test(q)) return null;
+  const snap = presenceSnapshot();
+  if (!snap || snap.error) return { text: 'I cannot see who is active right now. It retries on its own every half minute.', kind: 'alert' };
+  const users = snap.users || [];
+  if (!users.length) return { text: 'Nobody else is active right now.' };
+  return { text: `${users.length} ${users.length === 1 ? 'person is' : 'people are'} active now:\n` +
+    users.map(u => `- ${u.full_name}${u.member_id === appState.me?.id ? ' — you' : ''}`).join('\n') };
+}
 
 function actionButton(a) {
   const go_ = a.kind === 'go';
@@ -338,7 +445,7 @@ function paintVoice(){
   if(use)use.disabled=busy || !status.text.trim();
 }
 onVoiceChange(paintVoice);
-onVoiceChange(() => { const st = voiceState(); if (st.phase === 'recording') setMood('listening'); else if (document.documentElement.dataset.vanessa === 'listening') setMood('idle'); });
+onVoiceChange(() => { const st = voiceState(); if (st.phase === 'recording') setMood('listening'); else if (document.documentElement.dataset.vanessa === 'listening') setVanessaState('idle'); });
 function useTranscript(){
   if(['recording','stopping'].includes(voiceState().phase))return;
   const transcript=$('#v-transcript')?.value.trim();if(!transcript)return;
@@ -483,10 +590,20 @@ function send(question) {
       if (ticket !== epoch || user !== appState.me?.id) return;
       /* Doing something comes before answering: "claim Noah" is a request,
          not a question, and must not be routed to the roster matcher. */
+      /* A tool explained in a line, with the way in — or a polite no. */
+      const ex = explainTool(q);
+      if (ex) {
+        note?.remove();
+        sayRich(ex.denied ? { text: ex.text } : { text: ex.text, to: ex.to, title: ex.title, kind: 'explain' });
+        return;
+      }
+      const here = presenceAnswer(q);
+      if (here) { note?.remove(); sayRich(here); return; }
+
       const acted = await handleAction(q);
       if (acted) {
         note?.remove();
-        say('her', acted.text);
+        sayRich(acted, { acted: true });
         if (acted.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(acted.go); }, 500);
         return;
       }
@@ -507,7 +624,7 @@ function send(question) {
         if (canonical) { const second = ask(canonical); if (!second.stuck) r = second; }
       }
       note?.remove();
-      if (failures.length) say('her', `Could not load ${failures.join(', ')}. I will retry on your next question; answers may be limited until it loads.`);
+      if (failures.length) sayRich({ kind: 'alert', text: `I could not load ${failures.join(', ')} just now, so this answer may be missing something. I will try again on your next question.` });
 
       /* With the model loaded she writes the reply herself, from the numbers
          the hub just worked out. The deterministic text stays as the safety
@@ -521,11 +638,12 @@ function send(question) {
         }
       }
 
-      say('her', r.text);
+      sayRich(r);
       if (r.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(r.go); }, 400);
     } catch (err) {
       note?.remove();
-      if (ticket === epoch) say('her', 'I could not finish that question. Please try again.')?.classList.add('is-error');
+      if (ticket === epoch) sayRich({ text: 'I could not finish that one. Ask me again in a moment.', kind: 'error' });
+      console.error('[Vanessa]', err);
     } finally {
       note?.remove();
       if (ticket === epoch && user === appState.me?.id) { setMood('speaking'); if (!inFlow) paintFollowups(q); }
@@ -566,7 +684,7 @@ export function resetVanessa() {
   resetActions();
   resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
   $('#v-launch')?.remove(); $('#v-panel')?.remove(); document.body.classList.remove('v-open');
-  document.documentElement.dataset.vanessa = 'idle'; tellToggle();
+  setVanessaState('idle'); tellToggle();
 }
 export function initVanessa() {
   if ($('#v-launch') || !appState.me) return;
@@ -578,7 +696,7 @@ export function initVanessa() {
   panel.id = 'v-panel'; panel.className = 'v-panel'; panel.hidden = true;
   panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Vanessa');
   panel.innerHTML = `<div class="v-head"><span class="v-head-id"><span class="orb orb-sm" id="v-orb"><i></i></span>
-      <span><strong>Vanessa</strong><span class="sub" id="v-sub">Here with you</span></span></span>
+      <span><strong>Vanessa<span class="v-live" id="v-live" hidden></span></strong><span class="sub" id="v-sub">Here with you</span></span></span>
     <span class="v-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
     <button type="button" class="icon-btn" id="v-close" aria-label="Close">✕</button></div>
     <div id="v-saved" class="v-saved" hidden></div>
@@ -679,6 +797,13 @@ export function initVanessa() {
   });
   paintContext();
 }
+
+/* Ambient: how many teammates are here, beside her name. */
+document.addEventListener('hub:presence', e => {
+  const el = $('#v-live'); if (!el) return;
+  const k = e.detail && !e.detail.error ? (e.detail.users || []).length : 0;
+  el.hidden = k < 2; el.textContent = `${k} active`;
+});
 
 /* She always knows which screen you are on: her header, suggestions and
    follow-ups are redrawn whenever the route changes, open or not. */

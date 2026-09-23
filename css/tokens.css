@@ -75,6 +75,21 @@
   --t-people:        #3b3a36;
   --t-health:        #a3454f;
 
+  /* ------------------------------------------------------ layered surfaces
+     The hub is one environment with layers, not paper cards on a desk.
+       surface-0  embedded in the page (no fill of its own)
+       surface-1  a faint lift — rows, quiet groups
+       surface-2  a clear surface — hovered rows, working areas
+       glass-1/2  floating things over the ambient light (pills, sheets)
+     Borders are hairlines that fade into the surface, never hard rules. */
+  --surface-1: color-mix(in srgb, var(--bg-elev) 45%, transparent);
+  --surface-2: color-mix(in srgb, var(--bg-elev) 78%, transparent);
+  --glass-1:   color-mix(in srgb, var(--bg-elev) 58%, transparent);
+  --glass-2:   color-mix(in srgb, var(--bg-elev) 74%, transparent);
+  --hairline:  color-mix(in srgb, var(--line) 70%, transparent);
+  --blur-1: blur(12px) saturate(1.2);
+  --blur-2: blur(18px) saturate(1.3);
+
   /* ----------------------------------------------------------- type */
   --font:    "Plus Jakarta Sans", ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --display: "Instrument Serif", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
@@ -110,7 +125,8 @@
   /* ----------------------------------------------------------- motion */
   --ease:     cubic-bezier(.2,.8,.2,1);
   --ease-out: cubic-bezier(.16,1,.3,1);
-  --dur-1: .12s; --dur-2: .2s; --dur-3: .36s;
+  --dur-1: .12s; --dur-2: .2s; --dur-3: .36s; --dur-4: .56s;
+  --ease-spring: cubic-bezier(.3,1.3,.5,1);   /* a touch of overshoot, for things that slide into place */
 
   /* ----------------------------------------------------------- layout */
   --rail: 252px;

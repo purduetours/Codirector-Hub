@@ -349,10 +349,10 @@ function card(g) {
 }
 
 const EMPTY = {
-  open: 'Every guide has been claimed. Nice.',
-  mine: 'You have not claimed anyone yet — check the Available tab.',
-  claimed: 'Nothing is currently claimed and waiting.',
-  done: 'No evals have been submitted yet.',
+  open: 'Every guide has been claimed. Nice work, everyone.',
+  mine: 'Nothing waiting on you right now. When you are ready, the Available tab has guides to claim.',
+  claimed: 'Nothing is claimed and waiting at the moment.',
+  done: 'No evals have been submitted yet — they will appear here as they come in.',
   all: 'No guides match that search.'
 };
 

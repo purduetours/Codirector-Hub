@@ -28,7 +28,7 @@
   import { register, visibleModules } from '../js/core/router.js';
   import { hintsFor } from '../js/core/vanessa-hints.js';
   import { vanessaSuggestions } from '../js/core/vanessa-ui.js';
-  import { actionsFor, homeActions } from '../js/core/vanessa-context.js';
+  import { actionsFor, homeActions, resolveActions, explainTool } from '../js/core/vanessa-context.js';
   import { ask } from '../js/core/vanessa.js';
 
   import evals from '../js/modules/evals.js';
@@ -107,6 +107,21 @@
     ].filter(Boolean);
     const leakedAnswers = probes.filter(q => ask(q).text !== NO);
     if (probes.length) check(`${key}: restricted questions get "${NO}"`, !leakedAnswers.length, leakedAnswers.join(' | '));
+
+    // Typing a navigation request is held to the same rule as clicking.
+    const typed = [['open training', 'training'], ['take me to the eval tracker', 'evals'], ['open interviews', 'interviews'], ['open people', 'people']];
+    const typedLeak = typed.filter(([q, id]) => !ids.includes(id) && ask(q).go);
+    check(`${key}: typed "open …" requests cannot reach hidden tools`, !typedLeak.length, typedLeak.map(t => t[0]).join(', '));
+
+    // Asking what a tool is never describes one this account cannot open.
+    const explained = ['What is the evaluation tool?', 'What does the training tool do?', 'What is the interviews tool?', 'What is data health?']
+      .map(q => [q, explainTool(q)]).filter(([, r]) => r && !r.denied && !ids.includes(r.to));
+    check(`${key}: tool explanations respect access`, !explained.length, explained.map(e => e[0]).join(' | '));
+
+    // Every tier the registry returns is permission-checked.
+    const tiers = resolveActions('today', {});
+    const tierLeak = tiers.filter(a => a.kind === 'open' && !ids.includes(a.to)).map(a => a.id);
+    check(`${key}: prioritised home actions stay inside access`, !tierLeak.length, tierLeak.join(', '));
   }
 
   document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;

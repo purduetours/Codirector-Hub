@@ -5,6 +5,7 @@
 import { $, $$, closeAllModals, settle } from './ui.js';
 import { isAdmin, inTraining, inRecruitment } from './state.js';
 import { iconFor } from './icons.js';
+import { setVanessaState } from './vanessa-state.js';
 
 const modules = new Map();
 let current = null;
@@ -123,6 +124,7 @@ async function renderOnce() {
   const mod = modules.get(id);
   const changing = !current || current.id !== id;
   const firstPaint = !current;
+  const fromId = current?.id || null;
 
   if (current && current.id !== id && current.unmount) {
     try { current.unmount(); } catch { /* a broken teardown shouldn't block navigation */ }
@@ -147,13 +149,20 @@ async function renderOnce() {
     const ico = $('#view-ico');
     if (ico) ico.innerHTML = iconFor(mod);
 
-    view.classList.remove('is-entering');
+    view.classList.remove('is-entering', 'is-handing');
     view.style.viewTransitionName = '';
-    view.innerHTML = `<div class="loading loading-v">
+    /* A module that can draw its frame instantly (Home) does so inside the
+       transition, so the new screen has real shapes to animate into — her
+       orb, most of all. Everything else shows the loader and fills in after. */
+    if (mod.prepaint) {
+      try { mod.prepaint(view); } catch { view.innerHTML = ''; }
+    } else {
+      view.innerHTML = `<div class="loading loading-v" role="status">
         <span class="orb orb-sm"><i></i></span>
         <p>Opening ${mod.title}…</p>
         <div class="skel-lines"><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
       </div>`;
+    }
     if (changing) window.scrollTo({ top: 0, behavior: 'instant' });
     if (from) document.documentElement.classList.add('vt-morph');
     routeListeners.forEach(fn => { try { fn(mod); } catch { /* a listener never blocks a page */ } });
@@ -166,8 +175,12 @@ async function renderOnce() {
       if (fromIco) fromIco.style.viewTransitionName = 'tool-ico';
       view.style.viewTransitionName = 'none';   // the tile is the workspace, for one frame
     }
+    // Going home plays the handoff backwards: the workspace recedes and
+    // Vanessa comes forward again.
+    const homeward = id === 'today' && fromId && fromId !== 'today';
+    if (homeward) document.documentElement.classList.add('vt-home');
     const vt = document.startViewTransition(swap);
-    vt.finished.finally(() => document.documentElement.classList.remove('vt-morph'));
+    vt.finished.finally(() => document.documentElement.classList.remove('vt-morph', 'vt-home'));
     try { await vt.updateCallbackDone; } catch { /* swap threw; fall through and mount anyway */ }
   } else {
     swap();
@@ -176,8 +189,20 @@ async function renderOnce() {
   try {
     await mod.mount(view);
   } catch (err) {
-    view.innerHTML =
-      `<div class="empty"><div class="empty-mark">⚠️</div><p>${err.message}</p></div>`;
+    /* Said the way she would say it, with a way to try again — and the real
+       error still in the console, and one click away on screen, for whoever
+       is debugging. */
+    console.error(`[${mod.id}]`, err);
+    view.innerHTML = `<div class="v-fail" role="alert">
+        <span class="orb orb-sm"><i></i></span>
+        <h3>I couldn't open ${mod.title} just now.</h3>
+        <p>It is usually the connection. Try again, and if it keeps happening the details below will help whoever looks after the hub.</p>
+        <div class="v-fail-acts"><button type="button" class="btn btn-primary" data-retry>Try again</button>
+          <a class="btn btn-ghost" href="#/today">Back to Home</a></div>
+        <details><summary>Details</summary><code>${String(err?.message || err).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</code></details>
+      </div>`;
+    setVanessaState('error');
+    view.querySelector('[data-retry]')?.addEventListener('click', () => render());
   }
   // Replay the entrance once the real content is in, not over the spinner.
   void view.offsetWidth;

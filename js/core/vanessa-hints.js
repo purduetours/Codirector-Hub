@@ -6,4 +6,5 @@
 ============================================================================ */
 import { questionsFor } from './vanessa-context.js';
 
-export const hintsFor = id => questionsFor(id, 2);
+// Home is Vanessa herself, so it needs no hint about her.
+export const hintsFor = id => (id === 'today' ? [] : questionsFor(id, 2));
