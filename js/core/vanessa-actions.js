@@ -27,6 +27,8 @@ const MAKEUP_ALT = /\b(?:did|completed|finished)\s+(?:their|his|her)\s+(?:makeup
 
 let pending = null;                    // { kind, guide|person } awaiting a yes
 export const resetActions = () => { pending = null; };
+/** Is she waiting on a yes or no? The panel shows buttons for it. */
+export const pendingConfirmation = () => pending ? { kind: pending.kind || 'claim', name: pending.guide?.name || pending.person || '' } : null;
 
 const YES = /^\s*(y|ye|yes|yep|yeah|yup|sure|ok|okay|please|do it|go on|go ahead|sounds good|confirm)\b/i;
 const NO  = /^\s*(n|no|nope|nah|not now|never ?mind|no thanks|cancel|stop|leave it)\b/i;

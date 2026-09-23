@@ -8,6 +8,8 @@ import { loadTours } from '../core/sheets.js';
 import { state, myName, isAdmin, termId, nextTermId } from '../core/state.js';
 import { paintNav } from '../core/router.js';
 import { downloadCsv } from '../core/csv.js';
+import { setWorkContext } from '../core/vanessa-work.js';
+import { polishFeedback } from '../core/vanessa-write.js';
 import {
   $, $$, esc, sameName, prettyDate, prettyTime, todayISO, toast, showError,
   openModal, closeModal, wireModal, debounce, injectStyle, SEARCH_ICON
@@ -222,9 +224,12 @@ function shell() {
           </div>
         </fieldset>
         <label class="field"><span>What went well</span>
-          <textarea id="ev-well" rows="4" placeholder="Strengths, standout moments, good habits…"></textarea></label>
+          <textarea id="ev-well" rows="4" placeholder="Strengths, standout moments, good habits… rough notes are fine"></textarea></label>
+        <button type="button" class="v-assist" data-assist="wentWell"><span class="orb orb-xs"><i></i></span>Polish with Vanessa</button>
         <label class="field"><span>Areas to improve</span>
           <textarea id="ev-improve" rows="4" placeholder="Concrete, actionable suggestions…"></textarea></label>
+        <button type="button" class="v-assist" data-assist="improve"><span class="orb orb-xs"><i></i></span>Polish with Vanessa</button>
+        <div id="ev-assist" class="v-suggest" hidden aria-live="polite"></div>
         <label class="field"><span>Other notes <em class="muted">(optional)</em></span>
           <textarea id="ev-notes" rows="2"></textarea></label>
         <p class="hint" id="ev-draft-note" hidden style="color:var(--good)"></p>
@@ -850,8 +855,66 @@ function openEval(g) {
     }
   }
   paintDraftNote();
+  $('#ev-assist').hidden = true;
   openModal($('#ev-modal-eval'));
   setTimeout(() => $('#ev-well').focus(), 60);
+
+  /* Tell Vanessa what is open, and give her the form's own field access, so
+     "help me write this comment" means this evaluation and a suggestion she
+     makes lands through the form — never around it. */
+  const FIELD = { wentWell: '#ev-well', improve: '#ev-improve', notes: '#ev-notes' };
+  setWorkContext({
+    kind: 'eval-form', label: `${g.name}'s evaluation`,
+    data: { evalId: g.id, name: g.name },
+    isOpen: () => !!$('#ev-modal-eval') && !$('#ev-modal-eval').hidden && local.target?.id === g.id,
+    read: key => $(FIELD[key])?.value || '',
+    write: (key, value) => { const el = $(FIELD[key]); if (!el) return; el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); },
+    assist: rough => showAssist(rough)
+  });
+}
+
+/* ------------------------------------------------------------ Vanessa assist
+   Rough notes in a feedback box, polished wording offered underneath. Nothing
+   changes in the form until "Use this" or "Edit" is pressed; "Try again"
+   offers another phrasing of the same points. */
+let assist = { source: '', variant: 0 };
+
+function showAssist(rough, variant = 0) {
+  const box = $('#ev-assist');
+  if (!box || !local.target) return false;
+  assist = { source: rough, variant };
+  const s = polishFeedback(rough, { name: local.target.name, variant });
+  if (s.empty) {
+    box.innerHTML = `<div class="v-suggest-head"><span class="orb orb-xs"><i></i></span><b>Vanessa</b></div>
+      <p class="v-suggest-note">Jot down a few rough notes first — "confident, knew everything, but talked fast" is plenty — and I will suggest the wording.</p>`;
+    box.hidden = false; return true;
+  }
+  const part = (key, label, text) => text ? `<div class="v-suggest-part">
+      <span class="v-suggest-label">${label}</span><p>${esc(text)}</p>
+      <div class="v-suggest-acts"><button type="button" class="btn btn-primary btn-sm" data-use="${key}">Use this</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-edit="${key}">Edit</button></div></div>` : '';
+  box.innerHTML = `<div class="v-suggest-head"><span class="orb orb-xs"><i></i></span><b>Vanessa suggests</b>
+      <span class="v-suggest-sub">from your notes — nothing is changed until you choose</span></div>
+    ${part('wentWell', 'What went well', s.wentWell)}${part('improve', 'Areas to improve', s.improve)}
+    <div class="v-suggest-foot"><button type="button" class="linkish" data-again>Try again</button>
+      <button type="button" class="linkish" data-dismiss>Dismiss</button></div>`;
+  box.dataset.well = s.wentWell; box.dataset.improve = s.improve;
+  box.hidden = false;
+  box.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  return true;
+}
+
+/** Vanessa's handoff: open the submit form for a claimed guide. */
+let pendingOpen = null;
+export function queueOpenEval(evalId) {
+  pendingOpen = evalId;
+  if (document.getElementById('ev-list')) flushPendingOpen();
+}
+function flushPendingOpen() {
+  if (!pendingOpen) return;
+  const g = state.guides.find(x => x.id === pendingOpen);
+  pendingOpen = null;
+  if (g && isMine(g) && g.status === 'claimed') openEval(g);
 }
 
 /* Read-only view of what was submitted. Fetched on open rather than with the
@@ -1047,6 +1110,31 @@ export default {
     DRAFT_FIELDS.forEach(sel => $(sel).addEventListener('input', stash));
     $('#ev-rating').addEventListener('change', saveDraft);
 
+    const FIELD = { wentWell: '#ev-well', improve: '#ev-improve' };
+    $('#ev-eval-form').addEventListener('click', e => {
+      const ask = e.target.closest('[data-assist]');
+      if (ask) {
+        const key = ask.dataset.assist;
+        // Polish this box's notes; if it is empty, work from both boxes.
+        showAssist($(FIELD[key]).value.trim() || `${$('#ev-well').value} ${$('#ev-improve').value}`.trim());
+        return;
+      }
+      const box = $('#ev-assist');
+      const use = e.target.closest('[data-use]') || e.target.closest('[data-edit]');
+      if (use) {
+        const key = use.dataset.use || use.dataset.edit;
+        const el = $(FIELD[key]);
+        el.value = key === 'wentWell' ? box.dataset.well : box.dataset.improve;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.classList.add('is-filled'); setTimeout(() => el.classList.remove('is-filled'), 900);
+        if (use.dataset.edit) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+        use.closest('.v-suggest-part')?.classList.add('is-used');
+        return;
+      }
+      if (e.target.closest('[data-again]')) { showAssist(assist.source, assist.variant + 1); return; }
+      if (e.target.closest('[data-dismiss]')) { box.hidden = true; }
+    });
+
     $('#ev-eval-form').addEventListener('submit', async e => {
       e.preventDefault();
       const go = $('#ev-eval-submit'), err = $('#ev-eval-error');
@@ -1078,6 +1166,7 @@ export default {
     });
 
     if (isAdmin()) wireRollover();
+    flushPendingOpen();
   },
 
   /** Called by the shell's "End of semester" action. */

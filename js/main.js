@@ -6,6 +6,7 @@ import { register, buildNav, render, paintNav, go, list, visibleModules, onRoute
 import { $, $$, esc, initials, toast } from './core/ui.js';
 import { ICONS } from './core/icons.js';
 import { hintsFor } from './core/vanessa-hints.js';
+import { TOOL_INFO } from './core/vanessa-context.js';
 import { bustSheets, loadAbsences, formStamp } from './core/sheets.js';
 import { registerEvalActions } from './core/vanessa-eval.js';
 import { submitReviewedEval } from './core/vanessa-eval-submit.js';
@@ -155,8 +156,8 @@ setInterval(paintVersion, 10 * 60 * 1000);
    classic way to make people click it twice to find out which way round it is.
 -------------------------------------------------------------------------- */
 const THEME_KEY = 'hub2.theme';
-const systemDark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-const isDark = () => (document.documentElement.dataset.theme || (systemDark() ? 'dark' : 'light')) === 'dark';
+// Noir is the identity, so dark is the default; light is an explicit choice.
+const isDark = () => document.documentElement.dataset.theme !== 'light';
 
 function paintTheme() {
   const dark = isDark();
@@ -257,11 +258,12 @@ onRoute(mod => {
 onRoute(mod => {
   const box = $('#v-hint');
   const qs = hintsFor(mod.id);
-  box.hidden = !qs.length;
-  box.innerHTML = qs.length
-    ? `<span class="v-hint-lead"><span class="orb orb-xs"><i></i></span><span>Ask Vanessa</span></span>` +
-      qs.map(q => `<button type="button" class="v-hint-chip" data-ask="${esc(q)}">${esc(q)}</button>`).join('')
-    : '';
+  const helps = TOOL_INFO[mod.id]?.helps;
+  box.hidden = mod.id === 'today' || (!qs.length && !helps);
+  box.innerHTML = box.hidden ? '' :
+    `<span class="v-hint-lead"><span class="orb orb-xs"><i></i></span>` +
+    `<span class="v-hint-say">You're in ${esc(mod.title)}.${helps ? ` ${esc(helps)}` : ''}</span></span>` +
+    qs.map(q => `<button type="button" class="v-hint-chip" data-ask="${esc(q)}">${esc(q)}</button>`).join('');
 });
 $('#v-hint').addEventListener('click', e => {
   const chip = e.target.closest('[data-ask]');

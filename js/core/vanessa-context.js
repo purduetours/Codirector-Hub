@@ -48,16 +48,16 @@ const NEEDS = { any: () => true, training: inTraining, recruitment: inRecruitmen
    One plain-language line per tool, used when somebody asks Vanessa what a
    tool is, and as the description on its action. */
 export const TOOL_INFO = {
-  today:         { names: ['home', 'vanessa'], explain: 'Home is where I live: what needs you today, and every tool your account can open.' },
-  announcements: { names: ['announcements', 'notices'], explain: 'Notices for the committee. Everyone can read them; codirectors post them.' },
-  evals:         { names: ['eval tracker', 'evaluation tool', 'evaluations', 'evaluation', 'evals', 'eval'], explain: 'The Eval Tracker is where tour guide evaluations happen: claim a guide, pick one of their tours, then submit your feedback.' },
-  interviews:    { names: ['interviews', 'interview tool', 'grading'], explain: 'Interviews runs recruitment day: check candidates in, grade them, and see results and decisions.' },
-  training:      { names: ['training', 'attendance'], explain: 'Training tracks attendance at each session, who owes a makeup, and absences filed in advance.' },
-  schedule:      { names: ['tour schedule', 'schedule'], explain: 'The Tour Schedule shows who is leading which tour, read live from the shared workbook.' },
-  directory:     { names: ['guide directory', 'directory'], explain: 'The Guide Directory is everyone on the roster, with their eval status, tours and details in one place.' },
-  desks:         { names: ['desk coverage', 'desks', 'desk'], explain: 'Desk Coverage is the weekly Front and Welcome desk rota, with any uncovered slots called out.' },
-  people:        { names: ['people', 'accounts', 'access'], explain: 'People controls who can sign in to the hub and which role — and so which tools — each person has.' },
-  health:        { names: ['data health'], explain: 'Data health lists where the hub and the spreadsheets disagree, so records can be put right.' }
+  today: { names: ['home', 'vanessa'], explain: 'Home is where I live: what needs you today, and every tool your account can open.', helps: "" },
+  announcements: { names: ['announcements', 'notices'], explain: 'Notices for the committee. Everyone can read them; codirectors post them.', helps: "I can tell you what needs doing." },
+  evals: { names: ['eval tracker', 'evaluation tool', 'evaluations', 'evaluation', 'evals', 'eval'], explain: 'The Eval Tracker is where tour guide evaluations happen: claim a guide, pick one of their tours, then submit your feedback.', helps: "I can help you write feedback or find a tour to evaluate." },
+  interviews: { names: ['interviews', 'interview tool', 'grading'], explain: 'Interviews runs recruitment day: check candidates in, grade them, and see results and decisions.', helps: "I can find who is ungraded or worth discussing." },
+  training: { names: ['training', 'attendance'], explain: 'Training tracks attendance at each session, who owes a makeup, and absences filed in advance.', helps: "I can find who owes a makeup or who filed an absence." },
+  schedule: { names: ['tour schedule', 'schedule'], explain: 'The Tour Schedule shows who is leading which tour, read live from the shared workbook.', helps: "I can tell you who is leading, any day." },
+  directory: { names: ['guide directory', 'directory'], explain: 'The Guide Directory is everyone on the roster, with their eval status, tours and details in one place.', helps: "I can find who still needs an eval." },
+  desks: { names: ['desk coverage', 'desks', 'desk'], explain: 'Desk Coverage is the weekly Front and Welcome desk rota, with any uncovered slots called out.', helps: "I can find uncovered slots." },
+  people: { names: ['people', 'accounts', 'access'], explain: 'People controls who can sign in to the hub and which role — and so which tools — each person has.', helps: "I can explain what each role can see." },
+  health: { names: ['data health'], explain: 'Data health lists where the hub and the spreadsheets disagree, so records can be put right.', helps: "I can explain what each check means." }
 };
 
 /* ------------------------------------------------------------ registry */
@@ -175,6 +175,10 @@ const ACTIONS = [
 /* ------------------------------------------------------------ resolver */
 const val = (f, ctx) => (typeof f === 'function' ? f(ctx) : f);
 
+/** May this account run it, right now? The one permission question every
+   Vanessa action is asked at the moment it runs — not just when drawn. */
+export function canRun(a) { return !!a && allowed(a); }
+
 function allowed(a) {
   if (a.kind === 'open') return visibleModules().some(m => m.id === a.to && !m.soon);
   return (NEEDS[a.needs || 'any'] || NEEDS.any)();
@@ -250,6 +254,3 @@ export function questionsFor(routeId, n = 2) {
   return actionsFor(routeId, { withGeneral: false }).filter(a => a.kind === 'ask').slice(0, n).map(a => a.q);
 }
 
-export function homeActions(ctx = {}) {
-  return resolveActions('today', ctx).map(legacy);
-}

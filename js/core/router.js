@@ -168,7 +168,10 @@ async function renderOnce() {
     routeListeners.forEach(fn => { try { fn(mod); } catch { /* a listener never blocks a page */ } });
   };
 
-  if (document.startViewTransition && changing && !firstPaint && !reducedMotion()) {
+  /* A background tab cannot run a view transition (the browser refuses with
+     InvalidStateError), so it just swaps. An aborted one is harmless — the
+     swap still runs — so its promises are caught rather than left to shout. */
+  if (document.startViewTransition && changing && !firstPaint && !reducedMotion() && document.visibilityState === 'visible') {
     if (from) {
       from.style.viewTransitionName = 'workspace';
       const fromIco = from.querySelector('[data-morph-ico]');
@@ -180,7 +183,8 @@ async function renderOnce() {
     const homeward = id === 'today' && fromId && fromId !== 'today';
     if (homeward) document.documentElement.classList.add('vt-home');
     const vt = document.startViewTransition(swap);
-    vt.finished.finally(() => document.documentElement.classList.remove('vt-morph', 'vt-home'));
+    vt.ready.catch(() => {});
+    vt.finished.catch(() => {}).finally(() => document.documentElement.classList.remove('vt-morph', 'vt-home'));
     try { await vt.updateCallbackDone; } catch { /* swap threw; fall through and mount anyway */ }
   } else {
     swap();

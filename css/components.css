@@ -69,8 +69,8 @@ code { font-family: var(--mono); font-size: .86em; background: var(--bg-sunken);
 .btn-quiet:hover:not(:disabled) { background: var(--bg-sunken); color: var(--text); border-color: transparent; }
 .btn-danger { background: var(--danger); color: #fff; border-color: transparent; }
 .btn-danger:hover:not(:disabled) { filter: brightness(1.08); border-color: transparent; }
-.btn-gold { background: var(--gold); color: #17150f; border-color: transparent; }
-.btn-gold:hover:not(:disabled) { background: #dcc9a4; border-color: transparent; }
+.btn-gold { background: var(--gold); color: var(--on-signal); border-color: transparent; }
+.btn-gold:hover:not(:disabled) { background: var(--pink-soft); border-color: transparent; }
 .btn-block { width: 100%; padding: 13px; min-height: 48px; }
 .btn-sm { padding: 6px 13px; font-size: var(--fs-sm); min-height: 32px; gap: 6px; }
 
@@ -209,7 +209,7 @@ button.stat:hover { border-color: color-mix(in srgb, var(--gold) 70%, var(--line
 .modal-root { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px; }
 .modal-scrim {
   position: absolute; inset: 0;
-  background: color-mix(in srgb, #0d0b07 48%, transparent);
+  background: color-mix(in srgb, #000 48%, transparent);
   backdrop-filter: blur(6px) saturate(1.1); -webkit-backdrop-filter: blur(6px) saturate(1.1);
   animation: fade var(--dur-2) ease;
 }
@@ -263,7 +263,7 @@ button.stat:hover { border-color: color-mix(in srgb, var(--gold) 70%, var(--line
   flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
   font-size: .72rem; font-weight: 800; margin-top: 1px;
 }
-.toast.ok::before { content: "✓"; background: var(--gold); color: #17150f; }
+.toast.ok::before { content: "✓"; background: var(--gold); color: var(--on-signal); }
 .toast.err::before { content: "!"; background: rgba(255,255,255,.22); color: #fff; }
 @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.98); } }
 @keyframes sink { to { opacity: 0; transform: translateY(8px); } }

@@ -13,7 +13,7 @@
       in, the tab highlight slides, dialogs settle and lift away.
 ============================================================================ */
 
-@property --ambient-tint { syntax: "<color>"; inherits: true; initial-value: #8e6f3e; }
+@property --ambient-tint { syntax: "<color>"; inherits: true; initial-value: #ff4fa3; }
 :root { transition: --ambient-tint 1.1s var(--ease-out); }
 
 /* ------------------------------------------------------------- ambient */
@@ -46,8 +46,8 @@
 @keyframes drift-a { to { translate: -6vw 4vh; scale: 1.08; } }
 @keyframes drift-b { to { translate: 5vw -5vh; scale: .94; } }
 body { background: transparent; }
-:root[data-theme="dark"] .ambient i { opacity: .7; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ambient i { opacity: .7; } }
+.ambient i { opacity: .72; }
+:root[data-theme="light"] .ambient i { opacity: .5; }
 
 /* Each tool's own light washes in under its title and fades into the page,
    so a tool page opens with its colour rather than a hard header bar. */
@@ -76,7 +76,7 @@ body.is-scrolled .topbar {
   background: color-mix(in srgb, var(--bg) 72%, transparent);
   border-bottom-color: color-mix(in srgb, var(--line) 70%, transparent);
   backdrop-filter: saturate(1.5) blur(18px); -webkit-backdrop-filter: saturate(1.5) blur(18px);
-  box-shadow: 0 10px 30px -24px rgba(30,20,0,.4);
+  box-shadow: 0 10px 30px -24px rgba(0,0,0,.5);
 }
 
 /* ------------------------------------------------------ view transitions */
@@ -138,7 +138,7 @@ body.is-scrolled .topbar {
 @keyframes sheet-out { to { transform: translateY(40px); opacity: 0; } }
 
 /* ------------------------------------------------------------- press */
-.btn, .tab, .v-chip, .hm-chip, .navlink, .hm-act, .hm-tool { -webkit-tap-highlight-color: transparent; }
+.btn, .tab, .v-chip, .v-opt, .navlink, .hm-act, .hm-plan { -webkit-tap-highlight-color: transparent; }
 .navlink { transition: background var(--dur-2) var(--ease), color var(--dur-2), transform var(--dur-2) var(--ease); }
 .navlink:active { transform: scale(.98); }
 .navlink.is-active::before { animation: rail-in .4s var(--ease-out); }
@@ -150,7 +150,7 @@ body.is-scrolled .topbar {
 :root[data-vanessa="thinking"] .orb { animation-duration: 2.2s; }
 :root[data-vanessa="thinking"] .orb > i { animation-duration: 1.4s; }
 :root[data-vanessa="speaking"] .orb { box-shadow:
-    inset 0 -6px 14px rgba(60,35,0,.22), inset 0 3px 8px rgba(255,255,255,.4),
+    inset 0 -6px 14px rgba(40,0,25,.3), inset 0 3px 8px rgba(255,255,255,.4),
     0 0 0 1px color-mix(in srgb, var(--gold-deep) 30%, transparent),
     0 0 26px -2px color-mix(in srgb, var(--v-1) 75%, transparent); }
 :root[data-vanessa="listening"] .orb { animation-duration: 6s; }

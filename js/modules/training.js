@@ -118,6 +118,18 @@ export const sessionKey = label =>
 let sessions = null, attendance = null, absences = null;
 const local = { tab: 'attendance', search: '', session: '' };
 
+/* Vanessa's handoff: "show me attendance for today" opens the Attendance tab
+   on the session held that day, when there is one. Returns what it found so
+   she can say so honestly. */
+let focusDate = null;
+export function focusTraining({ date = null } = {}) {
+  local.tab = 'attendance';
+  focusDate = date;
+  const hit = date && sessions ? sessions.find(x => x.held_on === date) : null;
+  if (hit) local.session = hit.id;
+  return hit ? { label: hit.label } : null;
+}
+
 let loadError = null;
 
 /* Tolerant on purpose. The tables arrive with a migration somebody has to run
@@ -635,6 +647,7 @@ export default {
       <div id="tr-body"><div class="loading"><div class="spinner"></div><p>Loading training…</p></div></div>`;
 
     if (!sessions) await loadAll();
+    if (focusDate) { const hit = (sessions || []).find(x => x.held_on === focusDate); if (hit) local.session = hit.id; focusDate = null; }
 
     /* The grid needs the form too, now that it marks who has filed. It is a
        separate trip to Google though, so the table is painted from the

@@ -8,14 +8,15 @@ import { ask, greeting, shareInterviews, shareOther, resetVanessaData } from './
 import { modelStatus, onModelChange, checkAvailability, enableModel, cancelModel, disableModel, resetModel, interpret, resumeIfEnabled } from './vanessa-model.js';
 import { state as appState, inTraining, inRecruitment, myName } from './state.js';
 import { $, esc, injectStyle } from './ui.js';
-import { go, onRoute, currentModule } from './router.js';
+import { onRoute, currentModule } from './router.js';
 import { actionsFor, explainTool } from './vanessa-context.js';
+import { interpret as interpretIntent, performAction, actionById, openAction } from './vanessa-os.js';
 import { presenceSnapshot } from './presence.js';
 import { visibleModules } from './router.js';
 import { setVanessaState } from './vanessa-state.js';
 import { ICONS } from './icons.js';
 import { handleEvalMessage, evalDraft, resetEvalFlow, editEvalDraft, savedEvalSummary, bufferEvalDraft } from './vanessa-eval.js';
-import { handleAction, resetActions } from './vanessa-actions.js';
+import { handleAction, resetActions, pendingConfirmation } from './vanessa-actions.js';
 import { voiceSupported, voiceState, onVoiceChange, startVoice, stopVoice, resetVoice, setVoiceText } from './vanessa-voice.js';
 let voiceDraftRef=null;
 export { shareInterviews };
@@ -100,7 +101,7 @@ injectStyle('vanessa-css', `
 .v-msg.her { position:relative; border:1px solid color-mix(in srgb, var(--line) 70%, transparent);
   background:linear-gradient(180deg, color-mix(in srgb, var(--gold-wash) 55%, var(--bg-sunken)), var(--bg-sunken)); }
 .v-msg.her::before { content:""; position:absolute; left:-32px; bottom:2px; width:22px; height:22px; border-radius:50%;
-  background:radial-gradient(circle at 32% 30%, #fff8e0 0 10%, transparent 34%), conic-gradient(var(--v-1), #f3cf6a, var(--v-2), var(--gold-deep), var(--v-1));
+  background:radial-gradient(circle at 32% 30%, var(--orb-hi) 0 10%, transparent 34%), conic-gradient(var(--v-1), var(--v-3), var(--v-2), var(--gold-deep), var(--v-1));
   box-shadow:0 0 0 1px color-mix(in srgb, var(--gold-deep) 30%, transparent), 0 3px 10px -3px color-mix(in srgb, var(--v-1) 70%, transparent); }
 .v-msg.her:has(+ .v-msg.her)::before { opacity:0; }
 .v-msg.is-typing { color:transparent; font-size:0; padding:13px 16px; min-width:58px; }
@@ -202,7 +203,10 @@ function say(who, text) {
   const el = document.createElement('div');
   el.className = 'v-msg ' + who; el.textContent = text;
   log.appendChild(el);
-  if (who === 'her') collapse(el);
+  if (who === 'her') {
+    collapse(el);
+    pendingSelect = null;   // a newer message retires any choice still open above it
+  }
   scrollLog();
   return el;
 }
@@ -252,14 +256,18 @@ const routeTitle = () => currentModule()?.title || 'Home';
    follow-ups keep working. Only the head, the body layout and any buttons
    inside it change. */
 const NO_ACCESS = "That tool isn't available for your account.";
-const KIND_HEAD = { result: ['spark', 'Here is what I found'], alert: ['spark', 'Heads up'], confirm: ['check', 'Done'],
+const KIND_HEAD = { result: ['spark', 'Here is what I found'], alert: ['spark', 'Heads up'], confirm: ['check', 'Done'], review: ['check', 'Please confirm'],
   nav: ['arrow', 'Opening'], explain: ['spark', 'About'], error: ['close', 'Something went wrong'] };
 
 function classify(r, { acted } = {}) {
   const text = String(r?.text || '');
   if (r?.kind) return r.kind;
   if (text === NO_ACCESS) return 'alert';
-  if (acted) return /could ?n.?t|cannot|can't|not available|failed|error|sorry|isn't|no longer/i.test(text) ? 'alert' : 'confirm';
+  if (acted) {
+    if (pendingConfirmation()) return 'review';                       // she is asking, not done
+    if (/^\s*(left it alone|okay|no problem)/i.test(text)) return 'message';
+    return /could ?n.?t|cannot|can't|not available|failed|error|sorry|isn't|no longer|already|which one|who\?|give me a name/i.test(text) ? 'alert' : 'confirm';
+  }
   if (r?.go) return 'nav';
   if (/^\s*[-•]\s/m.test(text)) return 'result';
   return 'message';
@@ -275,7 +283,7 @@ function sayRich(r, opts = {}) {
   const toolTitle = r?.go || r?.to ? visibleModules().find(m => m.id === (r.go || r.to))?.title : '';
   let html = '';
   if (head && kind !== 'message') {
-    const label = kind === 'nav' ? `Opening ${toolTitle || 'that'}` : kind === 'explain' ? (r.title || toolTitle || 'About') : head[1];
+    const label = kind === 'nav' ? `Opening ${r.title || toolTitle || 'that'}` : kind === 'explain' ? (r.title || toolTitle || 'About') : head[1];
     html += `<span class="v-kind">${ICONS[head[0]] || ''}<span>${esc(label)}</span></span>`;
   }
   const lines = text.split('\n');
@@ -316,10 +324,122 @@ function presenceAnswer(q) {
     users.map(u => `- ${u.full_name}${u.member_id === appState.me?.id ? ' — you' : ''}`).join('\n') };
 }
 
+/* Every action button carries its registry id, so clicking it and typing it
+   run the same action through the same permission check. */
 function actionButton(a) {
   const go_ = a.kind === 'go';
-  return `<button type="button" class="v-chip ${go_ ? 'is-go' : ''}" ${go_ ? `data-go="${esc(a.to)}"` : `data-question="${esc(a.q)}"`}>` +
+  return `<button type="button" class="v-chip ${go_ ? 'is-go' : ''}" data-action="${esc(a.id)}">` +
     `${esc(a.label)}${go_ ? ICONS.arrow : ''}</button>`;
+}
+
+/* ------------------------------------------------------------ components
+   What vanessa-os.js hands back, drawn as native parts of her conversation:
+   selection, confirmation, suggestion, summary and handoff. Buttons keep the
+   plan's own run() functions, so choosing one can return the next step —
+   that is how a workflow chains without anybody typing. */
+const plans = new Map();
+let planSeq = 0, pendingSelect = null, closePanel = () => {};
+const narrow = () => !matchMedia('(min-width: 1280px)').matches;
+
+function renderPlan(plan) {
+  if (!plan) return null;
+  if (plan.type === 'reply') return sayRich({ text: plan.text, kind: plan.kind });
+  if (plan.type === 'handoff') {
+    const el = sayRich({ text: plan.text, kind: 'nav', title: visibleModules().find(m => m.id === plan.to)?.title });
+    if (narrow()) setTimeout(() => closePanel(), 700);   // on a phone she steps aside for the workspace
+    return el;
+  }
+  const id = ++planSeq;
+  plans.set(id, plan);
+  const el = say('her', '');
+  if (!el) return null;
+  el.classList.add('v-plan', 'v-k-' + plan.type);
+  el.dataset.plan = String(id);
+  const HEAD = { select: ['spark', 'Choose one'], confirm: ['check', 'Please review'], suggest: ['spark', 'Suggestion'], summary: ['spark', plan.title || 'Summary'] };
+  const [ico, label] = HEAD[plan.type] || ['spark', ''];
+  let html = `<span class="v-kind">${ICONS[ico] || ''}<span>${esc(label)}</span></span>`;
+  if (plan.type !== 'summary' && plan.title) html += `<p class="v-lead">${esc(plan.title)}</p>`;
+  if (plan.text) html += `<p class="v-text">${esc(plan.text)}</p>`;
+
+  if (plan.type === 'select') {
+    html += `<div class="v-opts">${(plan.options || []).map((o, i) =>
+      `<button type="button" class="v-opt" data-opt="${i}"><b>${esc(o.label)}</b>${o.sub ? `<span>${esc(o.sub)}</span>` : ''}</button>`).join('')}</div>`;
+    if (plan.extra?.length) html += `<div class="v-inline-acts">${plan.extra.map((x, i) => `<button type="button" class="v-chip" data-extra="${i}">${esc(x.label)}</button>`).join('')}</div>`;
+    pendingSelect = { id, plan };
+  }
+  if (plan.type === 'confirm') {
+    if (plan.rows?.length) html += `<dl class="v-rows">${plan.rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
+    html += `<div class="v-confirm-acts"><button type="button" class="btn btn-primary btn-sm" data-confirm>${esc(plan.confirm?.label || 'Confirm')}</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-cancel>${esc(plan.cancel?.label || 'Cancel')}</button></div>`;
+  }
+  if (plan.type === 'suggest') {
+    html += (plan.parts || []).map((p, i) => `<div class="v-suggest-part"><span class="v-suggest-label">${esc(p.label)}</span><p>${esc(p.text)}</p>
+      <div class="v-suggest-acts"><button type="button" class="btn btn-primary btn-sm" data-use="${i}">Use this</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-edit="${i}">Edit</button></div></div>`).join('') +
+      `<div class="v-inline-acts"><button type="button" class="v-chip" data-again>Try again</button></div>`;
+  }
+  if (plan.type === 'summary') {
+    if (plan.rows?.length) html += `<ul class="v-list">${plan.rows.map(([k, v]) => `<li><b>${esc(v)}</b><span>${esc(k)}</span></li>`).join('')}</ul>`;
+    if (plan.actions?.length) html += `<div class="v-inline-acts">${plan.actions.map((a, i) => `<button type="button" class="v-chip is-go" data-sact="${i}">${esc(a.label)}${ICONS.arrow}</button>`).join('')}</div>`;
+  }
+  el.innerHTML = html;
+  scrollLog();
+  return el;
+}
+
+/* A step chosen: settle the card, run it, show whatever comes next. */
+async function runStep(el, fn) {
+  if (!fn) return;
+  el?.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  el?.classList.add('is-settled');
+  setMood('thinking');
+  try {
+    const next = await fn();
+    if (next) renderPlan(next);
+  } catch (err) {
+    console.error('[Vanessa]', err);
+    sayRich({ kind: 'error', text: 'That did not go through. Nothing was changed — try again in a moment.' });
+  }
+  setMood('speaking');
+}
+
+/* Typing "2" or "Alex" while she is waiting on a choice picks it. */
+function typedChoice(q) {
+  if (!pendingSelect) return false;
+  const { id, plan } = pendingSelect;
+  const opts = plan.options || [];
+  const t = q.trim().toLowerCase();
+  let idx = /^\d+$/.test(t) ? Number(t) - 1 : opts.findIndex(o => `${o.label} ${o.sub || ''}`.toLowerCase().split(/[\s—·,-]+/).includes(t));
+  if (idx < 0 || idx >= opts.length) return false;
+  pendingSelect = null;
+  const el = document.querySelector(`[data-plan="${id}"]`);
+  el?.querySelector(`[data-opt="${idx}"]`)?.classList.add('is-chosen');
+  runStep(el, opts[idx].run);
+  return true;
+}
+
+/* Quick answers for her existing flows, so they can be clicked too. */
+function addQuick(el, items) {
+  if (!el || !items.length) return;
+  const row = document.createElement('div');
+  row.className = items.some(i => i.confirm) ? 'v-confirm-acts' : 'v-inline-acts';
+  row.innerHTML = items.map(i => i.confirm !== undefined
+    ? `<button type="button" class="btn ${i.confirm ? 'btn-primary' : 'btn-ghost'} btn-sm" data-say="${esc(i.say)}">${esc(i.label)}</button>`
+    : `<button type="button" class="v-chip" data-say="${esc(i.say)}">${esc(i.label)}</button>`).join('');
+  el.appendChild(row);
+}
+function evalQuick(el) {
+  const d = evalDraft();
+  if (d?.phase === 'rating') return addQuick(el, [1, 2, 3, 4, 5].map(n => ({ label: String(n), say: String(n) })).concat({ label: 'Skip', say: 'skip' }));
+  const polish = { label: 'Polish my wording', say: 'help me polish this feedback' };
+  if (d?.phase === 'review') {
+    addQuick(el, [{ label: 'Submit evaluation', say: 'submit it', confirm: true }, { label: 'Keep editing', say: '', confirm: false }]);
+    return addQuick(el, [polish]);
+  }
+  if (d?.phase === 'improve' || d?.phase === 'notes') return addQuick(el, [{ label: 'None', say: 'none' }, polish]);
+  // Choosing which claimed guide: her numbered list becomes buttons.
+  const lines = String(el.textContent || '').split('\n').map(l => /^(\d+)\.\s+(.+)$/.exec(l.trim())).filter(Boolean);
+  if (lines.length) addQuick(el, lines.map(m => ({ label: m[2], say: m[1] })));
 }
 
 function paintContext() {
@@ -590,6 +710,15 @@ function send(question) {
       if (ticket !== epoch || user !== appState.me?.id) return;
       /* Doing something comes before answering: "claim Noah" is a request,
          not a question, and must not be routed to the roster matcher. */
+      /* Answering a choice she offered, by typing it. */
+      if (typedChoice(q)) { note?.remove(); inFlow = true; return; }
+
+      /* Tasks, not pages: evaluate a tour, show attendance, help me write
+         this. The OS layer turns them into choices, confirmations and
+         handoffs over the modules' own workflows. */
+      const plan = await interpretIntent(q);
+      if (plan) { note?.remove(); inFlow = plan.type !== 'reply'; renderPlan(plan); return; }
+
       /* A tool explained in a line, with the way in — or a polite no. */
       const ex = explainTool(q);
       if (ex) {
@@ -603,8 +732,10 @@ function send(question) {
       const acted = await handleAction(q);
       if (acted) {
         note?.remove();
-        sayRich(acted, { acted: true });
-        if (acted.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(acted.go); }, 500);
+        const el = sayRich(acted, { acted: true });
+        const wait = pendingConfirmation();
+        if (wait) { inFlow = true; addQuick(el, [{ label: wait.kind === 'makeup' ? 'Yes, mark it done' : 'Yes, claim', say: 'yes', confirm: true }, { label: 'Cancel', say: 'no', confirm: false }]); }
+        if (acted.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) performAction(openAction(acted.go)); }, 500);
         return;
       }
 
@@ -633,13 +764,14 @@ function send(question) {
       if (llmReady() && !evalFlowHandled) {
         const shown = await generate(q, r, ticket, user);
         if (shown) {
-          if (r.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(r.go); }, 400);
+          if (r.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) performAction(openAction(r.go)); }, 400);
           return;
         }
       }
 
-      sayRich(r);
-      if (r.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) go(r.go); }, 400);
+      const el = sayRich(r);
+      if (evalFlowHandled) evalQuick(el);
+      if (r.go) setTimeout(() => { if (ticket === epoch && user === appState.me?.id) performAction(openAction(r.go)); }, 400);
     } catch (err) {
       note?.remove();
       if (ticket === epoch) sayRich({ text: 'I could not finish that one. Ask me again in a moment.', kind: 'error' });
@@ -649,18 +781,6 @@ function send(question) {
       if (ticket === epoch && user === appState.me?.id) { setMood('speaking'); if (!inFlow) paintFollowups(q); }
     }
   });
-}
-
-/* What she offers to help with, by committee. The same list feeds her panel
-   and the home screen, so the two can never disagree about what she can do
-   for this person. */
-export function vanessaSuggestions() {
-  return [
-    ...(inTraining() ? ['Help me write an eval', 'What do I need to do?'] : []),
-    ...(inRecruitment() ? ['Who is worth discussing?', 'Who has not checked in?'] : []),
-    ...(inTraining() ? ['Who needs an eval and has a tour tomorrow?'] : ['Who is leading tours tomorrow?']),
-    'What should I wear on tour?'
-  ];
 }
 
 /* Open her from anywhere — the rail, the top bar, the home screen, a hint
@@ -683,6 +803,7 @@ export function resetVanessa() {
   resetLlmHistory();
   resetActions();
   resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
+  plans.clear(); pendingSelect = null;
   $('#v-launch')?.remove(); $('#v-panel')?.remove(); document.body.classList.remove('v-open');
   setVanessaState('idle'); tellToggle();
 }
@@ -750,6 +871,7 @@ export function initVanessa() {
   $('#v-close').addEventListener('click', close);
   $('#v-form').addEventListener('submit', e => { e.preventDefault(); send($('#v-input').value); });
   panel.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); launch.focus(); } });
+  closePanel = () => { if (open) close(); };
   panel.addEventListener('input', e=>{
     if(e.target.id==='v-transcript'){setVoiceText(e.target.value);$('#v-voice-use').disabled=!e.target.value.trim();return;}
     const node=e.target.closest('[data-eval-field]');
@@ -785,11 +907,52 @@ export function initVanessa() {
     if (e.target.id === 'v-model-cancel') { cancelModel(); return; }
     if (e.target.id === 'v-model-off') { disableModel(); return; }
     if (e.target.id === 'v-model-check') { checkAvailability(); return; }
+    /* Plan components: choices, confirmations, suggestions, summaries. */
+    const card = e.target.closest('[data-plan]');
+    const plan = card && plans.get(Number(card.dataset.plan));
+    if (plan) {
+      const b = e.target.closest('button');
+      if (!b || b.disabled) return;
+      if (b.dataset.opt !== undefined) { pendingSelect = null; b.classList.add('is-chosen'); runStep(card, plan.options[Number(b.dataset.opt)].run); return; }
+      if (b.dataset.extra !== undefined) { pendingSelect = null; runStep(card, plan.extra[Number(b.dataset.extra)].run); return; }
+      if (b.hasAttribute('data-confirm')) { runStep(card, plan.confirm?.run); return; }
+      if (b.hasAttribute('data-cancel')) { runStep(card, () => ({ type: 'reply', text: 'Okay — nothing was changed.' })); return; }
+      /* Using one suggestion settles only that part — the other part and
+         Try again stay live, so both halves can be taken. */
+      const partIdx = b.dataset.use ?? b.dataset.edit;
+      if (partIdx !== undefined) {
+        const part = plan.parts[Number(partIdx)];
+        const box = b.closest('.v-suggest-part');
+        box?.querySelectorAll('button').forEach(x => { x.disabled = true; });
+        const result = part.use();
+        if (result?.kind === 'confirm') box?.classList.add('is-used');
+        if (result) renderPlan(result);
+        if (b.dataset.edit !== undefined && narrow()) close();
+        return;
+      }
+      if (b.hasAttribute('data-again')) { runStep(card, plan.again); return; }
+      if (b.dataset.sact !== undefined) { runStep(card, plan.actions[Number(b.dataset.sact)].run); return; }
+    }
+    /* Quick answers to her existing flows. */
+    const quick = e.target.closest('[data-say]');
+    if (quick) {
+      quick.closest('.v-inline-acts, .v-confirm-acts')?.querySelectorAll('button').forEach(x => { x.disabled = true; });
+      if (quick.dataset.say) send(quick.dataset.say); else $('#v-eval-draft textarea')?.focus();
+      return;
+    }
+    /* Registry actions — the same ones the home screen draws. */
+    const act = e.target.closest('[data-action]');
+    if (act) {
+      const out = performAction(actionById(act.dataset.action));
+      if (out?.type === 'handoff' && narrow()) close();
+      else if (out && out.type !== 'handoff') renderPlan(out);
+      return;
+    }
     const dest = e.target.closest('[data-go]');
     if (dest) {
-      // On a narrow screen she is in the way of the tool she just opened.
-      if (!matchMedia('(min-width: 1280px)').matches) close();
-      go(dest.dataset.go);
+      if (narrow()) close();
+      const out = performAction(openAction(dest.dataset.go));
+      if (out && out.type !== 'handoff') renderPlan(out);
       return;
     }
     const chip = e.target.closest('[data-question]');

@@ -168,7 +168,7 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
 .hm-act:hover .hm-act-go { transform: translateX(3px); color: var(--tool); }
 .hm-act.is-ask .hm-act-ico { color: var(--gold-deep); background: var(--gold-wash); border-color: color-mix(in srgb, var(--gold) 30%, transparent); }
 .hm-act-badge { flex: none; min-width: 24px; height: 24px; padding: 0 8px; border-radius: 999px; display: grid; place-items: center;
-  font-size: var(--fs-xs); font-weight: 800; background: var(--gold); color: #17150f; font-variant-numeric: tabular-nums; }
+  font-size: var(--fs-xs); font-weight: 800; background: var(--gold); color: var(--on-signal); font-variant-numeric: tabular-nums; }
 
 /* focus: in her stage, joined to her by the thread */
 .hm-focus { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 4px; max-width: 920px; }

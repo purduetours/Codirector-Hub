@@ -27,8 +27,8 @@
   import { state } from '../js/core/state.js';
   import { register, visibleModules } from '../js/core/router.js';
   import { hintsFor } from '../js/core/vanessa-hints.js';
-  import { vanessaSuggestions } from '../js/core/vanessa-ui.js';
-  import { actionsFor, homeActions, resolveActions, explainTool } from '../js/core/vanessa-context.js';
+  import { actionsFor, resolveActions, explainTool } from '../js/core/vanessa-context.js';
+  import { interpret } from '../js/core/vanessa-os.js';
   import { ask } from '../js/core/vanessa.js';
 
   import evals from '../js/modules/evals.js';
@@ -70,6 +70,7 @@
   const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
   for (const [key, role] of Object.entries(ROLES)) {
+    state.guides = [];
     state.role = role;
     state.me = { id: 'test', full_name: 'Test Person', role: role.name };
 
@@ -85,14 +86,14 @@
       .filter(id => !ids.includes(id) && hintsFor(id).length);
     check(`${key}: Vanessa offers no hint for a tool it cannot open`, !leaked.length, leaked.join(', '));
 
-    const chips = vanessaSuggestions();
+    const chips = actionsFor('today').filter(a => a.kind === 'ask').map(a => a.q);
     const offTopic = chips.filter(q =>
       (/eval/i.test(q) && !role.in_training) ||
       (/discussing|checked in/i.test(q) && !role.in_recruitment));
     check(`${key}: Vanessa's suggestions match the role`, !offTopic.length, offTopic.join(' | '));
 
     // Every place her home deck and page actions offer must be one the router allows.
-    const offered = [...homeActions(), ...EXPECT.admin.flatMap(id => actionsFor(id))];
+    const offered = [...actionsFor('today'), ...EXPECT.admin.flatMap(id => actionsFor(id))];
     const badGo = offered.filter(a => a.kind === 'go' && !ids.includes(a.to)).map(a => a.to);
     check(`${key}: Vanessa only offers to open tools this role can reach`, !badGo.length, [...new Set(badGo)].join(', '));
 
@@ -122,6 +123,19 @@
     const tiers = resolveActions('today', {});
     const tierLeak = tiers.filter(a => a.kind === 'open' && !ids.includes(a.to)).map(a => a.id);
     check(`${key}: prioritised home actions stay inside access`, !tierLeak.length, tierLeak.join(', '));
+
+    // Typed tasks go through the OS layer's permission check before anything runs.
+    const tasks = [
+      !role.is_admin    && ['take me to attendance', 'show me attendance for today', 'open admin tools'],
+      !role.in_training && ['I need to evaluate the 2 PM tour', 'help me write this comment'],
+    ].filter(Boolean).flat();
+    const taskLeak = [];
+    for (const q of tasks) {
+      const plan = await interpret(q);
+      // A refusal, or nothing for her to do — never a handoff, choice or confirmation.
+      if (plan && !(plan.type === 'reply' && (plan.text === NO || plan.kind === 'alert'))) taskLeak.push(`${q} → ${plan.type}`);
+    }
+    if (tasks.length) check(`${key}: typed tasks are refused before they run`, !taskLeak.length, taskLeak.join(' | '));
   }
 
   document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;

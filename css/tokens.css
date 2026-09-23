@@ -1,94 +1,102 @@
 /* ============================================================ design tokens
-   Codirector Hub 2.0. One source of truth for colour, type, space, depth and
-   motion. Modules never hardcode a hex value — they reach for a token, which
-   is why every tool picked up the redesign without its own restyle.
+   Codirector Hub — Noir. One source of truth for colour, type, space, depth
+   and motion. Modules never hardcode a colour; they reach for a token, which
+   is why every tool changed with this file.
 
-   Identity, in one sentence: warm ivory paper and deep ink, with Purdue gold
-   used the way a good watch uses it — on the few things that matter.
+   Identity, in one sentence: black is the structure, pink is the energy
+   running through it.
 
-   Purdue's palette, from the University brand guidelines:
-     Boilermaker Gold #CFB991   Aged #8E6F3E   Rush #DAAA00   Field #DDB945
-     Dust #EBD99F   Steel #555960   Cool Gray #6F727B   Steam #C4BFC0
+   How pink is used — as a signal, not a paint:
+   · Vanessa owns it. Her orb, her glow, her panel's edge.
+   · It marks what is live: the active tool, the selected tab, focus, the
+     thread from her to what she is handing you, a count that wants you.
+   · Primary actions carry it, sparingly — one per view, not every button.
+   · It is never a status. Success is green, warning amber, danger a warm red
+     kept clearly apart from pink, neutral charcoal. A roomful of people
+     reading a screen at speed must not confuse "Vanessa" with "error".
 
-   Rules that fall out of it:
-   · Gold is an ACCENT. Large gold areas turn muddy on paper, so light mode
-     carries its actions in ink and gold marks the signature things — the
-     active tool, focus, Vanessa, a count that wants you.
-   · At night the roles invert: gold becomes the action colour with black on
-     it (11:1). Anything painted on --accent uses --accent-text for that
-     reason, never an assumed white.
-   · Status colours stay semantic (green done, red danger) but are warmed so
-     they sit beside the gold instead of fighting it.
+   The legacy names (--gold, --gold-deep, --gold-wash …) are kept and now
+   carry the pink signal, because two passes of components were written
+   against them. New work should prefer --pink-*.
 
-   The legacy token names (--bg, --line, --accent, --open …) are kept exactly:
-   every module's own stylesheet is written against them.
+   Dark is the identity. A light variant exists for anyone who needs it —
+   [data-theme="light"] from the sidebar toggle — and keeps the same roles.
 ============================================================================ */
 :root {
+  color-scheme: dark;
+
   /* ------------------------------------------------------------ surfaces */
-  --bg:          #f5f2eb;   /* ivory paper */
-  --bg-elev:     #ffffff;
-  --bg-sunken:   #ede9e0;
-  --bg-glass:    rgba(255,253,248,.72);
-  --line:        #e4ded1;
-  --line-strong: #d0c8b7;
-  --text:        #17150f;   /* ink */
-  --text-soft:   #545760;   /* Steel */
-  --text-faint:  #686b73;   /* Cool Gray a shade down, for 4.5:1 on ivory */
+  --bg:          #09090b;   /* near-black, a breath of violet */
+  --bg-elev:     #141318;
+  --bg-sunken:   #0e0d11;
+  --bg-glass:    rgba(20,19,24,.66);
+  --line:        #25232b;
+  --line-strong: #37343f;
+  --text:        #f6f2f6;
+  --text-soft:   #bdb5c2;
+  --text-faint:  #8d8594;   /* 5.4:1 on --bg */
+
+  /* ------------------------------------------------------------ the signal */
+  --pink:        #ff4fa3;   /* Vanessa, live, selected */
+  --pink-bright: #ff2e8f;
+  --pink-soft:   #ff8cc4;   /* pink that must carry small text on black */
+  --pink-deep:   #c21a6a;
+  --pink-wash:   rgba(255,79,163,.10);
+  --pink-glow:   rgba(255,79,163,.42);
+
+  /* legacy names, now the signal */
+  --gold:        var(--pink);
+  --gold-bright: var(--pink-bright);
+  --gold-deep:   var(--pink-soft);
+  --gold-wash:   var(--pink-wash);
 
   /* -------------------------------------------------------------- action */
-  --accent:       #17150f;
-  --accent-hover: #3b3325;
-  --accent-soft:  #f3ead8;  /* a wash of Dust */
+  --accent:       #e3287e;  /* primary buttons: deep enough for white text, 4.6:1 */
+  --accent-hover: #f23b8f;
+  --accent-soft:  rgba(255,79,163,.12);
   --accent-text:  #ffffff;
+  --on-signal:    #ffffff;  /* text on a pink badge or pill */
 
-  /* ----------------------------------------------------------- signature */
-  --gold:        #cfb991;   /* Boilermaker Gold */
-  --gold-bright: #daaa00;   /* Rush, for glow and the orb's core */
-  --gold-deep:   #8e6f3e;   /* Aged, for gold that must carry small text */
-  --gold-wash:   #f6efdf;
-
-  /* Vanessa's light. Gold, a warm ember and a cool steel — three hues, so
-     the orb reads as alive rather than as a gold button. */
-  --v-1: #daaa00;
-  --v-2: #e59566;
-  --v-3: #8aa4c4;
+  /* Vanessa's light: pink, a violet undertone and a pale rose highlight —
+     three hues so the orb reads as alive rather than as a pink button. */
+  --v-1: #ff4fa3;
+  --v-2: #8e5bff;
+  --v-3: #ffc2dc;
+  --orb-hi: rgba(255,236,246,.95);
 
   /* ------------------------------------------------------------- status */
-  --open:    #35607f;  --open-bg:    #e7eef4;
-  --warn:    #8a6a12;  --warn-bg:    #f7eed5;
-  --good:    #2e7d4f;  --good-bg:    #e3f0e7;
-  --info:    #555960;  --info-bg:    #ebecee;
-  --mute:    #6f727b;  --mute-bg:    #eeede9;
-  --danger:  #a3222a;  --danger-bg:  #f8e8e8;
+  --open:    #8fb4ff;  --open-bg:    rgba(143,180,255,.12);
+  --warn:    #f5bd55;  --warn-bg:    rgba(245,189,85,.12);
+  --good:    #4fd18b;  --good-bg:    rgba(79,209,139,.12);
+  --info:    #c1bcc8;  --info-bg:    rgba(193,188,200,.10);
+  --mute:    #948d9b;  --mute-bg:    rgba(148,141,155,.12);
+  --danger:  #ff6b5e;  --danger-bg:  rgba(255,107,94,.12);   /* warm red, well clear of pink */
 
-  /* Each tool gets a quiet hue of its own, used only for its icon tile and
-     the thin rule under its page title — enough to tell them apart at a
-     glance, not so much that the hub turns into a paint chart. */
-  --t-today:         #8e6f3e;
-  --t-announcements: #b0782a;
-  --t-evals:         #8e6f3e;
-  --t-interviews:    #b5563f;
-  --t-training:      #4f7a5c;
-  --t-schedule:      #3f6485;
-  --t-directory:     #6b5a8c;
-  --t-desks:         #2f7672;
-  --t-people:        #3b3a36;
-  --t-health:        #a3454f;
+  /* Each tool keeps a quiet hue of its own for its icon tile, tuned for black. */
+  --t-today:         #ff4fa3;
+  --t-announcements: #ffb36b;
+  --t-evals:         #ff6fb3;
+  --t-interviews:    #ff8a7a;
+  --t-training:      #6fd6a0;
+  --t-schedule:      #8fb4ff;
+  --t-directory:     #b79bff;
+  --t-desks:         #6fd3cf;
+  --t-people:        #d4ccd8;
+  --t-health:        #ff8a9a;
 
   /* ------------------------------------------------------ layered surfaces
-     The hub is one environment with layers, not paper cards on a desk.
-       surface-0  embedded in the page (no fill of its own)
        surface-1  a faint lift — rows, quiet groups
        surface-2  a clear surface — hovered rows, working areas
-       glass-1/2  floating things over the ambient light (pills, sheets)
+       glass-1/2  floating over the ambient light (pills, sheets, panels)
      Borders are hairlines that fade into the surface, never hard rules. */
-  --surface-1: color-mix(in srgb, var(--bg-elev) 45%, transparent);
-  --surface-2: color-mix(in srgb, var(--bg-elev) 78%, transparent);
-  --glass-1:   color-mix(in srgb, var(--bg-elev) 58%, transparent);
-  --glass-2:   color-mix(in srgb, var(--bg-elev) 74%, transparent);
-  --hairline:  color-mix(in srgb, var(--line) 70%, transparent);
-  --blur-1: blur(12px) saturate(1.2);
-  --blur-2: blur(18px) saturate(1.3);
+  --surface-1: rgba(255,255,255,.028);
+  --surface-2: rgba(255,255,255,.055);
+  --glass-1:   rgba(22,20,27,.58);
+  --glass-2:   rgba(26,24,32,.74);
+  --hairline:  rgba(255,255,255,.07);
+  --edge-light: linear-gradient(135deg, rgba(255,79,163,.45), rgba(255,255,255,.06) 40%, rgba(142,91,255,.25));
+  --blur-1: blur(14px) saturate(1.3);
+  --blur-2: blur(22px) saturate(1.4);
 
   /* ----------------------------------------------------------- type */
   --font:    "Plus Jakarta Sans", ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -102,127 +110,91 @@
   --fs-lg:  1rem;      /* 16 */
   --fs-xl:  1.25rem;   /* 20 */
   --fs-2xl: 1.625rem;  /* 26 */
-  --fs-hero: clamp(2.1rem, 1.3rem + 3.2vw, 3.6rem);
+  --fs-hero: clamp(2.2rem, 1.3rem + 3.4vw, 3.9rem);
 
   /* ----------------------------------------------------------- space */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
   --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 56px;
 
   /* ----------------------------------------------------------- shape */
-  --radius-xs: 7px;
-  --radius-sm: 10px;
-  --radius:    16px;
-  --radius-lg: 22px;
-  --radius-xl: 30px;
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius:    18px;
+  --radius-lg: 26px;
+  --radius-xl: 34px;
 
   /* ----------------------------------------------------------- depth */
-  --shadow-xs: 0 1px 1px rgba(40,30,10,.04);
-  --shadow:    0 1px 2px rgba(40,30,10,.05), 0 6px 20px -10px rgba(40,30,10,.16);
-  --shadow-md: 0 2px 4px rgba(40,30,10,.05), 0 14px 34px -14px rgba(40,30,10,.24);
-  --shadow-lg: 0 30px 70px -24px rgba(35,25,5,.40), 0 2px 6px rgba(35,25,5,.06);
-  --ring:      0 0 0 3px color-mix(in srgb, var(--gold) 55%, transparent);
+  --shadow-xs: 0 1px 1px rgba(0,0,0,.4);
+  --shadow:    0 1px 2px rgba(0,0,0,.5), 0 10px 28px -14px rgba(0,0,0,.8);
+  --shadow-md: 0 2px 4px rgba(0,0,0,.5), 0 18px 40px -16px rgba(0,0,0,.85);
+  --shadow-lg: 0 34px 80px -26px rgba(0,0,0,.9), 0 2px 8px rgba(0,0,0,.5);
+  --shadow-tint: rgba(0,0,0,.55);
+  --glow-sm: 0 0 18px -4px var(--pink-glow);
+  --glow:    0 0 36px -6px var(--pink-glow);
+  --ring:    0 0 0 3px rgba(255,79,163,.38);
 
   /* ----------------------------------------------------------- motion */
-  --ease:     cubic-bezier(.2,.8,.2,1);
-  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease:        cubic-bezier(.2,.8,.2,1);
+  --ease-out:    cubic-bezier(.16,1,.3,1);
+  --ease-spring: cubic-bezier(.3,1.3,.5,1);
   --dur-1: .12s; --dur-2: .2s; --dur-3: .36s; --dur-4: .56s;
-  --ease-spring: cubic-bezier(.3,1.3,.5,1);   /* a touch of overshoot, for things that slide into place */
 
   /* ----------------------------------------------------------- layout */
-  --rail: 252px;
+  --rail: 248px;
   --rail-compact: 76px;
   --topbar: 64px;
   --content: 1180px;
 }
 
-/* ---------------------------------------------------------------- dark mode
+/* ---------------------------------------------------------------- light
+   For daylight or preference. Same roles: pearl structure, pink signal. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg:          #f7f3f6;
+  --bg-elev:     #ffffff;
+  --bg-sunken:   #efe8ed;
+  --bg-glass:    rgba(255,252,254,.72);
+  --line:        #e8dde4;
+  --line-strong: #d6c6d0;
+  --text:        #17111a;
+  --text-soft:   #564d5b;
+  --text-faint:  #6d6472;
 
-   Two ways in, and they must not fight. The hub follows the laptop until the
-   toggle is used; that choice is stamped on <html> as data-theme and wins —
-   including a dark machine whose owner asked for light, which is what the
-   :not([data-theme="light"]) guard is for.
--------------------------------------------------------------------------- */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg:          #0f0e0c;
-    --bg-elev:     #191815;
-    --bg-sunken:   #211f1b;
-    --bg-glass:    rgba(25,24,21,.72);
-    --line:        #2c2a25;
-    --line-strong: #423d33;
-    --text:        #f3eee4;
-    --text-soft:   #b9b2a4;
-    --text-faint:  #8f897b;
+  --pink:        #e0287a;
+  --pink-bright: #ff2e8f;
+  --pink-soft:   #b8155f;
+  --pink-deep:   #9c0f50;
+  --pink-wash:   rgba(224,40,122,.08);
+  --pink-glow:   rgba(224,40,122,.30);
 
-    --accent:       #cfb991;
-    --accent-hover: #ddc9a4;
-    --accent-soft:  #2a2418;
-    --accent-text:  #000000;
+  --accent:       #d11d6f;
+  --accent-hover: #b8155f;
+  --accent-soft:  rgba(224,40,122,.08);
 
-    --gold:        #cfb991;
-    --gold-bright: #e2b830;
-    --gold-deep:   #d9c49c;
-    --gold-wash:   #231e14;
+  --v-1: #ff4fa3; --v-2: #8e5bff; --v-3: #ffc2dc;
 
-    --v-1: #e2b830; --v-2: #e9956a; --v-3: #7f9dc2;
+  --open:    #2f5fb3;  --open-bg:    #e8eefb;
+  --warn:    #8a5f07;  --warn-bg:    #fbf0d9;
+  --good:    #1f7a4a;  --good-bg:    #e1f3e8;
+  --info:    #4f4955;  --info-bg:    #efebf0;
+  --mute:    #6d6472;  --mute-bg:    #efebf0;
+  --danger:  #b3261e;  --danger-bg:  #fbe6e3;
 
-    --open:   #8fb6d4;  --open-bg:   #16222d;
-    --warn:   #ddb945;  --warn-bg:   #2e2409;
-    --good:   #6cc190;  --good-bg:   #12271b;
-    --info:   #c4bfc0;  --info-bg:   #25241f;
-    --mute:   #9d9795;  --mute-bg:   #201e1a;
-    --danger: #ec8d8d;  --danger-bg: #321819;
+  --t-today: #d11d6f; --t-announcements: #b0621d; --t-evals: #d11d6f; --t-interviews: #b5443a;
+  --t-training: #2f7a52; --t-schedule: #2f5fb3; --t-directory: #6a4bc4; --t-desks: #1f7672;
+  --t-people: #4f4955; --t-health: #b3354a;
 
-    --t-today: #d9c49c; --t-announcements: #e0a95a; --t-evals: #d9c49c;
-    --t-interviews: #e58a72; --t-training: #8cc09b; --t-schedule: #8fb3d6;
-    --t-directory: #b4a3d6; --t-desks: #79c2bc; --t-people: #d8d2c6; --t-health: #e6909a;
+  --surface-1: rgba(255,255,255,.5);
+  --surface-2: rgba(255,255,255,.82);
+  --glass-1:   rgba(255,255,255,.6);
+  --glass-2:   rgba(255,255,255,.78);
+  --hairline:  rgba(60,20,45,.09);
+  --edge-light: linear-gradient(135deg, rgba(224,40,122,.35), rgba(0,0,0,.04) 40%, rgba(142,91,255,.2));
 
-    --shadow-xs: 0 1px 1px rgba(0,0,0,.4);
-    --shadow:    0 1px 2px rgba(0,0,0,.45), 0 8px 24px -12px rgba(0,0,0,.7);
-    --shadow-md: 0 2px 4px rgba(0,0,0,.45), 0 16px 36px -14px rgba(0,0,0,.75);
-    --shadow-lg: 0 30px 70px -24px rgba(0,0,0,.85), 0 2px 6px rgba(0,0,0,.4);
-  }
+  --shadow-xs: 0 1px 1px rgba(60,20,45,.05);
+  --shadow:    0 1px 2px rgba(60,20,45,.06), 0 8px 24px -12px rgba(60,20,45,.18);
+  --shadow-md: 0 2px 4px rgba(60,20,45,.06), 0 16px 36px -14px rgba(60,20,45,.24);
+  --shadow-lg: 0 30px 70px -24px rgba(60,20,45,.35), 0 2px 6px rgba(60,20,45,.06);
+  --shadow-tint: rgba(60,20,45,.14);
+  --ring: 0 0 0 3px rgba(224,40,122,.25);
 }
-
-:root[data-theme="dark"] {
-    --bg:          #0f0e0c;
-    --bg-elev:     #191815;
-    --bg-sunken:   #211f1b;
-    --bg-glass:    rgba(25,24,21,.72);
-    --line:        #2c2a25;
-    --line-strong: #423d33;
-    --text:        #f3eee4;
-    --text-soft:   #b9b2a4;
-    --text-faint:  #8f897b;
-
-    --accent:       #cfb991;
-    --accent-hover: #ddc9a4;
-    --accent-soft:  #2a2418;
-    --accent-text:  #000000;
-
-    --gold:        #cfb991;
-    --gold-bright: #e2b830;
-    --gold-deep:   #d9c49c;
-    --gold-wash:   #231e14;
-
-    --v-1: #e2b830; --v-2: #e9956a; --v-3: #7f9dc2;
-
-    --open:   #8fb6d4;  --open-bg:   #16222d;
-    --warn:   #ddb945;  --warn-bg:   #2e2409;
-    --good:   #6cc190;  --good-bg:   #12271b;
-    --info:   #c4bfc0;  --info-bg:   #25241f;
-    --mute:   #9d9795;  --mute-bg:   #201e1a;
-    --danger: #ec8d8d;  --danger-bg: #321819;
-
-    --t-today: #d9c49c; --t-announcements: #e0a95a; --t-evals: #d9c49c;
-    --t-interviews: #e58a72; --t-training: #8cc09b; --t-schedule: #8fb3d6;
-    --t-directory: #b4a3d6; --t-desks: #79c2bc; --t-people: #d8d2c6; --t-health: #e6909a;
-
-    --shadow-xs: 0 1px 1px rgba(0,0,0,.4);
-    --shadow:    0 1px 2px rgba(0,0,0,.45), 0 8px 24px -12px rgba(0,0,0,.7);
-    --shadow-md: 0 2px 4px rgba(0,0,0,.45), 0 16px 36px -14px rgba(0,0,0,.75);
-    --shadow-lg: 0 30px 70px -24px rgba(0,0,0,.85), 0 2px 6px rgba(0,0,0,.4);
-}
-
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"]  { color-scheme: dark; }

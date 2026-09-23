@@ -1,0 +1,222 @@
+/* ============================================================ noir
+   Pass four: black is the structure, pink is the energy running through it.
+   Loaded last. Everything reads the tokens; pink appears only where the
+   system is signalling — Vanessa, what is live, what is chosen, the one
+   primary action on a screen.
+============================================================================ */
+
+/* ============================================================ environment
+   Near-black with slow pink light. The ambient layer from pass two now
+   glows magenta and violet; each workspace still tints it with its own hue. */
+.ambient { background:
+  radial-gradient(120% 80% at 70% -10%, rgba(255,79,163,.10), transparent 60%),
+  radial-gradient(90% 70% at -10% 100%, rgba(142,91,255,.08), transparent 60%),
+  var(--bg); }
+.ambient::after { opacity: .22; }
+:root[data-theme="light"] .ambient::after { opacity: .35; }
+.main::before { height: 420px; background:
+  radial-gradient(55% 100% at 16% 0%, color-mix(in srgb, var(--ambient-tint) 16%, transparent), transparent 70%); }
+
+/* ============================================================ Vanessa energy
+   Her orb is the brightest source of pink in the app. Its bloom breathes
+   when idle, quickens when she thinks, brightens as she responds, sweeps
+   when she opens a workspace, and turns green or red briefly for done or
+   wrong — then settles. */
+.orb {
+  background:
+    radial-gradient(circle at 30% 26%, var(--orb-hi) 0 7%, transparent 30%),
+    radial-gradient(circle at 70% 78%, color-mix(in srgb, var(--v-2) 70%, transparent) 0 12%, transparent 46%),
+    conic-gradient(from var(--orb-turn, 0deg), var(--v-1), var(--v-3) 20%, var(--pink-bright) 40%, var(--v-2) 62%, var(--v-1) 82%, var(--v-3));
+  box-shadow:
+    inset 0 -6px 14px rgba(40,0,25,.45), inset 0 3px 8px rgba(255,255,255,.28),
+    0 0 0 1px rgba(255,79,163,.35),
+    0 0 24px -4px var(--pink-glow);
+}
+.hm-orb .orb { box-shadow:
+    inset 0 -10px 22px rgba(40,0,25,.5), inset 0 4px 12px rgba(255,255,255,.3),
+    0 0 0 1px rgba(255,79,163,.4), 0 0 60px -6px var(--pink-glow), 0 0 140px -30px var(--pink); }
+.hm-halo { background: radial-gradient(closest-side, rgba(255,79,163,.28), transparent 72%); }
+.hm-halo::before, .hm-halo::after { border-color: rgba(255,79,163,.35); }
+.hm-thread { background: linear-gradient(to bottom, var(--pink), rgba(142,91,255,.45) 40%, transparent 85%); box-shadow: 0 0 12px var(--pink-glow); }
+
+:root[data-vanessa="thinking"] .orb   { animation-duration: 2s; filter: saturate(1.25); }
+:root[data-vanessa="responding"] .orb { box-shadow: inset 0 -6px 14px rgba(40,0,25,.35), 0 0 0 1px rgba(255,79,163,.5), 0 0 44px -2px var(--pink-glow); }
+:root[data-vanessa="opening"] .orb    { animation-duration: 1.4s; box-shadow: 0 0 0 1px rgba(255,79,163,.55), 0 0 70px 0 var(--pink-glow); }
+:root[data-vanessa="ready"] .hm-orb .orb { box-shadow: 0 0 0 1px rgba(255,79,163,.45), 0 0 80px -4px var(--pink-glow), 0 0 160px -30px var(--pink); }
+
+/* The thinking sweep along her panel's top edge, and the thread, run pink. */
+.v-head::after { background: linear-gradient(90deg, transparent, var(--pink), var(--v-2), var(--pink), transparent); background-size: 200% 100%; }
+.v-wave i { background: var(--pink); }
+
+/* ============================================================ surfaces
+   Glass with light on its edge rather than a grey outline. */
+.panel, .tr-wrap, .gr-wrap, .desk-wrap, .stats, .hm-act.is-focus, .v-panel, .modal, .ev-cal {
+  position: relative;
+}
+.panel::after, .stats::after, .modal::after, .v-panel::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; padding: 1px;
+  background: var(--edge-light);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude; opacity: .55;
+}
+.hm-act.is-focus::after { box-shadow: 0 0 14px var(--pink-glow); }
+.card, .ev-card { background: var(--surface-2); border-color: var(--hairline); }
+.card:hover, .ev-card:hover { border-color: rgba(255,79,163,.28); }
+.modal { background: color-mix(in srgb, var(--bg-elev) 94%, transparent); border-color: var(--hairline); border-radius: var(--radius-xl); }
+.modal::before { background: linear-gradient(90deg, transparent, var(--pink) 25%, var(--v-2) 55%, var(--pink) 80%, transparent); height: 2px; }
+.modal-foot { background: rgba(255,255,255,.02); }
+.modal-scrim { background: rgba(4,3,6,.66); backdrop-filter: blur(8px) saturate(1.2); -webkit-backdrop-filter: blur(8px) saturate(1.2); }
+
+/* The home sheet: a darker plane rising out of her light, with a pink seam. */
+.hm-sheet { background: linear-gradient(to bottom, rgba(20,19,24,.78), rgba(14,13,17,.5) 55%, transparent); }
+.hm-wave path { fill: rgba(20,19,24,.78); }
+:root[data-theme="light"] .hm-sheet { background: linear-gradient(to bottom, rgba(255,255,255,.75), rgba(255,255,255,.4) 55%, transparent); }
+:root[data-theme="light"] .hm-wave path { fill: rgba(255,255,255,.75); }
+.hm-sheet::before { background: radial-gradient(50% 100% at 50% 100%, rgba(255,79,163,.28), transparent 70%); }
+
+/* ============================================================ action hierarchy
+   Pink draws the eye only to what matters: the primary action on a screen,
+   Vanessa's focus cards. Everything else is quiet charcoal. */
+.btn-primary {
+  background: linear-gradient(135deg, var(--pink-bright), var(--accent) 55%, var(--pink-deep));
+  box-shadow: 0 0 0 1px rgba(255,79,163,.3) inset, 0 10px 26px -12px var(--pink-glow);
+}
+.btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #ff4fa3, var(--accent-hover) 55%, var(--accent)); box-shadow: 0 0 0 1px rgba(255,79,163,.45) inset, var(--glow-sm); }
+.btn-ghost, .btn { border-color: var(--hairline); }
+.btn:not(.btn-primary):not(.btn-danger):not(.btn-quiet) { background: var(--surface-2); color: var(--text); }
+.btn:not(.btn-primary):not(.btn-danger):not(.btn-quiet):hover:not(:disabled) { background: rgba(255,255,255,.09); border-color: rgba(255,79,163,.3); }
+:root[data-theme="light"] .btn:not(.btn-primary):not(.btn-danger):not(.btn-quiet) { background: var(--bg-elev); }
+.btn-danger { background: var(--danger); color: #1a0705; }
+
+.hm-act.is-focus { background: linear-gradient(160deg, rgba(255,79,163,.14), rgba(26,24,32,.72) 45%); border-color: transparent; }
+:root[data-theme="light"] .hm-act.is-focus { background: linear-gradient(160deg, rgba(224,40,122,.10), rgba(255,255,255,.85) 45%); }
+.hm-act.is-focus:hover { box-shadow: var(--shadow-md), var(--glow-sm); }
+.hm-act.is-focus::before { background: radial-gradient(closest-side, color-mix(in srgb, var(--tool) 22%, transparent), transparent); }
+.hm-act-badge, .navlink .count, .tab-badge { background: var(--pink); color: var(--on-signal); box-shadow: 0 0 12px -2px var(--pink-glow); }
+
+/* ============================================================ navigation
+   Quiet dark rail; pink marks where you are and nothing else. */
+.rail { background: rgba(12,11,15,.62); border-right-color: var(--hairline); }
+:root[data-theme="light"] .rail { background: rgba(255,255,255,.6); }
+.navlink.is-active { background: linear-gradient(90deg, rgba(255,79,163,.14), rgba(255,79,163,.03)); box-shadow: none; color: var(--text); }
+.navlink.is-active::before { background: var(--pink); box-shadow: 0 0 12px var(--pink); width: 3px; }
+.navlink.is-active .ico { color: var(--pink); }
+.navlink:hover { background: rgba(255,255,255,.04); }
+.rail-ask { background: linear-gradient(135deg, rgba(255,79,163,.16), rgba(142,91,255,.08)); border-color: rgba(255,79,163,.3); }
+.rail-ask:hover { box-shadow: var(--glow-sm); }
+.avatar { background: linear-gradient(145deg, var(--pink), var(--v-2)); color: #fff; }
+.tab.is-active, .tab-glider { background: rgba(255,79,163,.16); box-shadow: 0 0 0 1px rgba(255,79,163,.3) inset; color: var(--text); }
+.tabs { background: rgba(255,255,255,.03); border-color: var(--hairline); }
+.dock { background: rgba(14,13,17,.78); border-color: var(--hairline); }
+.dock-v .orb { box-shadow: 0 0 0 4px var(--bg), 0 0 30px -2px var(--pink-glow); border: 0; }
+.dock-btn.is-active { color: var(--pink); background: rgba(255,79,163,.1); }
+.v-top, .active-users summary, .qs-input { background: var(--surface-2) !important; border-color: var(--hairline) !important; }
+
+/* ============================================================ workspace header
+   Vanessa hands you the area: a quiet line of hers under the title. */
+.v-hint { gap: 10px 12px; }
+.v-hint-lead { color: var(--text-soft); font-weight: 600; }
+.v-hint-say { color: var(--text-soft); }
+.v-hint-chip { border: 1px solid rgba(255,79,163,.28); background: rgba(255,79,163,.07); color: var(--text); }
+.v-hint-chip:hover { background: rgba(255,79,163,.14); border-color: rgba(255,79,163,.5); box-shadow: var(--glow-sm); }
+@media (max-width: 860px) { .v-hint-say { display: none; } }
+
+/* ============================================================ statuses
+   Pink is never a status. */
+.pill.tone-open { --tone: var(--open); --tone-bg: var(--open-bg); }
+.tr-sel { background: var(--surface-2); color: var(--text); border-color: var(--hairline); }
+.callout { background: var(--warn-bg); border-color: rgba(245,189,85,.25); border-left-color: var(--warn); color: var(--text-soft); }
+.callout strong { color: var(--warn); }
+
+/* ============================================================ response components */
+.v-msg.her { background: linear-gradient(180deg, rgba(255,79,163,.07), rgba(255,255,255,.035)); border-color: var(--hairline); }
+.v-msg.you { background: linear-gradient(135deg, var(--pink-bright), var(--accent) 60%, var(--pink-deep)); color: #fff; }
+.v-msg.her::before { background: radial-gradient(circle at 32% 30%, var(--orb-hi) 0 10%, transparent 34%), conic-gradient(var(--v-1), var(--v-3), var(--pink-bright), var(--v-2), var(--v-1));
+  box-shadow: 0 0 0 1px rgba(255,79,163,.4), 0 0 14px -2px var(--pink-glow); }
+.v-kind { color: var(--pink-soft); }
+.v-chip { background: var(--surface-2); border-color: var(--hairline); color: var(--text-soft); }
+.v-chip:hover { border-color: rgba(255,79,163,.5); background: rgba(255,79,163,.1); color: var(--text); }
+.v-chip.is-go { background: rgba(255,79,163,.1); border-color: rgba(255,79,163,.3); color: var(--text); }
+.v-list li { background: rgba(255,255,255,.04); }
+
+/* selection: big, tappable records */
+.v-opts { display: grid; gap: 6px; margin-top: 10px; }
+.v-opt {
+  display: grid; gap: 1px; text-align: left; cursor: pointer; font: inherit; color: var(--text);
+  padding: 11px 14px; border-radius: 14px; min-height: 48px;
+  background: rgba(255,255,255,.04); border: 1px solid var(--hairline);
+  transition: background var(--dur-2), border-color var(--dur-2), transform var(--dur-2) var(--ease), box-shadow var(--dur-2);
+  animation: v-msg-in .4s var(--ease-out) both;
+}
+.v-opt:nth-child(2) { animation-delay: .04s; } .v-opt:nth-child(3) { animation-delay: .08s; } .v-opt:nth-child(n+4) { animation-delay: .12s; }
+.v-opt b { font-size: var(--fs-md); font-weight: 750; }
+.v-opt span { font-size: var(--fs-xs); color: var(--text-faint); }
+.v-opt:hover:not(:disabled) { background: rgba(255,79,163,.1); border-color: rgba(255,79,163,.45); transform: translateX(2px); box-shadow: var(--glow-sm); }
+.v-opt.is-chosen { background: rgba(255,79,163,.16); border-color: var(--pink); }
+.v-plan.is-settled .v-opt:not(.is-chosen), .v-plan.is-settled .v-chip { opacity: .45; }
+.v-plan.is-settled .btn { opacity: .6; }
+
+/* confirmation: a review card */
+.v-msg.v-k-review, .v-msg.v-k-confirm.v-plan { background: linear-gradient(180deg, rgba(255,79,163,.1), rgba(255,255,255,.035)); border-color: rgba(255,79,163,.3); }
+.v-msg.v-k-review .v-kind, .v-msg.v-k-confirm.v-plan .v-kind { color: var(--pink-soft); }
+.v-rows { margin: 10px 0 0; display: grid; gap: 4px; }
+.v-rows div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: 10px; background: rgba(255,255,255,.04); font-size: var(--fs-sm); }
+.v-rows dt { color: var(--text-faint); }
+.v-rows dd { margin: 0; font-weight: 650; text-align: right; }
+.v-confirm-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+/* suggestion: wording to use, edit or try again — in chat and in the form */
+.v-suggest-part { margin-top: 10px; padding: 11px 12px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--hairline);
+  transition: border-color var(--dur-2), background var(--dur-2); }
+.v-suggest-part.is-used { border-color: color-mix(in srgb, var(--good) 45%, transparent); background: var(--good-bg); }
+.v-suggest-part p { margin: 4px 0 10px; line-height: 1.55; }
+.v-suggest-label { font-size: var(--fs-2xs); font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--pink-soft); }
+.v-suggest-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.v-assist {
+  justify-self: start; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; margin-top: -6px;
+  font: inherit; font-size: var(--fs-xs); font-weight: 700; color: var(--pink-soft);
+  padding: 5px 12px 5px 6px; border-radius: 999px; background: rgba(255,79,163,.08); border: 1px solid rgba(255,79,163,.25);
+  transition: background var(--dur-2), box-shadow var(--dur-2);
+}
+.v-assist:hover { background: rgba(255,79,163,.15); box-shadow: var(--glow-sm); }
+.v-suggest { border-radius: 18px; padding: 14px; background: linear-gradient(180deg, rgba(255,79,163,.09), rgba(255,255,255,.03));
+  border: 1px solid rgba(255,79,163,.28); animation: v-msg-in .45s var(--ease-out) both; }
+.v-suggest-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v-suggest-head b { font-size: var(--fs-sm); }
+.v-suggest-sub, .v-suggest-note { font-size: var(--fs-xs); color: var(--text-faint); }
+.v-suggest-note { margin-top: 8px; }
+.v-suggest-foot { display: flex; gap: 14px; margin-top: 10px; }
+textarea.is-filled { box-shadow: 0 0 0 3px rgba(255,79,163,.35), var(--glow-sm); transition: box-shadow .3s; }
+
+/* ============================================================ liquid transitions
+   A pink light sweeps across as a workspace opens from her, so the change
+   reads as one surface re-forming rather than a page swap. */
+.vt-morph::view-transition-group(workspace) { animation-duration: .6s; }
+.vt-morph::view-transition-image-pair(workspace) { border-radius: var(--radius-xl); box-shadow: 0 0 0 1px rgba(255,79,163,.35), 0 0 80px -10px var(--pink-glow); }
+::view-transition-old(root) { animation: noir-dim .32s var(--ease) both; }
+@keyframes noir-dim { to { opacity: 0; filter: brightness(.6); } }
+.is-chosen { box-shadow: 0 0 0 2px var(--pink), 0 0 50px -8px var(--pink-glow), var(--shadow-lg) !important; }
+.is-handing::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 5;
+  background: radial-gradient(60% 40% at 50% 40%, rgba(255,79,163,.12), transparent 70%);
+  animation: fade .3s ease both;
+}
+
+/* ============================================================ mobile
+   Vanessa stays the centre: a bigger dock orb, full-height sheet, and
+   selections as full-width cards. */
+@media (max-width: 860px) {
+  .dock-v .orb { --size: 54px; }
+  .v-opt { min-height: 54px; }
+  .v-panel { background: var(--bg); }
+  .hm-act.is-focus { border-radius: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-handing::after { display: none; }
+}
+
+/* Her halo belongs to the orb, not to the column the thread runs down. */
+.hm-halo { inset: auto; top: -40px; left: 50%; margin-left: -92px; width: 184px; height: 184px; }
+@media (max-width: 860px) { .hm-halo { top: -28px; margin-left: -63px; width: 126px; height: 126px; } }

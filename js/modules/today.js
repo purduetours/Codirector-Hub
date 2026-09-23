@@ -26,10 +26,11 @@ import { state, myName, isAdmin, inTraining, inRecruitment, termLabel } from '..
 import { select, update } from '../core/db.js';
 import { loadDesks, loadTours } from '../core/sheets.js';
 import { $, esc, injectStyle, initials, prettyTime, todayISO } from '../core/ui.js';
-import { morphTo, visibleModules } from '../core/router.js';
+import { visibleModules } from '../core/router.js';
 import { ICONS } from '../core/icons.js';
 import { presenceSnapshot } from '../core/presence.js';
 import { resolveActions } from '../core/vanessa-context.js';
+import { performAction, actionById, openAction } from '../core/vanessa-os.js';
 import { setVanessaState } from '../core/vanessa-state.js';
 import { loadRoster } from './evals.js';
 import interviews, { interviewData } from './interviews.js';
@@ -340,9 +341,9 @@ function paintAgenda(plan) {
      primary    in her stage, beside her — what needs you now, with why
      secondary  the tools you usually reach for, on the sheet
      more       folded away, a click to open */
-function attrs(a) {
-  return a.kind === 'open' ? `data-go="${esc(a.to)}"` : `data-ask="${esc(a.q)}"`;
-}
+// Buttons name their registry action; clicking runs it through Vanessa's
+// one executor, exactly as typing the same request would.
+const attrs = a => `data-action="${esc(a.id)}"`;
 function actButton(a, size, i = 0) {
   const tool = a.kind === 'open' ? a.to : (a.icon || 'today');
   const line = a.reason || a.status || a.description;
@@ -474,18 +475,19 @@ function shell() {
    The pause is short and the navigation always happens — the animation
    sells continuity, it never stands in the way. */
 let handing = false;
-function handoff(dest, el) {
-  if (handing) return;
-  const mod = visibleModules().find(m => m.id === dest);
-  if (!mod) return;                                // the router would refuse it anyway
-  if (reduced()) { morphTo(dest, el); return; }
+function handoff(action, el) {
+  if (handing || !action) return;
+  if (action.kind === 'ask') { performAction(action); return; }
+  const mod = visibleModules().find(m => m.id === action.to);
+  if (!mod) { performAction(action); return; }     // lets the executor say no, politely
+  if (reduced()) { performAction(action, { from: el }); return; }
   handing = true;
   setVanessaState('opening');
   const says = $('#hm-says');
   if (says) says.textContent = `Opening ${mod.title} for you…`;
   el.classList.add('is-chosen');
   $('#view')?.classList.add('is-handing');
-  setTimeout(() => { handing = false; morphTo(dest, el); }, 240);
+  setTimeout(() => { handing = false; performAction(action, { from: el }); }, 240);
 }
 
 let onPresence = null;
@@ -520,12 +522,12 @@ export default {
     });
 
     view.addEventListener('click', e => {
-      const q = e.target.closest('[data-ask]');
-      if (q) { ask(q.dataset.ask); return; }
       const to = e.target.closest('[data-scroll]');
       if (to) { $(to.dataset.scroll)?.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }); return; }
+      const act = e.target.closest('[data-action]');
+      if (act) { e.preventDefault(); handoff(actionById(act.dataset.action), act); return; }
       const dest = e.target.closest('[data-go]');
-      if (dest) { e.preventDefault(); handoff(dest.dataset.go, dest); }
+      if (dest) { e.preventDefault(); handoff(openAction(dest.dataset.go), dest); }
     });
 
     paintPresence(presenceSnapshot());

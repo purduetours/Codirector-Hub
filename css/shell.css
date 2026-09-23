@@ -38,11 +38,11 @@ svg { display: block; }
   position: relative; display: inline-block; flex: none;
   width: var(--size); height: var(--size); border-radius: 50%;
   background:
-    radial-gradient(circle at 30% 28%, rgba(255,250,235,.95) 0 8%, transparent 32%),
+    radial-gradient(circle at 30% 28%, var(--orb-hi) 0 8%, transparent 32%),
     radial-gradient(circle at 70% 78%, color-mix(in srgb, var(--v-3) 55%, transparent) 0 10%, transparent 42%),
-    conic-gradient(from var(--orb-turn, 0deg), var(--v-1), #f3cf6a 22%, var(--v-2) 42%, var(--gold-deep) 62%, #f3cf6a 82%, var(--v-1));
+    conic-gradient(from var(--orb-turn, 0deg), var(--v-1), var(--v-3) 22%, var(--v-2) 42%, var(--gold-deep) 62%, var(--v-3) 82%, var(--v-1));
   box-shadow:
-    inset 0 -6px 14px rgba(60,35,0,.28),
+    inset 0 -6px 14px rgba(40,0,25,.4),
     inset 0 3px 8px rgba(255,255,255,.35),
     0 0 0 1px color-mix(in srgb, var(--gold-deep) 30%, transparent),
     0 6px 22px -6px color-mix(in srgb, var(--v-1) 65%, transparent);
@@ -55,7 +55,7 @@ svg { display: block; }
   filter: blur(calc(var(--size) * .06)); mix-blend-mode: soft-light;
   animation: orb-breathe 5.5s ease-in-out infinite;
 }
-.orb-xs { --size: 20px; box-shadow: inset 0 -3px 6px rgba(60,35,0,.25), 0 0 0 1px color-mix(in srgb, var(--gold-deep) 25%, transparent); }
+.orb-xs { --size: 20px; box-shadow: inset 0 -3px 6px rgba(40,0,25,.35), 0 0 0 1px color-mix(in srgb, var(--gold-deep) 25%, transparent); }
 .orb-sm { --size: 30px; }
 .orb-lg { --size: 76px; }
 .orb-xl { --size: 340px; }
@@ -171,7 +171,7 @@ svg { display: block; }
 .ico-emoji { font-size: 15px; line-height: 1; }
 .navlink .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .navlink .count {
-  font-size: var(--fs-2xs); font-weight: 780; background: var(--gold); color: #17150f;
+  font-size: var(--fs-2xs); font-weight: 780; background: var(--gold); color: var(--on-signal);
   border-radius: 999px; padding: 1px 7px; min-width: 20px; text-align: center; line-height: 1.6;
 }
 .navlink.is-soon { opacity: .5; cursor: default; }
@@ -194,7 +194,7 @@ svg { display: block; }
 .who-out svg { width: 17px; height: 17px; }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%; flex: none;
-  background: linear-gradient(145deg, var(--gold), var(--gold-deep)); color: #17150f;
+  background: linear-gradient(145deg, var(--gold), var(--gold-deep)); color: var(--on-signal);
   display: grid; place-items: center; font-size: var(--fs-2xs); font-weight: 800; letter-spacing: .02em;
 }
 .who-name { font-size: var(--fs-sm); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -207,7 +207,7 @@ svg { display: block; }
    claim a grid column and shove the rail and content sideways. */
 .nav-scrim {
   display: none; position: fixed; inset: 0; z-index: 55;
-  background: color-mix(in srgb, #0d0b07 45%, transparent);
+  background: color-mix(in srgb, #000 45%, transparent);
   backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
   opacity: 0; pointer-events: none; transition: opacity var(--dur-2);
 }
