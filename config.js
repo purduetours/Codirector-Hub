@@ -1,22 +1,15 @@
 /* ------------------------------------------------------------------
-   Codirector Hub — front-end config
+   Codirector Hub v2 — front-end config
 
-   The hub talks to the SAME Apps Script deployment as the standalone eval
-   tracker, so this URL is already filled in. Redeploy a new version of
-   Code.gs after editing it, and the URL stays the same.
+   The publishable key is meant to be public: it ships inside the page and
+   anyone can read it. It grants nothing on its own — the policies in
+   supabase/03-policies.sql decide what each signed-in person can see.
+
+   The service_role / secret key must NEVER appear in this file.
 ------------------------------------------------------------------ */
 window.CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbxQtWIaGaRE6xxSrngjrrPDt-lqA9fd8QVmfHdPJCbDl2nudHN6Ss5MJmyEoNQ_qPpu/exec',
+  SUPABASE_URL: 'https://ngboeuxjhthacdavkimc.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_yJQFZ79OaP_z_nCyObsJiw_tMJnoUvD',
 
-  TERM_LABEL: 'Fall 2026',
-
-  /* Guide Room runs on its own Apps Script + spreadsheet, with token auth
-     rather than the hub's access codes. The hub still gates the module behind
-     a valid hub sign-in; this is just the onward connection. */
-  GUIDE_ROOM: {
-    apiUrl: 'https://script.google.com/macros/s/AKfycbxdMj93rekhlqYyBY894C8E0ns0o87q7m2hktzSjl4CJ5UQ5LMHUsiLv7VDVELDCLAq/exec',
-    token: 'NK6pWGXepY_WMnEJvYDviz8k6LSSHLnh'
-  },
-  REQUIRE_CODE: true,
-  RATING_OPTIONS: ['1', '2', '3', '4', '5']
+  TERM_LABEL: 'Fall 2026'
 };

@@ -1,0 +1,16 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vanessa isolated preview</title><link rel="stylesheet" href="../css/tokens.css"><link rel="stylesheet" href="../css/shell.css"><link rel="stylesheet" href="../css/components.css"></head>
+<body><main style="padding:24px"><h1>Vanessa isolated preview</h1><p>Fictional records only. No database calls or real evaluation submissions. Model startup is simulated: the first attempt fails, Retry succeeds.</p><button id="reset" class="btn">Simulate sign-out</button><p id="preview-status">Demo user signed in</p></main>
+<script type="module">
+import {state,clearSession,onSessionReset} from '../js/core/state.js';
+import {shareOther,shareInterviews} from '../js/core/vanessa.js';
+import {registerEvalActions} from '../js/core/vanessa-eval.js';
+import {initVanessa,resetVanessa,registerWarmers} from '../js/core/vanessa-ui.js';
+let tries=0;
+globalThis.LanguageModel={availability:async()=>'downloadable',create:async options=>{if(++tries===1)throw Object.assign(Error('Simulated permission failure'),{name:'NotAllowedError'});return {destroy(){},clone:async()=>({prompt:async()=>'NONE',destroy(){}})};}};
+state.me={id:'demo',full_name:'Demo User'};state.role={in_training:true,in_recruitment:true,is_admin:true};state.loadedAt=new Date();
+state.guides=[{id:'fake-eval',name:'Avery Sample',status:'claimed',evaluatorId:'demo',date:'2026-09-11',time:'10:00',rank:1,priority:'First Priority',tours:[],skip:false}];state.counts={open:1};state.neededTotal=1;
+shareOther('tours',[]);shareOther('desks',[]);shareInterviews({candidates:[]});registerWarmers([]);
+registerEvalActions({load:async()=>{},submit:async()=>({already:false})});
+onSessionReset(resetVanessa);initVanessa();
+document.querySelector('#reset').onclick=()=>{clearSession();document.querySelector('#preview-status').textContent='Signed out — chat removed';};
+</script></body></html>

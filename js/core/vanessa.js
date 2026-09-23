@@ -18,7 +18,7 @@ import { TOPICS } from './vanessa-knowledge.js';
 import { smallTalk, smallTalkStrong, peel } from './vanessa-chat.js';
 import { HANDBOOK } from './vanessa-handbook.js';
 import { state, myName, isAdmin, inTraining, inRecruitment } from './state.js';
-import { esc, todayISO } from './ui.js';
+import { esc } from './ui.js';
 import { taskSummary } from './vanessa-tasks.js';
 import { matchEvalTours } from './vanessa-tour-match.js';
 import { dateRange, dayISO, DAY_NAMES } from './vanessa-dates.js';
@@ -147,90 +147,10 @@ function evalAnswers(q) {
   return null;
 }
 
-/* ------------------------------------------------- training answers -------
-   Attendance, makeups and who has said in advance they will be missing.
-
-   Worth its own section rather than being folded into the handbook: "who
-   missed training" used to return the written absence POLICY, which is a real
-   paragraph and completely useless when what you wanted was five names.
--------------------------------------------------------------------------- */
-function trainingAnswers(q) {
-  const t = shared.training;
-  // Training is codirector-only, so she will not discuss it with anyone else.
-  if (!t || !isAdmin()) return null;
-  const { sessions = [], attendance = [], absences = [] } = t;
-  if (!sessions.length) return null;
-
-  const byId = new Map(sessions.map(s => [s.id, s]));
-  const label = id => byId.get(id)?.label || '';
-  const past = s => !s.held_on || s.held_on <= todayISO();
-  const owed = attendance.filter(a => /absent/i.test(a.actual || ''));
-
-  /* --- who owes a makeup ------------------------------------------------ */
-  if (has(q, 'makeup', 'make up', 'made up', 'owes', 'owe', 'outstanding', 'still absent',
-             'not done their', 'catch up', 'behind on training')) {
-    if (!owed.length) return 'Nobody owes a makeup — everyone marked absent has completed one.';
-    const people = [...new Set(owed.map(a => a.person_name))];
-    remember(people);
-    return `${people.length} ${people.length === 1 ? 'person owes' : 'people owe'} a makeup:\n` +
-      owed.slice(0, 12).map(a => `- ${a.person_name} — ${label(a.session_id)}`).join('\n') +
-      (owed.length > 12 ? `\n…and ${owed.length - 12} more.` : '');
-  }
-
-  /* --- who has said they will be away ----------------------------------- */
-  if (has(q, 'filed', 'absence form', 'said they', 'told us', 'will miss', 'going to miss',
-             'will be gone', 'wont be there', 'will not be there', 'heads up',
-             'missing the next', 'missing next', 'out next', 'away next', 'skipping')) {
-    if (!absences.length) return 'Nobody has filed an absence.';
-    const upcoming = sessions.filter(s => !past(s));
-    const next = upcoming[0];
-    if (next && has(q, 'next', 'upcoming', 'this week')) {
-      const who = absences.filter(a => a.sessions.some(x => sameSession(x, next.label)));
-      remember(who.map(a => a.name));
-      return who.length
-        ? `${who.length} filed an absence for ${next.label}:\n` +
-          who.slice(0, 12).map(a => `- ${a.name}`).join('\n')
-        : `Nobody has filed an absence for ${next.label}.`;
-    }
-    remember(absences.map(a => a.name));
-    return `${absences.length} absence${absences.length === 1 ? '' : 's'} filed. The most recent:\n` +
-      absences.slice(0, 8).map(a => `- ${a.name} — ${a.sessions.join(', ') || 'no session given'}`).join('\n') +
-      '\n\nThe Training tab has the reasons.';
-  }
-
-  /* --- how a particular session went, or the term overall --------------- */
-  if (has(q, 'training', 'attendance', 'attended', 'showed up', 'turned up', 'came to',
-             'absent on', 'was absent', 'were absent', 'missed', 'no show', 'did not come')) {
-    const named = sessions.find(s => String(q).toLowerCase().includes(s.label.toLowerCase()));
-    const target = named || [...sessions].reverse().find(past);
-    if (!target) return 'No training session has happened yet this term.';
-
-    const rows = attendance.filter(a => a.session_id === target.id);
-    const came = rows.filter(a => /^attended/i.test(a.actual || '')).length;
-    const madeUp = rows.filter(a => /^makeup/i.test(a.actual || '')).length;
-    const missing = rows.filter(a => /absent/i.test(a.actual || ''));
-    remember(missing.map(a => a.person_name));
-
-    return `${target.label}: ${came} of ${rows.length} attended` +
-      (madeUp ? `, ${madeUp} completed a makeup` : '') +
-      (missing.length
-        ? `, ${missing.length} still owe one:\n` + missing.slice(0, 10).map(a => `- ${a.person_name}`).join('\n')
-        : '. Nobody is outstanding.') +
-      (named ? '' : `\n\nThat is the most recent session; name another and I will look it up.`);
-  }
-  return null;
-}
-
-/** "November 2rd" and "November 2nd" are the same evening. */
-const sameSession = (a, b) => {
-  const k = x => String(x || '').toLowerCase().replace(/(\d+)\s*(st|nd|rd|th)\b/g, '$1').replace(/[^a-z0-9]/g, '');
-  return k(a) === k(b);
-};
-
 /* ------------------------------------------------- interview answers ------ */
 
 let interviewData = null;
-const shared = { tours: null, desks: null, training: null, majors: null };
+const shared = { tours: null, desks: null };
 export function shareInterviews(d) { interviewData = d; }
 export function shareOther(kind, rows) { shared[kind] = rows; }
 
@@ -337,7 +257,7 @@ function interviewAnswers(q) {
 }
 
 /* --------------------------------------------------- a particular guide ---
-   "who is evaluating Jane Boilermaker", "when is Jane leading a tour". Matched on any
+   "who is evaluating Noah Cash", "when is Ella leading a tour". Matched on any
    part of the name so a first name alone is enough, and it refuses to answer
    when two guides fit rather than picking one.
 -------------------------------------------------------------------------- */
@@ -401,25 +321,6 @@ function guideAnswers(q) {
     `${x.evaluatorId === state.me?.id ? 'You are' : x.evaluator + ' is'} evaluating them` +
     (x.date ? `, on ${prettyDay(x.date)}${x.time ? ' at ' + prettyClock(x.time) : ''}.` : ', no tour date set yet.') +
     (x.status === 'submitted' ? ' Eval submitted.' : x.status === 'reviewed' ? ' Eval submitted and reviewed.' : ''));
-
-  /* What they study, and how their training is going. Both come from other
-     screens, so she says them only when those have loaded — never a blank
-     where a fact should be. */
-  const st = shared.majors?.get(x.name);
-  if (st) {
-    const study = [
-      st.majors?.length ? st.majors.join(' and ') : '',
-      st.minors?.length ? `minoring in ${st.minors.join(' and ')}` : ''
-    ].filter(Boolean).join(', ');
-    if (study) bits.push(`Studying ${study}${st.year ? ` — ${st.year.toLowerCase()}` : ''}.`);
-  }
-
-  const tr = shared.training?.perPerson?.get(x.name);
-  if (tr) {
-    if (tr.owed) bits.push(`Training: ${tr.owed} makeup${tr.owed === 1 ? '' : 's'} still owed.`);
-    else if (tr.filed) bits.push(`Training: all square, ${tr.filed} absence${tr.filed === 1 ? '' : 's'} filed in advance.`);
-    else bits.push('Training: nothing outstanding.');
-  }
 
   const range = dateRange(q.replace(new RegExp(x.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ''));
   if (range?.error) return range.error;
@@ -501,9 +402,7 @@ const DESTINATIONS = [
   { to: 'schedule',      k: ['schedule', 'tours', 'tour schedule'] },
   { to: 'desks',         k: ['desk', 'desks', 'coverage'] },
   { to: 'directory',     k: ['directory', 'guide list', 'guides'] },
-  { to: 'announcements', k: ['announcement', 'announcements', 'notices'] },
-  { to: 'training',      k: ['training', 'makeup', 'makeups', 'attendance', 'absence form'] },
-  { to: 'people',        k: ['people', 'members', 'accounts', 'who can sign in'] }
+  { to: 'announcements', k: ['announcement', 'announcements', 'notices'] }
 ];
 
 function navigation(q) {
@@ -511,14 +410,8 @@ function navigation(q) {
   if (!/^(?:please\s+)?(?:open|go to|take me to|jump to|navigate to)\b/i.test(q)) return null;
   for (const d of DESTINATIONS) {
     if (d.k.some(k => q.toLowerCase().includes(k))) {
-      const barred =
-        (['evals', 'desks', 'directory'].includes(d.to) && !inTraining()) ||
-        (['training', 'people'].includes(d.to) && !isAdmin()) ||
-        (d.to === 'interviews' && !inRecruitment()) ||
-        false;
-      if (barred) return { say: 'Your current role does not include that tool.' };
-      const NICE = { evals: 'Eval Tracker', training: 'Training', people: 'People', desks: 'Desk Coverage' };
-      return { go: d.to, say: `Opening ${NICE[d.to] || d.to}.` };
+      if ((['evals','desks','directory'].includes(d.to) && !inTraining()) || (d.to === 'interviews' && !inRecruitment())) return { say: 'Your current role does not include that tool.' };
+      return { go: d.to, say: `Opening ${d.to === 'evals' ? 'Eval Tracker' : d.to}.` };
     }
   }
   return null;
@@ -533,7 +426,7 @@ function navigation(q) {
    Anything longer starts guessing at what "her" meant three questions ago.
 -------------------------------------------------------------------------- */
 
-const memory = { list: [], person: null, pending: null, recent: [], lastQuestion: null };
+const memory = { list: [], person: null, pending: null, recent: [] };
 
 export function forget() { memory.list = []; memory.person = null; memory.pending = null; memory.recent = []; }
 export function resetVanessaData() {
@@ -641,52 +534,7 @@ function expand(words) {
   return [...out];
 }
 
-/* Words that belong to the hub, not to the handbook.
- The handbook is a whole printed booklet about Purdue, so it can find a plausible-sounding sentence for almost anything. Asked "what's the average score" it answered "the average starting salary for graduates is $79,364" -- a real sentence, confidently delivered, and nothing to do with the question. That is the worst thing she does, because it is indistinguishable from a real answer.
- So the handbook is barred outright from questions that use hub vocabulary. It knows about being a tour guide; it knows nothing about who is claimed, who is ungraded or what anybody scored, and it should not be allowed to guess. Those questions go unanswered instead, which is honest and also lets them reach the model tier. */
-const HUB_WORDS = /\b(eval|evals|evaluation|evaluations|evaluator|claim|claimed|unclaimed|candidate|candidates|interview|interviews|interviewer|grade|graded|ungraded|grading|score|scores|scored|scoring|rating|ratings|average|decision|decisions|undecided|roster|priority|priorities|submitted|submit|reviewed|rollover|checked in|checkin|desk|desks|uncovered|slot|slots|assignment|assignments|committee|codirector|training|trainings|makeup|makeups|attendance|absence|absences|hub|tab|dashboard)\b/i;
-
-/**
- * The handbook section that best fits the question, with its score.
- *
- * Split out of handbookAnswer so the model tier can share the retrieval and
- * apply its own, looser bar. The strict quoting path needs a high bar because
- * a bad quote reads as fact; a model that is handed a passage can weigh it and
- * say it is not sure, so it can afford to see more.
- */
-function bestSection(q) {
-  if (HUB_WORDS.test(q)) return null;
-  const base = [...new Set(tokens(q))];
-  if (!base.length) return null;
-  const ws = expand(base);
-
-  const scored = HANDBOOK.map(sec => {
-    const body = new Set(tokens(sec.text));
-    const title = new Set(tokens(sec.title));
-    let score = 0, matched = 0, rarest = 0;
-    for (const w of ws) {
-      const inBody = body.has(w) || [...body].some(b => near(b, w));
-      const inTitle = title.has(w) || [...title].some(t => near(t, w));
-      if (!inBody && !inTitle) continue;
-      matched++;
-      rarest = Math.max(rarest, rarity(w));
-      score += inTitle ? rarity(w) * 2 : rarity(w);
-    }
-    return { sec, score, matched, rarest, ws };
-  }).sort((a, b) => b.score - a.score);
-
-  return scored[0] || null;
-}
-
-/** What the model is allowed to read: a real match, but not a desperate one. */
-export function handbookContext(q) {
-  const best = bestSection(q);
-  if (!best || best.rarest < 1.6 || best.score < 1.6) return null;
-  return { title: best.sec.title, page: best.sec.page, text: best.sec.text };
-}
-
 function handbookAnswer(q) {
-  if (HUB_WORDS.test(q)) return null;      // not its territory — see HUB_WORDS
   const base = [...new Set(tokens(q))];
   // One word is enough if it is a rare one. "What are postcards for" reduces to
   // just "postcard" once the filler is stripped, and that is the whole question.
@@ -769,95 +617,6 @@ function offerFor(q, text) {
   return null;
 }
 
-/* ------------------------------------------------- "what needs me?"
-   The single most common thing anyone actually types, in a dozen phrasings,
-   and until now every one of them got a shrug: "whos free", "anything for
-   me", "idk what to do", "is there anything urgent", "who is behind".
-
-   They are all the same question, and the hub already computes the answer for
-   the Today screen. This routes the plain-English versions to it rather than
-   making people learn the phrase the matcher wants.
--------------------------------------------------------------------------- */
-const NEEDS_ME = new RegExp([
-  'anything (for me|i (need|should)|urgent|pressing|waiting|outstanding|left)',
-  'what (do i|should i|can i|needs|is) (need|do|doing|be doing|left|next|urgent|waiting)',
-  'what needs (me|doing|my attention)',
-  '(whats|what is) (urgent|pressing|next|left|outstanding|on my plate)',
-  'wh(o|at)s free',
-  'i(dk| dont know| do not know) what to do',
-  'where (do i|should i) start',
-  'catch me up', 'whats going on', 'sum(mary|marise|marize)',
-  'am i behind', 'who is behind', 'whos behind', 'anyone behind',
-  'nothing to do', 'give me something'
-].join('|'), 'i');
-
-/** Everything waiting on this person, most pressing first. */
-function needsMe() {
-  const bits = [];
-  const g = state.guides || [];
-  const me = state.me?.id;
-
-  if (inTraining() && g.length) {
-    const mine = g.filter(x => x.evaluatorId === me && x.status === 'claimed');
-    const undated = mine.filter(x => !x.date);
-    if (undated.length) bits.push(`${undated.length} of your claimed eval${undated.length === 1 ? ' has' : 's have'} no tour date yet: ` +
-      undated.slice(0, 5).map(x => x.name).join(', ') + (undated.length > 5 ? '…' : ''));
-    const dated = mine.filter(x => x.date);
-    if (dated.length) bits.push(`${dated.length} eval${dated.length === 1 ? '' : 's'} you have claimed and not submitted: ` +
-      dated.slice(0, 5).map(x => `${x.name} (${x.date})`).join(', ') + (dated.length > 5 ? '…' : ''));
-    if (!mine.length) {
-      const urgent = g.filter(x => x.status === 'open' && x.rank <= 2);
-      if (urgent.length) bits.push(`You have not claimed anybody. ${urgent.length} guides are unclaimed at first or second priority.`);
-    }
-    if (isAdmin()) {
-      const waiting = g.filter(x => x.status === 'submitted');
-      if (waiting.length) bits.push(`${waiting.length} submitted eval${waiting.length === 1 ? '' : 's'} waiting for a codirector to review.`);
-    }
-  }
-
-  if (inRecruitment() && interviewData?.candidates?.length) {
-    const c = interviewData.candidates;
-    const unscored = c.filter(x => x.checkin === 'Yes' && !x.scores?.[myName()]);
-    if (unscored.length) bits.push(`${unscored.length} checked-in candidate${unscored.length === 1 ? ' is' : 's are'} waiting on a score from you.`);
-    const none = c.filter(x => x.raters === 0);
-    if (none.length) bits.push(`${none.length} candidates have no scores from anybody yet.`);
-  }
-
-  if (!bits.length) {
-    return 'Nothing is waiting on you right now. ' +
-      vary('Enjoy it.', 'Genuinely — you are clear.', 'Make the most of it.');
-  }
-  return (bits.length === 1 ? 'One thing:' : `${bits.length} things:`) + '\n' +
-    bits.map(b => `- ${b}`).join('\n');
-}
-
-/* Some questions genuinely cannot be answered as asked -- "how many people",
-   "show me everything". Guessing produces confident nonsense and shrugging
-   wastes the person's turn. Asking which they meant is the honest reply, and
-   it is what a colleague would do. */
-function clarify(q) {
-  const t = String(q).toLowerCase().trim();
-
-  if (/^(how many|how much)( people| are there| do we have)?\??$/.test(t) ||
-      /^how many (people|are there|of them|total)\??$/.test(t)) {
-    const opts = [];
-    if (inTraining())    opts.push('guides needing an eval');
-    if (inRecruitment()) opts.push('interview candidates');
-    opts.push('people on the hub');
-    return `How many of what — ${opts.join(', ')}? Say the word and I will count them.`;
-  }
-
-  if (/^(show me |give me |tell me )?(everything|all of it|all|the lot)\??$/.test(t)) {
-    const opts = [];
-    if (inTraining())    opts.push('"how far along are the evals"');
-    if (inRecruitment()) opts.push('"who is worth discussing"');
-    opts.push('"who is leading tours today"', '"anything for me"');
-    return `More than fits in one answer. Pick a thread and I will pull it:\n` +
-           opts.map(o => `- ${o}`).join('\n');
-  }
-  return null;
-}
-
 export function ask(question) {
   let q = String(question || '').trim();
   if (!state.me) return { text: 'Sign in to use Vanessa.' };
@@ -898,62 +657,18 @@ export function ask(question) {
     q = peeled.rest;              // "hey bro who needs an eval" -> "who needs an eval"
   }
 
-  /* --- "what about tomorrow?" --------------------------------------------
-     A bare time or place with no verb is a follow-up to whatever was just
-     asked. On its own "what about tomorrow" means nothing; after "who is
-     leading tours today" it plainly means the same question, moved a day.
-     So the previous question is reused with the new time swapped in. */
-  const followUp = /^\s*(and\s+|so\s+|ok\s+|but\s+)?(what about|how about|and)\s+(.+?)\s*\??$/i.exec(q);
-  if (followUp && memory.lastQuestion) {
-    const bit = followUp[3].trim();
-    const WHEN = /\b(today|tomorrow|yesterday|tonight|this week|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b/i;
-    const when = WHEN.exec(bit);
-    if (when) {
-      // Swap the time word in the old question, or append it if it had none.
-      q = WHEN.test(memory.lastQuestion)
-        ? memory.lastQuestion.replace(WHEN, when[0])
-        : `${memory.lastQuestion} ${when[0]}`;
-    } else if (inTraining() && findPeople(bit, state.guides || [], x => x.name).length === 1) {
-      /* "what about Saandiya" is a change of subject, not the same question
-         with a name stuck on the end. Without this it appended her to the
-         previous question and cheerfully re-read the makeup list. */
-      q = `tell me about ${findPeople(bit, state.guides, x => x.name)[0].name}`;
-    } else {
-      q = `${memory.lastQuestion} ${bit}`;
-    }
-  }
-
   /* --- "the second one", "what about her" -------------------------------- */
   const ref = resolveReference(q);
   q = ref.q;
 
-  // Worth building on later, once it is clear this is a real question.
-  if (q.split(/\s+/).length >= 2) memory.lastQuestion = q;
-
   // Specific handbook/how-to topics win before operational data matching.
   const earlyTopic = topicMatch(q).topic;
-  /* Was `TOPICS.indexOf(earlyTopic) >= 15`, which decided what counted as a
-     handbook answer by its POSITION in the array. It happened to be right, and
-     would have gone quietly wrong the first time anybody inserted a topic --
-     a nasty thing to leave for whoever inherits this. The topics now say so
-     themselves. */
-  /* A written handbook answer explains a rule. It must not answer a question
-     about people: "what are the rules about absences" is the policy, "who
-     filed an absence" is five names, and both contain the word absence. Asking
-     who or how many is asking about the data, so the handbook stands aside. */
-  const aboutPeople = /^\s*(who|how many|which (guides?|people|candidates?)|list|show me who|anyone|anybody)\b/i.test(q);
-  const handbookTopic = !!earlyTopic?.book && !aboutPeople;
+  const handbookTopic = earlyTopic && TOPICS.indexOf(earlyTopic) >= 15 && TOPICS.indexOf(earlyTopic) < TOPICS.length - 1;
   if (handbookTopic) return { text: earlyTopic.a };
   if (/\bwho\b.*\b(?:still|gotta)\b.*\b(?:look|evaluate|eval)\b/i.test(q)) {
     if (inTraining() && inRecruitment() && !/\bevals?\b/i.test(q)) return { text: 'Do you mean guides needing an eval, or candidates needing interview scores?', stuck: false };
     q = inTraining() ? 'who still needs an eval' : 'who is ungraded';
   }
-  /* "anything for me", "whos free", "idk what to do" -- all one question. */
-  if (NEEDS_ME.test(q)) return { text: needsMe() };
-
-  const vague = clarify(q);
-  if (vague) return { text: vague };
-
   const tasks=taskSummary(q);
   if(tasks)return tasks;
   const tourMatch=matchEvalTours(q);
@@ -973,7 +688,7 @@ export function ask(question) {
   const interviewy = has(q, 'candidate', 'interview', 'undecided', 'decision', 'graded',
                             'grading', 'rater', 'checked in', 'discuss', 'top ', 'highest');
   // Naming exactly one person makes it a question about them, whatever other
-  // words happen to be in it. "When is Jane Boilermaker LEADING a tour" otherwise
+  // words happen to be in it. "When is Noah Cash LEADING a tour" otherwise
   // collided with the word "leader" and came back with the top scorers.
   const namesOne = (state.guides || []).length &&
                    findPeople(q, state.guides, x => x.name).length === 1;
@@ -986,8 +701,7 @@ export function ask(question) {
     if (candidateHits.length) return { text: interviewAnswers(q) };
     if (/^tell me about\s+/i.test(q) && !earlyTopic) return { text: 'I could not identify that person in your loaded hub data. Try their full name.' };
   }
-  const answer = trainingAnswers(q)
-    || deskAnswers(q)
+  const answer = deskAnswers(q)
     || scheduleAnswers(q)
     || (namesOne ? guideAnswers(q) : null)
     || (interviewy ? (interviewAnswers(q) || evalAnswers(q))
@@ -1115,7 +829,6 @@ function greetText() {
 function capabilityText() {
   const can = [];
   if (inTraining())     can.push('• Evals — who still needs one, what you have claimed, how far along we are, who has no tour scheduled');
-  if (inTraining())     can.push('• Training — who owes a makeup, who filed an absence, how a session went');
   if (inRecruitment())  can.push('• Interviews — who is ungraded, who is worth discussing, the top candidates, how many are undecided');
   can.push('• The schedule — who is leading tours today, tomorrow, or this week');
   if (inTraining()) can.push('• Desks — weekly coverage and uncovered slots');
@@ -1139,31 +852,3 @@ function socialReply(item) {
    waiting, rather than announcing herself and leaving them to think of
    something. */
 export const greeting = () => greetText();
-
-/**
- * Everything the in-browser model should see for one question.
- *
- * `facts` is what the deterministic code worked out — the real numbers, which
- * the model is told to use verbatim and never recompute. `book` is the
- * handbook passage, if the question is a handbook question. `notes` are the
- * written answers about how the hub itself works.
- */
-export function llmContext(question) {
-  const q = String(question || '').trim();
-  const deterministic = ask(q);
-
-  const topic = topicMatch(q).topic;
-  return {
-    facts: deterministic.stuck ? null : deterministic.text,
-    book:  handbookContext(q),
-    notes: topic ? topic.a : null,
-    go:    deterministic.go || null,
-    fallback: deterministic.text
-  };
-}
-
-/** The written note about how the hub works that best fits, if any. */
-export function topicNote(question) {
-  const t = topicMatch(String(question || '')).topic;
-  return t ? t.a : null;
-}

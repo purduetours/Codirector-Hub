@@ -1,24 +1,47 @@
 /* ============================================================ hub entry point */
-import { state, onChange } from './core/state.js';
-import { initAuth, showGate, hideGate, loadSession, refreshSession } from './core/auth.js';
+import { initPresence, resetPresence } from './core/presence.js';
+import { state, myName, isAdmin, inTraining, onSessionReset } from './core/state.js';
+import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
 import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
 import { $, $$, initials, toast } from './core/ui.js';
+import { bustSheets } from './core/sheets.js';
+import { registerEvalActions } from './core/vanessa-eval.js';
+import { submitReviewedEval } from './core/vanessa-eval-submit.js';
+import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup } from './core/vanessa-ui.js';
 
-import evals         from './modules/evals.js';
+import evals, { loadRoster } from './modules/evals.js';
+import interviews    from './modules/interviews.js';
 import schedule      from './modules/schedule.js';
 import directory     from './modules/directory.js';
 import desks         from './modules/desks.js';
-import interviews    from './modules/interviews.js';
 import announcements from './modules/announcements.js';
+import today         from './modules/today.js';
+import people        from './modules/people.js';
 
-[announcements, evals, interviews, schedule, directory, desks].forEach(register);
+[today, announcements, evals, interviews, schedule, directory, desks, people].forEach(register);
+
+/* The modules already know how to fetch their own data; Vanessa just asks them
+   to, rather than reaching past them into the database herself. */
+registerWarmers([
+  { needs: 'training', label: 'evaluations', load: () => (state.guides.length ? null : loadRoster()) },
+  { needs: 'recruitment', label: 'interviews', load: () => interviews.prefetch?.() },
+  { needs: 'any', label: 'tour schedule', load: () => schedule.prefetch?.() },
+  { needs: 'training', label: 'desk coverage', load: () => desks.prefetch?.() }
+]);
+
+onSessionReset(() => {
+  list().forEach(m => m.bust?.()); bustSheets(); resetVanessa(); resetPresence();
+  $('#view').replaceChildren();
+});
+
+registerEvalActions({ load: loadRoster, submit: submitReviewedEval });
 
 function paintShell() {
-  $('#who-name').textContent = state.name;
-  $('#who-role').textContent = state.isAdmin ? 'Codirector' : 'Committee';
-  $('#who-avatar').textContent = initials(state.name);
+  $('#who-name').textContent = myName();
+  $('#who-role').textContent = state.role?.name || '';
+  $('#who-avatar').textContent = initials(myName());
   $('#hub-term').textContent = window.CONFIG?.TERM_LABEL || '';
-  $('#btn-rollover').hidden = !state.isAdmin;
+  $('#btn-rollover').hidden = !isAdmin();
   $('#sync').textContent = state.loadedAt
     ? 'Synced ' + state.loadedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : '';
@@ -27,44 +50,30 @@ function paintShell() {
 async function start() {
   paintShell();
   buildNav();
+  initVanessa();
+  initPresence();
   await render();
-  warmUp();
-}
+  paintShell();
 
-/**
- * Quietly loads the other tools once the first screen is up.
- *
- * Every one of these is a 3-8 second round trip to Apps Script, and paying it the
- * moment someone clicks is what makes the hub feel slow. Fetching ahead means the
- * tab is usually ready before they get there.
- *
- * Staggered on purpose: firing them together is exactly the pattern that makes
- * Google start dropping requests.
- */
-async function warmUp() {
-  const pending = visibleModules().filter(m => m.prefetch && m.id !== currentModuleId());
-  for (const m of pending) {
-    try {
-      await m.prefetch();
-      paintNav();                       // a prefetched badge can now be accurate
-    } catch {
-      // a failed warm-up is invisible; the tab will simply load on demand
-    }
-    await new Promise(r => setTimeout(r, 1200));
-  }
-}
-
-function currentModuleId() {
-  return location.hash.replace(/^#\/?/, '').split('?')[0];
+  /* Load what Vanessa needs now, in the background, rather than when somebody
+     clicks her and waits. The screen is already painted at this point, so this
+     costs the user nothing and saves them a pause later. */
+  prewarm();
 }
 
 /* --- shell chrome ------------------------------------------------------ */
 $('#btn-refresh').addEventListener('click', async function () {
   this.classList.add('is-busy');
-  // Modules hold their data for the session, so Refresh has to clear them or it
-  // just re-renders the same cached rows.
-  list().forEach(m => m.bust?.());
-  if (await refreshSession()) { paintShell(); paintNav(); await render(); toast('Up to date.'); }
+  try {
+    list().forEach(m => m.bust?.());
+    bustSheets(); resetWarmup();
+    if (inTraining()) await loadRoster();
+    paintShell(); paintNav(); await render();
+    prewarm();
+    toast('Up to date.');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
   this.classList.remove('is-busy');
 });
 
@@ -79,14 +88,13 @@ $('#burger').addEventListener('click', () => app.classList.toggle('nav-open'));
 $('#nav-scrim').addEventListener('click', () => app.classList.remove('nav-open'));
 $('#nav').addEventListener('click', e => { if (e.target.closest('.navlink')) app.classList.remove('nav-open'); });
 
+/* Sessions last about an hour. Renew quietly in the background so nobody is
+   thrown back to the sign-in screen in the middle of writing an eval. */
+setInterval(() => { refreshIfStale().catch(() => {}); }, 5 * 60 * 1000);
+
 /* --- boot -------------------------------------------------------------- */
 initAuth(start);
 
-if (!state.name) {
-  showGate();
-} else {
-  hideGate();
-  loadSession()
-    .then(start)
-    .catch(err => showGate(err.message));
-}
+restore()
+  .then(ok => { if (ok) { hideGate(); return start(); } showGate(); })
+  .catch(err => showGate(err.message));

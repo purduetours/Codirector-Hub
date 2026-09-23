@@ -1,0 +1,146 @@
+Codirector Hub verification — September 11, 2026
+
+89 app regression checks + 9 email-worker checks + 31 database checks = 129 passing checks.
+31 JavaScript files and the TypeScript entry point passed syntax checks.
+
+The database tests use local PostgreSQL via PGlite 0.5.8, actual schema/submit/eval access policies, a stand-in committee predicate, and Cron/pg_net/Vault test stubs. No live email, Supabase writes, or eval submissions occurred. Hosted scheduling, real inbox delivery, browser layout, microphone, and model download remain unverified.
+
+PASS dress code outranks tour data
+PASS ungraded query answers without navigating
+PASS negative check-in lists missing candidates
+PASS guide lookup does not return handbook passage
+PASS unknown person does not return unrelated handbook passage
+PASS tomorrow schedule keeps date filter
+PASS desk day and location filters
+PASS desk relative tomorrow uses a single weekday
+PASS greeting yes resolves recorded details
+PASS ambiguous guide first name asks which and resolves ordinal
+PASS standard scoring explanation remains available
+PASS explicit navigation still opens the requested tool
+PASS ambiguous casual request asks for clarification
+PASS reset removes candidate cache
+PASS signed-out questions cannot access hub data
+PASS week range includes multiple days
+PASS next week crosses calendar year
+PASS invalid and unsupported dates do not silently mean today
+PASS warm-up retries rejected loaders and deduplicates concurrent requests
+PASS session reset clears counts and notifies cleanup
+PASS UI teardown removes launcher and conversation
+PASS missing model API reports a visible reason
+PASS HTTP context reports HTTPS requirement
+PASS download starts synchronously with consistent English options
+PASS unfinished downloads are not automatically resumed
+PASS ready downloaded model resumes when opted in
+PASS failed startup retains retry and opt-in
+(node:5) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS cancel rejects pending startup and destroys late session
+PASS classifier rejects invented replies and preserves valid names
+PASS no-scheduled-tours question lists guides instead of today
+PASS failed workbook downloads retry instead of caching empty data
+PASS entirely empty desk rows still produce uncovered slots
+PASS old authenticated response is rejected after sign-out
+PASS conversation fills a reviewed draft without submitting
+PASS explicit submit sends exactly the reviewed fields
+PASS good is kept as a comment, not assigned a numeric rating
+PASS one message can fill labeled feedback and retain its date
+PASS several claims require explicit guide selection
+PASS an unknown named person never defaults to the sole claim
+PASS training access and ownership filter the available claims
+PASS unfinished draft cannot submit
+PASS edits invalidate stale submit buttons
+PASS submission failure preserves feedback for retry
+PASS simultaneous submission requests create one write
+PASS cancellation cannot claim to undo a submission already in flight
+PASS draft can be discarded before submission
+PASS UI sign-out teardown removes the eval draft as well
+PASS a read-only question during drafting does not become feedback
+PASS how-to question does not start a submission flow
+PASS blank feedback and invalid ratings/dates are rejected before writing
+PASS submission uses one atomic endpoint with exact feedback
+PASS server ownership rejection does not report success
+PASS missing RPC gives the one-time SQL setup instruction
+PASS premature chat submit is not stored as feedback
+PASS saved draft survives a fresh application context
+PASS partial draft resumes at the next unanswered field
+PASS another signed-in account cannot load the saved draft
+PASS new draft request does not overwrite existing saved feedback
+PASS resume rechecks ownership and retains inaccessible draft
+PASS explicit discard removes persisted draft
+PASS successful submission removes persisted draft
+PASS sign-out clears active flow but retains account draft
+PASS storage failure is reported without breaking drafting
+PASS typing into a field saves before Update draft is pressed
+PASS corrupt saved JSON is ignored without throwing
+PASS eval tour matching filters the date and lists priorities in order
+PASS eval tour matching combines priority and time filters
+PASS my eval tour search includes only my claims
+PASS missing schedule is not reported as no matching tours
+PASS tour search asks for a date instead of guessing
+PASS voice start is explicit and results remain a reviewable transcript
+PASS dictated submission command is only transcript text
+PASS late speech results are ignored after reset
+PASS microphone denial produces an actionable error
+PASS unsupported speech recognition leaves typing available
+PASS two record clicks do not create two microphone sessions
+PASS tour searches during drafting are not stored as comments
+PASS last priority filter does not include higher priority guides
+PASS task summary lists only own pending evals and saved draft
+PASS task summary reports missing loaded data
+PASS task question does not become draft feedback
+PASS vague feedback asks for detail without invention
+PASS clarification is optional and retains original wording
+PASS receipt displays server timestamp and saved feedback
+PASS submission reply includes receipt in conversation
+PASS presence publishes active then idle heartbeat
+PASS hidden tab withdraws its heartbeat
+PASS presence errors clear stale names
+PASS presence ignores responses after signout stop
+
+89 regression checks passed.
+
+PASS unauthorized callers cannot enqueue or send
+PASS GET cannot trigger reminders
+PASS missing secrets fail before network access
+PASS queued recipients use stable idempotency key
+PASS email timeout schedules retry without reporting accepted
+PASS rate limits and server errors retry, invalid requests fail
+PASS failed database acknowledgement reports incomplete processing
+PASS bounded batch limits execution time
+PASS request body cannot override recipients
+
+9 email-worker checks passed.
+
+PASS disabled reminders enqueue nothing
+PASS queues evaluator and owner using verified emails
+PASS repeated queue calls deduplicate
+PASS leased reminder cannot be claimed twice
+PASS wrong lease cannot acknowledge acceptance
+PASS provider acceptance is durable and not resent
+PASS past tours and tours beyond window are excluded
+PASS undated, submitted, skipped and old-term evals are excluded
+PASS inactive or unverified recipients are excluded
+PASS owner evaluating gets one email instead of duplicate CC
+PASS reassignment cancels old job and queues correct evaluator
+PASS disabling reminders prevents queued sends
+PASS expired leases retry same payload and idempotency identity
+PASS retry cutoff precedes provider idempotency expiry
+PASS Purdue timezone handles summer and winter
+PASS members cannot inspect or invoke reminder backend
+PASS presence requires active authenticated membership
+PASS presence derives identity and deduplicates multiple tabs
+PASS every active member can see names only
+PASS one account cannot clear another account presence
+PASS raw presence table is private
+PASS one closing tab does not hide another active tab
+PASS stale heartbeats expire after 90 seconds
+PASS deactivated accounts are excluded and denied access
+PASS atomic submission returns authoritative saved receipt
+PASS identical retry returns same receipt and timestamp
+PASS different feedback cannot overwrite an existing submission
+PASS other account cannot obtain receipt or submit claim
+PASS activation refuses missing owner configuration
+PASS activation refuses missing scheduler secrets
+PASS activation schedules one repeatable job with valid request SQL
+
+31 database checks passed.

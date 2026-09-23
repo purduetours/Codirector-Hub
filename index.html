@@ -17,22 +17,29 @@
   <form class="gate-card" id="gate-form">
     <div class="gate-mark">🎓</div>
     <h1>Codirector Hub</h1>
-    <p class="muted">Sign in with your committee access code.</p>
+    <p class="muted">Sign in with your Purdue email.</p>
 
     <label class="field">
-      <span>Who are you?</span>
-      <input list="committee-list" id="gate-name" autocomplete="name" placeholder="Your name" required>
-      <datalist id="committee-list"></datalist>
+      <span>Purdue email</span>
+      <input type="email" id="gate-email" autocomplete="username" placeholder="you@purdue.edu" required>
     </label>
 
-    <label class="field" id="gate-code-field">
-      <span>Access code</span>
-      <input type="password" id="gate-code" autocomplete="current-password" placeholder="Committee or admin code">
+    <label class="field">
+      <span>Password</span>
+      <input type="password" id="gate-password" autocomplete="current-password" required>
+    </label>
+
+    <label class="field" id="gate-name-wrap" hidden>
+      <span>Full name</span>
+      <input type="text" id="gate-name" autocomplete="name" placeholder="Jane Boilermaker">
     </label>
 
     <p class="form-error" id="gate-error" hidden></p>
     <button class="btn btn-primary btn-block" type="submit" id="gate-submit">Continue</button>
-    <p class="hint">Codirectors: use the admin code to unlock the extra tools.</p>
+    <p class="hint">
+      <span id="gate-swap-text">First time here?</span>
+      <button type="button" class="linkish" id="gate-swap">Make a password</button>
+    </p>
   </form>
 </div>
 

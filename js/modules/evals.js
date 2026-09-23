@@ -3,12 +3,12 @@
    claim -> schedule -> submit, with completed evals visible only to admins
    (filtered server-side) plus the end-of-semester rollover.
 ============================================================================ */
-import { api } from '../core/api.js';
-import { state } from '../core/state.js';
-import { refreshSession } from '../core/auth.js';
+import { select, update, rpc, toGuide } from '../core/db.js';
+import { loadTours } from '../core/sheets.js';
+import { state, myName, isAdmin } from '../core/state.js';
 import { paintNav } from '../core/router.js';
 import {
-  $, $$, esc, sameName, prettyDate, prettyTime, toast, showError,
+  $, $$, esc, sameName, prettyDate, prettyTime, todayISO, toast, showError,
   openModal, closeModal, wireModal, debounce, injectStyle, SEARCH_ICON
 } from '../core/ui.js';
 
@@ -16,11 +16,56 @@ const STATUS_LABEL = { open: 'Open', claimed: 'Claimed', submitted: 'Submitted',
 const TONE = { open: 'tone-open', claimed: 'tone-warn', submitted: 'tone-good', reviewed: 'tone-info', skip: 'tone-mute' };
 const TOUR_PREVIEW = 5;
 
-const local = { tab: 'open', search: '', priority: '', target: null, toursExpanded: false };
+const local = { tab: 'open', search: '', priority: '', month: null, day: null, target: null, toursExpanded: false };
 
-const isMine = g => sameName(g.evaluator, state.name);
+const isMine = g => !!g.evaluatorId && g.evaluatorId === state.me?.id;
 
 injectStyle('evals-css', `
+.ev-cal { border:1px solid var(--line); border-radius:var(--radius); background:var(--bg-elev);
+  padding:12px; margin-bottom:18px; }
+.ev-cal-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.ev-cal-head strong { flex:1; font-size:.95rem; letter-spacing:-.01em; }
+.ev-cal-nav { font:inherit; cursor:pointer; border:1px solid var(--line-strong); background:var(--bg);
+  color:var(--text); border-radius:8px; width:28px; height:28px; line-height:1; flex:none; }
+.ev-cal-nav:hover { border-color:var(--accent); }
+.ev-cal-today { font:inherit; font-size:.74rem; cursor:pointer; padding:5px 10px; border-radius:999px;
+  border:1px solid var(--line-strong); background:var(--bg); color:var(--text-soft); flex:none; }
+.ev-cal-today:hover { border-color:var(--accent); color:var(--text); }
+.ev-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+.ev-cal-dow { text-align:center; font-size:.68rem; font-weight:600; color:var(--text-faint);
+  padding-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
+.ev-cal-day { font:inherit; color:var(--text); cursor:pointer; aspect-ratio:1; min-height:38px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  border:1px solid transparent; border-radius:9px; background:transparent; padding:2px; }
+.ev-cal-day .d { font-size:.82rem; font-variant-numeric:tabular-nums; }
+.ev-cal-day .n { font-size:.62rem; font-weight:700; color:var(--accent); line-height:1; }
+.ev-cal-day.has { background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 22%, transparent); }
+.ev-cal-day.none { color:var(--text-faint); cursor:default; }
+.ev-cal-day.off { visibility:hidden; }
+.ev-cal-day.today { border-color:var(--accent); }
+.ev-cal-day.sel { background:var(--accent); border-color:var(--accent); color:#fff; }
+.ev-cal-day.sel .n { color:#fff; }
+.ev-cal-day:not(.none):not(.sel):hover { border-color:var(--accent); }
+.ev-day { margin-bottom:18px; }
+.ev-day-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+  padding:0 2px 7px; border-bottom:1px solid var(--line); margin-bottom:8px; position:sticky; top:0;
+  background:var(--bg); z-index:1; }
+.ev-day-name { font-size:.95rem; font-weight:650; letter-spacing:-.01em; }
+.ev-day-name .soon { color:var(--accent); }
+.ev-day-count { font-size:.75rem; color:var(--text-faint); flex:none; }
+.ev-slot { display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--bg-elev); margin-bottom:6px; }
+.ev-slot.taken { background:transparent; border-style:dashed; }
+.ev-slot-time { font-size:.78rem; color:var(--text-faint); font-variant-numeric:tabular-nums;
+  min-width:112px; flex:none; }
+.ev-slot-who { flex:1; min-width:0; }
+.ev-slot-who b { display:block; font-size:.88rem; font-weight:600; }
+.ev-slot-who em { display:block; font-style:normal; font-size:.74rem; color:var(--text-faint); margin-top:1px; }
+.ev-slot .btn { flex:none; }
+@media (max-width:520px){
+  .ev-slot { flex-wrap:wrap; gap:6px 10px; }
+  .ev-slot-time { min-width:0; width:100%; }
+}
 .ev-card { display:flex; flex-direction:column; gap:11px; position:relative; overflow:hidden; }
 .ev-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--tone,var(--line-strong)); }
 .ev-card.is-mine { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
@@ -75,7 +120,7 @@ injectStyle('evals-css', `
 /* ---------------------------------------------------------------- markup */
 
 function shell() {
-  const admin = state.isAdmin;
+  const admin = isAdmin();
   const ratings = window.CONFIG?.RATING_OPTIONS || ['1', '2', '3', '4', '5'];
   return `
   <section class="stats" style="margin-bottom:16px">
@@ -92,6 +137,7 @@ function shell() {
 
   <nav class="tabs" id="ev-tabs" style="margin-bottom:14px">
     <button class="tab is-active" data-tab="open">Available</button>
+    <button class="tab" data-tab="days">By day</button>
     <button class="tab" data-tab="mine">My evals <span class="tab-badge" id="ev-badge" hidden>0</span></button>
     <button class="tab" data-tab="claimed">Claimed</button>
     <button class="tab" data-tab="done" ${admin ? '' : 'hidden'}>Done</button>
@@ -228,7 +274,7 @@ function visible() {
 
 function card(g) {
   const mine = isMine(g);
-  const admin = state.isAdmin;
+  const admin = isAdmin();
   const when = [prettyDate(g.date), prettyTime(g.time)].filter(Boolean).join(' · ');
 
   const meta = [];
@@ -270,6 +316,139 @@ const EMPTY = {
   all: 'No guides match that search.'
 };
 
+/* ------------------------------------------------------------- by day ----
+   Asked for by the committee: "which evals can I actually go to on Thursday?"
+
+   Every other tab answers "who needs an eval" and leaves you to open each card
+   to find out when they are leading. This inverts it -- the schedule first,
+   the people second -- because that is the order the question arrives in. You
+   know which afternoon you are free before you know whose tour you want.
+
+   The tours are the same ones already hanging off each guide from the shared
+   workbook, so nothing new is fetched. A guide leading three tours appears on
+   three days, which is correct: each is a separate chance to go and watch.
+-------------------------------------------------------------------------- */
+
+function dayGroups() {
+  const q = local.search.trim().toLowerCase();
+  const keep = g =>
+    (g.status === 'open' || g.status === 'claimed') &&
+    (!local.priority || g.priority === local.priority) &&
+    (!q || `${g.name} ${g.priority} ${g.evaluator}`.toLowerCase().includes(q));
+
+  const byDate = new Map();
+  state.guides.forEach(g => {
+    if (!keep(g)) return;
+    (g.tours || []).forEach(t => {
+      if (!byDate.has(t.date)) byDate.set(t.date, []);
+      byDate.get(t.date).push({ g, t });
+    });
+  });
+
+  return new Map([...byDate.entries()].map(([date, rows]) => [date, {
+    rows: rows.sort((a, b) =>
+      a.t.start.localeCompare(b.t.start) || a.g.name.localeCompare(b.g.name)),
+    free: rows.filter(r => r.g.status === 'open').length
+  }]));
+}
+
+const isoOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/* The month grid. Seven columns, because Saturday tours are real -- they live
+   on their own tab in the workbook and were invisible to the hub until now. */
+function calendar(groups) {
+  const today = todayISO();
+  if (!local.month) local.month = today.slice(0, 7);
+
+  const [y, m] = local.month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const lead = first.getDay();                       // Sunday = 0
+  const days = new Date(y, m, 0).getDate();
+
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push('<span class="ev-cal-day off"></span>');
+
+  for (let d = 1; d <= days; d++) {
+    const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const g = groups.get(iso);
+    const free = g ? g.free : 0;
+    const cls = [
+      'ev-cal-day',
+      g ? 'has' : 'none',
+      iso === today ? 'today' : '',
+      iso === local.day ? 'sel' : ''
+    ].filter(Boolean).join(' ');
+
+    cells.push(g
+      ? `<button class="${cls}" data-day="${iso}" title="${free} to claim">
+           <span class="d">${d}</span>${free ? `<span class="n">${free}</span>` : ''}</button>`
+      : `<span class="${cls}"><span class="d">${d}</span></span>`);
+  }
+
+  const label = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  return `<div class="ev-cal">
+    <div class="ev-cal-head">
+      <strong>${esc(label)}</strong>
+      <button class="ev-cal-today" data-cal="today">Today</button>
+      <button class="ev-cal-nav" data-cal="prev" aria-label="Previous month">‹</button>
+      <button class="ev-cal-nav" data-cal="next" aria-label="Next month">›</button>
+    </div>
+    <div class="ev-cal-grid">
+      ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<span class="ev-cal-dow">${d}</span>`).join('')}
+      ${cells.join('')}
+    </div>
+  </div>`;
+}
+
+function dayView() {
+  const groups = dayGroups();
+  const today = todayISO();
+
+  /* Land on a day that has something on it. Opening the tab on an empty
+     Sunday, with the answer two squares away, is a poor first impression. */
+  if (!local.day || !groups.has(local.day)) {
+    local.day = groups.has(today)
+      ? today
+      : [...groups.keys()].sort().find(d => d >= today) || [...groups.keys()].sort().pop() || today;
+    local.month = local.day.slice(0, 7);
+  }
+
+  const cal = calendar(groups);
+  const picked = groups.get(local.day);
+
+  if (!picked) {
+    return cal + `<div class="ev-day"><div class="ev-day-head">
+      <span class="ev-day-name">${esc(prettyDate(local.day, { weekday: 'long', month: 'long', day: 'numeric' }))}</span>
+      </div><p class="muted" style="padding:6px 2px">No tours that day.</p></div>`;
+  }
+
+  const { rows, free } = picked;
+  const label = local.day === today ? 'Today' : '';
+  const full = prettyDate(local.day, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  return cal + `<section class="ev-day">
+    <div class="ev-day-head">
+      <span class="ev-day-name">${label ? `<span class="soon">${label}</span> · ` : ''}${esc(full)}</span>
+      <span class="ev-day-count">${free ? `${free} to claim` : 'all claimed'}</span>
+    </div>
+    ${rows.map(({ g, t }) => {
+      const mine = isMine(g);
+      const taken = g.status !== 'open';
+      const who = taken
+        ? (mine ? 'Claimed by you' : g.evaluator ? `Claimed by ${g.evaluator}` : 'Already claimed')
+        : (g.priority || '');
+      return `<div class="ev-slot ${taken ? 'taken' : ''}">
+        <span class="ev-slot-time">${esc(t.slot || prettyTime(t.start))}</span>
+        <span class="ev-slot-who"><b>${esc(g.name)}</b><em>${esc(who)}</em></span>
+        ${taken
+          ? ''
+          : `<button class="btn btn-primary btn-sm" data-act="claim" data-id="${esc(g.id)}"
+                data-date="${esc(t.date)}" data-start="${esc(t.start)}">Claim</button>`}
+      </div>`;
+    }).join('')}
+  </section>`;
+}
+
 function paint() {
   const c = state.counts || {};
   const open = c.open || 0, claimed = c.claimed || 0;
@@ -303,8 +482,25 @@ function paint() {
   sel.innerHTML = '<option value="">All priorities</option>' + seen.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
   if (seen.includes(keep)) sel.value = keep;
 
+  const list = $('#ev-list');
+
+  if (local.tab === 'days') {
+    const empty = !dayGroups().size;
+    list.classList.remove('grid');
+    list.innerHTML = empty ? '' : dayView();
+    $('#ev-empty').hidden = !empty;
+    if (empty) {
+      $('#ev-empty-text').textContent = (local.search || local.priority)
+        ? 'No guides match those filters on any upcoming day.'
+        : 'Nobody who still needs an eval has a tour on the schedule yet. Tours are read from the shared workbook, so they appear here as soon as they are put in.';
+    }
+    paintNav();
+    return;
+  }
+
+  list.classList.add('grid');
   const rows = visible();
-  $('#ev-list').innerHTML = rows.map(card).join('');
+  list.innerHTML = rows.map(card).join('');
   $('#ev-empty').hidden = rows.length > 0;
   if (!rows.length) {
     $('#ev-empty-text').textContent = (local.search || local.priority)
@@ -313,27 +509,143 @@ function paint() {
   paintNav();
 }
 
-async function reload() {
-  await refreshSession();
-  paint();
+/**
+ * The whole roster in one query.
+ *
+ * The old app fetched this from Apps Script, which took three to eight seconds
+ * and shed load when several people asked at once. This is a single indexed
+ * read and comes back in well under a second, so there is no prefetching, no
+ * caching and no retry policy to get wrong.
+ */
+export async function loadRoster() {
+  const version = state.sessionVersion;
+  const rows = await select('eval_roster',
+    'select=*&term_id=eq.fall-2026&order=priority_rank.asc,last_name.asc');
+  state.guides = (rows || []).map(toGuide);
+
+  // Counts cover the WHOLE roster so the progress bar stays truthful even for
+  // somebody who cannot see every card.
+  const c = { open: 0, claimed: 0, submitted: 0, reviewed: 0, skip: 0 };
+  state.guides.forEach(g => { c[g.status] = (c[g.status] || 0) + 1; });
+  state.counts = c;
+  state.neededTotal = state.guides.filter(g => g.status !== 'skip').length;
+  state.loadedAt = new Date();
+
+  state.guideToursLoaded = false;
+  await attachTours().then(() => { if (version === state.sessionVersion) state.guideToursLoaded = true; }).catch(() => {});   // never block the roster on the workbook
+  return state.guides;
 }
 
 /**
- * Did that eval actually land?
+ * Hangs each guide's upcoming tours off their card, so claiming somebody offers
+ * their real tour times instead of an empty date box.
  *
- * Apps Script frequently executes a write and then drops the reply on its redirect
- * hop, which surfaces here as an error even though the sheet has the eval. Someone
- * who has just typed several paragraphs of feedback should not be told it failed
- * when it did not — so go and look before saying so.
+ * The schedule writes people as "Alli S." while the roster says "Alli Serrano",
+ * and it is not as simple as first name plus last initial:
+ *
+ *   "Nick Str."       -> Stromberg, so a surname matches on any prefix
+ *   "Cait G."         -> Caitlin Giordano, so first names do too
+ *   "Allison (Allie)" -> the roster carries the nickname in brackets
+ *   "Saandiya KPS"    -> only the first word of the first name is used
+ *
+ * Ported from the matcher the live hub has been using for a year, including its
+ * refusal to guess: two plausible guides means no match at all, because quietly
+ * hanging a tour on the wrong Ben is worse than hanging it on nobody.
  */
-async function evalLanded(id) {
-  try {
-    await refreshSession();
-    const g = state.guides.find(x => x.id === id);
-    return !!g && (g.status === 'submitted' || g.status === 'reviewed');
-  } catch {
-    return false;
+/* Only the two the matcher genuinely cannot work out. Note both point at the
+   spelling on the GUIDE roster, which is not always the spelling on the
+   committee list: Myelei is Whitaker as a guide and Capelle as a committee
+   member. Aliasing her to Capelle sent every one of her tours nowhere.
+
+   "Nick Str." deliberately has no entry -- the surname prefix match resolves it
+   to Stromberg on its own, and an alias here would hijack it to Steingraeber. */
+const ALIASES = {
+  'nick s.':   'Nicholas (Nick) Steingraeber',
+  'myelei c.': 'Myelei Whitaker'
+};
+
+let tourCache = null;
+
+function buildNameIndex(guides) {
+  const index = new Map();
+  const add = (key, g) => {
+    key = String(key || '').trim().toLowerCase();
+    if (!key) return;
+    if (!index.has(key)) index.set(key, []);
+    const arr = index.get(key);
+    if (!arr.includes(g)) arr.push(g);
+  };
+  guides.forEach(g => {
+    const first = String(g.first || '').trim();
+    const paren = /^(.*?)\s*\((.*?)\)\s*$/.exec(first);
+    if (paren) { add(paren[1], g); add(paren[2], g); } else { add(first, g); }
+    add(first.split(/\s+/)[0], g);
+  });
+  return index;
+}
+
+function resolveGuide(label, index, byName) {
+  const clean = String(label || '').replace(/[*+`\u00b4']+/g, '').trim();
+  if (!clean) return null;
+
+  const alias = ALIASES[clean.toLowerCase()];
+  if (alias) return byName.get(alias.toLowerCase()) || null;
+
+  const m = /^(.+?)\s+([A-Za-z]+)\.?$/.exec(clean);
+  if (!m) return null;
+  const first = m[1].trim().toLowerCase();
+  const surname = m[2].trim().toLowerCase();
+  const surnameFits = g => String(g.last || '').trim().toLowerCase().startsWith(surname);
+
+  const exact = index.get(first);
+  if (exact && exact.length) {
+    const hits = exact.filter(surnameFits);
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return null;          // genuinely ambiguous
   }
+
+  // The schedule sometimes shortens a first name the roster spells out. Accept
+  // that only when the surname agrees and exactly one guide fits.
+  const loose = [];
+  for (const [key, group] of index) {
+    if (!key.startsWith(first)) continue;
+    group.forEach(g => { if (surnameFits(g) && !loose.includes(g)) loose.push(g); });
+  }
+  return loose.length === 1 ? loose[0] : null;
+}
+
+async function attachTours() {
+  const version = state.sessionVersion;
+  if (!tourCache) {
+    const loaded = await loadTours();
+    if (version !== state.sessionVersion) return;
+    tourCache = loaded;
+  }
+
+  state.guides.forEach(g => { g.tours = []; });
+  const index = buildNameIndex(state.guides);
+  const byName = new Map(state.guides.map(g => [String(g.name).toLowerCase(), g]));
+
+  const unmatched = new Set();
+  for (const t of tourCache) {
+    const g = resolveGuide(t.guide, index, byName);
+    if (!g) { unmatched.add(t.guide); continue; }
+    g.tours.push({ date: t.date, start: t.start, slot: t.slot });
+  }
+  state.guides.forEach(g => g.tours.sort((a, b) =>
+    a.date === b.date ? a.start.localeCompare(b.start) : a.date.localeCompare(b.date)));
+  state.unmatchedSchedule = [...unmatched];
+  paintNav();
+
+  /* Tours arrive from the workbook a moment after the roster does, and the
+     By day tab is made entirely of tours -- without this it would paint empty
+     and stay that way until something else happened to redraw it. */
+  if (document.getElementById('ev-list')) paint();
+}
+
+async function reload() {
+  await loadRoster();
+  paint();
 }
 
 /* ---------------------------------------------------------------- tours */
@@ -370,13 +682,16 @@ function renderTours() {
     : 'Pick one above, or scroll for more.';
 }
 
-function openClaim(g, editing) {
+/* `preset` is the tour that was actually clicked. Claiming from the By day tab
+   means you already chose the day and the time -- being handed an empty date
+   box and a list of their other tours would be asking the same question twice. */
+function openClaim(g, editing, preset) {
   local.target = g;
   local.toursExpanded = false;
   $('#ev-claim-title').textContent = editing ? 'Edit schedule' : 'Claim eval';
   $('#ev-claim-sub').textContent = `${g.name} · ${g.priority || ''}`;
-  $('#ev-claim-date').value = g.date || '';
-  $('#ev-claim-time').value = g.time || '';
+  $('#ev-claim-date').value = preset?.date || g.date || '';
+  $('#ev-claim-time').value = preset?.start || g.time || '';
   $('#ev-claim-notes').value = g.notes || '';
   const go = $('#ev-claim-submit');
   go.textContent = editing ? 'Save' : 'Claim it';
@@ -402,6 +717,8 @@ function openEval(g) {
 
 export default {
   id: 'evals',
+  bust: () => { tourCache = null; },
+  needs: 'training',
   title: 'Eval Tracker',
   crumb: 'Claim and submit tour guide evaluations',
   icon: '📋',
@@ -409,7 +726,7 @@ export default {
   badge: () => state.guides.filter(g => isMine(g) && g.status === 'claimed').length || null,
 
   async mount(view) {
-    if (!state.guides.length) await refreshSession();
+    if (!state.guides.length) await loadRoster();
     view.innerHTML = shell();
     $$('.modal-root', view).forEach(wireModal);
     paint();
@@ -425,7 +742,7 @@ export default {
     view.querySelector('.stats').addEventListener('click', e => {
       const s = e.target.closest('.stat');
       if (!s) return;
-      if (s.dataset.jump === 'done' && !state.isAdmin) return;
+      if (s.dataset.jump === 'done' && !isAdmin()) return;
       $$('#ev-tabs .tab').find(t => t.dataset.tab === s.dataset.jump)?.click();
     });
 
@@ -433,25 +750,51 @@ export default {
     $('#ev-priority').addEventListener('change', e => { local.priority = e.target.value; paint(); });
 
     $('#ev-list').addEventListener('click', async e => {
+      const day = e.target.closest('[data-day]');
+      if (day) { local.day = day.dataset.day; local.month = local.day.slice(0, 7); return paint(); }
+
+      const nav = e.target.closest('[data-cal]');
+      if (nav) {
+        if (nav.dataset.cal === 'today') {
+          local.day = todayISO(); local.month = local.day.slice(0, 7);
+        } else {
+          const [y, m] = local.month.split('-').map(Number);
+          const d = new Date(y, m - 1 + (nav.dataset.cal === 'next' ? 1 : -1), 1);
+          local.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        }
+        return paint();
+      }
+
       const b = e.target.closest('button[data-act]');
       if (!b) return;
       const g = state.guides.find(x => x.id === b.dataset.id);
       if (!g) return;
 
-      if (b.dataset.act === 'claim')  return openClaim(g, false);
+      if (b.dataset.act === 'claim') {
+        const d = b.dataset.date;
+        return openClaim(g, false, d ? { date: d, start: b.dataset.start } : null);
+      }
       if (b.dataset.act === 'edit')   return openClaim(g, true);
       if (b.dataset.act === 'submit') return openEval(g);
 
       if (b.dataset.act === 'unclaim') {
         if (!confirm(`Release ${g.name} back to the open list?`)) return;
         b.disabled = true;
-        try { toast((await api('unclaim', { id: g.id })).message); await reload(); }
-        catch (err) { toast(err.message, 'err'); b.disabled = false; }
+        try {
+          await update('evals', `id=eq.${g.id}`,
+            { evaluator_id: null, claimed_at: null, tour_date: null, tour_time: null });
+          toast(`Released ${g.name}.`);
+          await reload();
+        } catch (err) { toast(err.message, 'err'); b.disabled = false; }
       }
       if (b.dataset.act === 'review') {
         b.disabled = true;
-        try { toast((await api('markReviewed', { id: g.id, value: g.status !== 'reviewed' })).message); await reload(); }
-        catch (err) { toast(err.message, 'err'); b.disabled = false; }
+        const on = g.status !== 'reviewed';
+        try {
+          await update('evals', `id=eq.${g.id}`, { reviewed_at: on ? new Date().toISOString() : null });
+          toast(`${on ? 'Marked' : 'Unmarked'} ${g.name} as reviewed.`);
+          await reload();
+        } catch (err) { toast(err.message, 'err'); b.disabled = false; }
       }
     });
 
@@ -476,14 +819,26 @@ export default {
       const label = go.textContent;
       go.disabled = true; go.textContent = 'Saving…'; err.hidden = true;
       try {
-        const r = await api(mode, {
-          id: local.target.id,
-          date: $('#ev-claim-date').value,
-          time: $('#ev-claim-time').value,
-          notes: $('#ev-claim-notes').value
-        });
+        const patch = {
+          tour_date: $('#ev-claim-date').value || null,
+          tour_time: $('#ev-claim-time').value || null,
+          scheduling_notes: $('#ev-claim-notes').value || null
+        };
+        // Claiming filters on "nobody has it yet", so if two people press the
+        // button at the same instant one gets the row back and the other gets
+        // none. No lock, no queue -- Postgres settles it.
+        let filter = `id=eq.${local.target.id}`;
+        if (mode === 'claim') {
+          patch.evaluator_id = state.me.id;
+          patch.claimed_at = new Date().toISOString();
+          filter += '&evaluator_id=is.null';
+        }
+        const rows = await update('evals', filter, patch);
+        if (mode === 'claim' && (!rows || !rows.length)) {
+          throw new Error(`${local.target.name} was just claimed by somebody else.`);
+        }
         closeModal($('#ev-modal-claim'));
-        toast(r.message);
+        toast(mode === 'claim' ? `You claimed ${local.target.name}.` : 'Schedule updated.');
         await reload();
       } catch (e2) {
         showError(err, e2.message);
@@ -500,31 +855,27 @@ export default {
       const checked = $('#ev-rating input:checked');
       go.disabled = true; go.textContent = 'Submitting…'; err.hidden = true;
       try {
-        const r = await api('submit', {
-          id: local.target.id,
-          date: $('#ev-eval-date').value,
-          time: $('#ev-eval-time').value,
-          rating: checked ? checked.value : '',
-          wentWell: $('#ev-well').value,
-          improve: $('#ev-improve').value,
-          notes: $('#ev-notes').value
+        if ($('#ev-eval-date').value || $('#ev-eval-time').value) {
+          await update('evals', `id=eq.${local.target.id}`, {
+            tour_date: $('#ev-eval-date').value || null,
+            tour_time: $('#ev-eval-time').value || null
+          });
+        }
+        const r = await rpc('submit_eval', {
+          p_eval_id:   local.target.id,
+          p_rating:    checked ? Number(checked.value) : null,
+          p_went_well: $('#ev-well').value,
+          p_improve:   $('#ev-improve').value,
+          p_notes:     $('#ev-notes').value
         });
         closeModal($('#ev-modal-eval'));
-        toast(r.priorityChanged ? `${r.message} Priority moved to ${r.priorityChanged.split(' -> ')[1]}.` : r.message);
+        toast(r?.message || 'Eval submitted.');
         await reload();
-      } catch (e2) {
-        if (await evalLanded(local.target.id)) {
-          closeModal($('#ev-modal-eval'));
-          toast('That eval did save — the server just lost the reply.');
-          paint();
-        } else {
-          showError(err, e2.message);
-        }
-      }
+      } catch (e2) { showError(err, e2.message); }
       finally { go.disabled = false; go.textContent = 'Submit eval'; }
     });
 
-    if (state.isAdmin) wireRollover();
+    if (isAdmin()) wireRollover();
   },
 
   /** Called by the shell's "End of semester" action. */
@@ -553,13 +904,13 @@ function wireRollover() {
     const err = $('#ev-roll-error');
     this.disabled = true; this.textContent = 'Checking…'; err.hidden = true;
     try {
-      const { summary: s } = await api('rollover', { clearProgress: $('#ev-roll-clear').checked, dryRun: true });
+      const s = await rpc('run_rollover', { p_from_term: 'fall-2026', p_to_term: 'spring-2027', p_dry_run: true });
       const moves = Object.keys(s.moves || {}).sort();
       $('#ev-roll-preview').innerHTML = '<h4>What will happen</h4>' +
         (moves.length
           ? moves.map(k => `<div class="preview-row"><span>${esc(k)}</span><span class="n">${s.moves[k]}</span></div>`).join('')
           : '<div class="preview-row"><span>No priority changes</span><span class="n">0</span></div>') +
-        `<div class="preview-note"><strong>${s.promoted}</strong> moved up · <strong>${s.alreadyTop}</strong> already at First Priority · <strong>${s.untouched}</strong> left alone${s.clearProgress ? ` · <strong>${s.cleared}</strong> records cleared` : ''}</div>`;
+        `<div class="preview-note"><strong>${s.promoted}</strong> moved up · <strong>${s.already_top}</strong> already at First Priority · <strong>${s.untouched}</strong> left alone${false ? ` · <strong>${s.cleared}</strong> records cleared` : ''}</div>`;
       const box = $('#ev-roll-preview');
       box.hidden = false;
       box.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
@@ -578,7 +929,7 @@ function wireRollover() {
     const go = $('#ev-roll-go'), err = $('#ev-roll-error');
     go.disabled = true; go.textContent = 'Running…'; err.hidden = true;
     try {
-      const r = await api('rollover', { clearProgress: clear, dryRun: false });
+      const r = await rpc('run_rollover', { p_from_term: 'fall-2026', p_to_term: 'spring-2027', p_dry_run: false });
       closeModal($('#ev-modal-roll'));
       toast(r.message);
       await reload();

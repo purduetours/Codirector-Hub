@@ -2,8 +2,8 @@
    Notices codirectors post for the committee. Everyone reads; admins write.
    Backed by an `Announcements` tab that setup() creates.
 ============================================================================ */
-import { api } from '../core/api.js';
-import { state } from '../core/state.js';
+import { select, insert, remove } from '../core/db.js';
+import { state, isAdmin } from '../core/state.js';
 import {
   $, esc, prettyDate, toast, showError, injectStyle,
   openModal, closeModal, wireModal
@@ -29,15 +29,20 @@ function card(a) {
         <div class="ann-title">${a.pinned ? '📌 ' : ''}${esc(a.title)}</div>
         <div class="ann-meta">${esc(a.author || 'Committee')} · ${esc(prettyDate(a.date) || a.date || '')}</div>
       </div>
-      ${state.isAdmin ? `<button class="icon-btn" data-del="${esc(a.id)}" title="Delete">✕</button>` : ''}
+      ${isAdmin() ? `<button class="icon-btn" data-del="${esc(a.id)}" title="Delete">✕</button>` : ''}
     </div>
     <div class="ann-body">${esc(a.body)}</div>
   </article>`;
 }
 
 async function prime() {
-  const data = await api('announcements');
-  items = data.items || [];
+  const rows = await select('announcements',
+    'select=id,title,body,pinned,created_at,author:members(full_name)&order=pinned.desc,created_at.desc');
+  items = (rows || []).map(r => ({
+    id: r.id, title: r.title, body: r.body, pinned: r.pinned,
+    date: (r.created_at || '').slice(0, 10),
+    author: r.author?.full_name || 'Committee'
+  }));
 }
 
 async function load() {
@@ -65,7 +70,7 @@ export default {
 
   async mount(view) {
     view.innerHTML = `
-      ${state.isAdmin ? `<div style="margin-bottom:16px"><button class="btn btn-primary" id="ann-new">＋ New announcement</button></div>` : ''}
+      ${isAdmin() ? `<div style="margin-bottom:16px"><button class="btn btn-primary" id="ann-new">＋ New announcement</button></div>` : ''}
       <div id="ann-list"></div>
 
       <div class="modal-root" id="ann-modal" hidden>
@@ -95,7 +100,7 @@ export default {
     if (items === null) await prime();
     paint();
 
-    if (!state.isAdmin) return;
+    if (!isAdmin()) return;
     wireModal($('#ann-modal'));
 
     $('#ann-new').addEventListener('click', () => {
@@ -112,10 +117,11 @@ export default {
       const go = $('#ann-post'), err = $('#ann-error');
       go.disabled = true; go.textContent = 'Posting…'; err.hidden = true;
       try {
-        await api('postAnnouncement', {
-          title: $('#ann-title').value,
-          body: $('#ann-body').value,
-          pinned: $('#ann-pin').checked
+        await insert('announcements', {
+          title:  $('#ann-title').value,
+          body:   $('#ann-body').value,
+          pinned: $('#ann-pin').checked,
+          author_id: state.me.id
         });
         closeModal($('#ann-modal'));
         toast('Announcement posted.');
@@ -128,7 +134,7 @@ export default {
       const b = e.target.closest('[data-del]');
       if (!b || !confirm('Delete this announcement?')) return;
       b.disabled = true;
-      try { await api('deleteAnnouncement', { id: b.dataset.del }); toast('Deleted.'); await load(); }
+      try { await remove('announcements', `id=eq.${b.dataset.del}`); toast('Deleted.'); await load(); }
       catch (e2) { toast(e2.message, 'err'); b.disabled = false; }
     });
   }
