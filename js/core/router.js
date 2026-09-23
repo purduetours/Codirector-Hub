@@ -4,9 +4,16 @@
 ============================================================================ */
 import { $, $$, closeAllModals } from './ui.js';
 import { isAdmin, inTraining, inRecruitment } from './state.js';
+import { iconFor } from './icons.js';
 
 const modules = new Map();
 let current = null;
+
+/* Things outside the router that care which screen is showing — the Vanessa
+   hint under the title, the phone dock. Told after every mount. */
+const routeListeners = new Set();
+export function onRoute(fn) { routeListeners.add(fn); return () => routeListeners.delete(fn); }
+export const currentModule = () => current;
 
 /**
  * @param {object} mod
@@ -99,13 +106,19 @@ async function renderOnce() {
 
   $('#view-title').textContent = mod.title;
   $('#view-crumb').textContent = mod.crumb || '';
+  document.body.dataset.route = mod.id;
+  document.documentElement.style.setProperty('--tool', `var(--t-${mod.id}, var(--gold-deep))`);
+  const ico = $('#view-ico');
+  if (ico) ico.innerHTML = iconFor(mod);
 
   // Anything still open belongs to the outgoing view and is about to be wiped with
   // it. Close it properly first, or its scroll lock outlives it.
   closeAllModals();
 
   const view = $('#view');
+  view.classList.remove('is-entering');
   view.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading…</p></div>';
+  routeListeners.forEach(fn => { try { fn(mod); } catch { /* a listener never blocks a page */ } });
 
   try {
     await mod.mount(view);
@@ -113,6 +126,9 @@ async function renderOnce() {
     view.innerHTML =
       `<div class="empty"><div class="empty-mark">⚠️</div><p>${err.message}</p></div>`;
   }
+  // Replay the entrance once the real content is in, not over the spinner.
+  void view.offsetWidth;
+  view.classList.add('is-entering');
 }
 
 export function paintNav() {
@@ -126,19 +142,25 @@ export function paintNav() {
       slot.textContent = badge ?? '';
       slot.hidden = !badge;
     }
+    if (badge) a.dataset.badge = badge; else delete a.dataset.badge;
   });
+  $$('[data-dock]').forEach(a => a.classList.toggle('is-active', a.dataset.dock === id));
 }
 
 export function buildNav() {
   const rail = $('#nav');
   const sections = {};
-  visibleModules().forEach(m => (sections[m.section] ||= []).push(m));
+  /* Codirector-only tools get their own group, so a codirector can see at a
+     glance which screens are theirs alone — and nobody else ever sees the
+     heading, because visibleModules() has already removed those tools. */
+  visibleModules().forEach(m => (sections[m.needs === 'admin' ? 'Codirectors' : m.section] ||= []).push(m));
 
   rail.innerHTML = Object.entries(sections).map(([name, mods]) => `
     <div class="rail-section">${name}</div>
     ${mods.map(m => `
-      <a class="navlink ${m.soon ? 'is-soon' : ''}" ${m.soon ? '' : `href="#/${m.id}"`} data-mod="${m.id}">
-        <span class="ico">${m.icon}</span>
+      <a class="navlink ${m.soon ? 'is-soon' : ''}" ${m.soon ? '' : `href="#/${m.id}"`} data-mod="${m.id}"
+         style="--tool:var(--t-${m.id}, var(--gold-deep))" title="${m.title}">
+        <span class="ico">${iconFor(m)}</span>
         <span class="lbl">${m.title}</span>
         ${m.soon ? '<span class="pill tone-mute">soon</span>' : '<span class="count" hidden></span>'}
       </a>`).join('')}

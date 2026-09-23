@@ -16,47 +16,65 @@ let voiceDraftRef=null;
 export { shareInterviews };
 export const shareData = (kind, rows) => shareOther(kind, rows);
 injectStyle('vanessa-css', `
-.v-launch { position:fixed; right:18px; bottom:18px; z-index:60;
-  width:52px; height:52px; border-radius:50%; border:0; cursor:pointer;
-  background:var(--accent); color: var(--accent-text); font-size:22px; line-height:1;
-  box-shadow:var(--shadow-lg); transition:transform .15s; }
-.v-launch:hover { transform:scale(1.06); }
-.v-panel { position:fixed; right:18px; bottom:80px; z-index:61; width:min(380px, calc(100vw - 36px));
-  max-height:min(560px, calc(100dvh - 120px)); display:flex; flex-direction:column;
-  background:var(--bg-elev); border:1px solid var(--line); border-radius:16px;
-  box-shadow:var(--shadow-lg); overflow:hidden; }
-.v-head { display:flex; align-items:center; justify-content:space-between;
-  padding:12px 14px; border-bottom:1px solid var(--line); background:var(--bg-sunken); }
-.v-head strong { font-size:.92rem; }
-.v-head .sub { font-size:.7rem; color:var(--text-faint); display:block; }
-.v-log { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
-.v-msg { font-size:.85rem; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere;
-  padding:9px 12px; border-radius:12px; max-width:92%; }
-.v-msg.her { background:var(--bg-sunken); color:var(--text); align-self:flex-start; border-bottom-left-radius:4px; }
-.v-msg.you { background:var(--accent); color: var(--accent-text); align-self:flex-end; border-bottom-right-radius:4px; }
-.v-chips { display:flex; flex-wrap:wrap; gap:6px; padding:0 14px 10px; }
-.v-chip { font:inherit; font-size:.74rem; cursor:pointer; padding:5px 10px; border-radius:999px;
-  border:1px solid var(--line-strong); background:var(--bg-elev); color:var(--text-soft); }
-.v-chip:hover { border-color:var(--accent); color:var(--text); }
-.v-model-on { font-size:.74rem; color:var(--good); align-self:center; }
-.v-model-note { font-size:.72rem; color:var(--text-faint); line-height:1.45; flex-basis:100%; }
+/* The bubble is kept as the single source of open/closed truth, but the
+   hub never shows it: Vanessa is opened from the rail, the top bar, the home
+   screen or the phone dock. A floating chat bubble is exactly the "website
+   with a chatbot in the corner" feel this redesign exists to remove. */
+.v-launch { position:fixed; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+  clip:rect(0 0 0 0); border:0; }
+.v-panel { position:fixed; top:12px; right:12px; bottom:12px; z-index:70;
+  width:min(440px, calc(100vw - 24px)); display:flex; flex-direction:column;
+  background:var(--bg-elev); border:1px solid var(--line); border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-lg); overflow:hidden; animation:v-in var(--dur-3) var(--ease-out); }
+@keyframes v-in { from { opacity:0; transform:translateX(24px) scale(.985); } }
+.v-head { position:relative; display:flex; align-items:center; gap:12px; justify-content:space-between;
+  padding:16px 16px 14px; border-bottom:1px solid var(--line); overflow:hidden;
+  background:radial-gradient(420px 140px at 0% 0%, color-mix(in srgb, var(--gold) 22%, transparent), transparent 70%), var(--bg-elev); }
+.v-head-id { display:flex; align-items:center; gap:12px; min-width:0; }
+.v-head strong { font-size:1.02rem; font-weight:780; letter-spacing:-.02em; display:block; }
+.v-head .sub { font-size:var(--fs-xs); color:var(--text-faint); display:block; font-weight:550; }
+.v-log { flex:1; overflow-y:auto; padding:18px 16px; display:flex; flex-direction:column; gap:12px; min-height:60px;
+  scrollbar-width:thin; }
+.v-msg { font-size:var(--fs-md); line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere;
+  padding:11px 14px; border-radius:18px; max-width:90%; animation:fade-up var(--dur-3) var(--ease-out); }
+.v-msg.her { background:var(--bg-sunken); color:var(--text); align-self:flex-start; border-bottom-left-radius:6px; }
+.v-msg.you { background:var(--accent); color:var(--accent-text); align-self:flex-end; border-bottom-right-radius:6px; }
+.v-chips { display:flex; flex-wrap:wrap; gap:7px; padding:0 16px 12px; }
+.v-chip { font:inherit; font-size:var(--fs-xs); font-weight:650; cursor:pointer; padding:7px 12px; border-radius:999px;
+  border:1px solid var(--line-strong); background:var(--bg-elev); color:var(--text-soft); text-decoration:none;
+  transition:border-color var(--dur-2), color var(--dur-2), background var(--dur-2); }
+.v-chip:hover { border-color:var(--gold); color:var(--text); background:var(--gold-wash); }
+.v-model-on { font-size:var(--fs-xs); color:var(--good); align-self:center; font-weight:650; }
+.v-model-note { font-size:var(--fs-xs); color:var(--text-faint); line-height:1.5; flex-basis:100%; }
 .v-msg.her.streaming::after { content:'▍'; opacity:.5; }
-.v-ask { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line); }
-.v-ask input { flex:1; min-width:0; }
-.v-log { min-height:60px; }
-#v-eval-draft { max-height:280px; flex-shrink:1; overflow-y:auto; border-top:1px solid var(--line); }
-.v-eval-fields { padding:10px 14px; font-size:.8rem; display:grid; gap:8px; }
-.v-eval-fields label { display:grid; gap:4px; }
-.v-eval-fields textarea { width:100%; min-height:50px; resize:vertical; }
+.v-ask { display:flex; gap:8px; padding:12px; border-top:1px solid var(--line); background:var(--bg-elev); }
+.v-ask input { flex:1; min-width:0; border-radius:999px; padding-left:16px; }
+.v-ask .btn { flex:none; }
+#v-eval-draft { max-height:320px; flex-shrink:1; overflow-y:auto; border-top:1px solid var(--line);
+  background:color-mix(in srgb, var(--gold-wash) 50%, var(--bg-elev)); }
+.v-panel details > summary { padding:10px 16px; cursor:pointer; font-size:var(--fs-sm); font-weight:650;
+  color:var(--text-soft); list-style:none; display:flex; align-items:center; gap:8px; }
+.v-panel details > summary::-webkit-details-marker { display:none; }
+.v-panel details > summary::before { content:'›'; font-size:1.1em; transition:transform var(--dur-2); display:inline-block; }
+.v-panel details[open] > summary::before { transform:rotate(90deg); }
+.v-eval-fields { padding:4px 16px 14px; font-size:var(--fs-sm); display:grid; gap:10px; }
+.v-eval-fields label { display:grid; gap:5px; font-weight:600; color:var(--text-soft); font-size:var(--fs-xs); }
+.v-eval-fields textarea { width:100%; min-height:54px; resize:vertical; }
 .v-eval-fields .row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-.v-voice-body { padding:10px 14px;display:grid;gap:8px;font-size:.875rem; }
-#v-voice { max-height:240px;overflow:auto;flex-shrink:1; }
-#v-voice textarea { width:100%;min-height:70px; }
-.v-saved { padding:8px 14px;font-size:.8rem;border-bottom:1px solid var(--line); }
+.v-voice-body { padding:4px 16px 14px; display:grid; gap:9px; font-size:var(--fs-sm); color:var(--text-soft); }
+#v-voice { max-height:260px; overflow:auto; flex-shrink:1; border-top:1px solid var(--line); }
+#v-voice textarea { width:100%; min-height:70px; }
+.v-saved { padding:10px 16px; font-size:var(--fs-sm); border-bottom:1px solid var(--line);
+  background:var(--gold-wash); color:var(--text); }
 .v-eval-actions { display:flex; gap:6px; flex-wrap:wrap; }
 .v-panel > details { max-height:45%; overflow-y:auto; flex-shrink:0; }
-.v-panel > .v-chips { max-height:100px; overflow-y:auto; flex-shrink:0; }
-@media (max-width:520px){ .v-panel { right:10px; left:10px; width:auto; bottom:76px; } }
+.v-panel > details:not(#v-eval-draft):not(#v-voice) { border-top:1px solid var(--line); }
+.v-panel > .v-chips { max-height:120px; overflow-y:auto; flex-shrink:0; }
+@media (max-width:860px){
+  .v-panel { inset:0; width:auto; border-radius:0; border:0; padding-top:env(safe-area-inset-top);
+    padding-bottom:env(safe-area-inset-bottom); animation:v-up var(--dur-3) var(--ease-out); }
+  @keyframes v-up { from { opacity:0; transform:translateY(30px); } }
+}
 `);
 
 
@@ -323,6 +341,7 @@ function send(question) {
   sendQueue = sendQueue.then(async () => {
     if (ticket !== epoch || user !== appState.me?.id) return;
     const note = say('her', 'Checking…');
+    $('#v-orb')?.classList.add('is-thinking');
     try {
       const failures = await warmUp();
       if (ticket !== epoch || user !== appState.me?.id) return;
@@ -370,15 +389,43 @@ function send(question) {
     } catch (err) {
       note?.remove();
       if (ticket === epoch) say('her', 'I could not finish that question. Please try again.');
-    } finally { note?.remove(); }
+    } finally { note?.remove(); $('#v-orb')?.classList.remove('is-thinking'); }
   });
 }
+
+/* What she offers to help with, by committee. The same list feeds her panel
+   and the home screen, so the two can never disagree about what she can do
+   for this person. */
+export function vanessaSuggestions() {
+  return [
+    ...(inTraining() ? ['Help me write an eval', 'What do I need to do?'] : []),
+    ...(inRecruitment() ? ['Who is worth discussing?', 'Who has not checked in?'] : []),
+    ...(inTraining() ? ['Who needs an eval and has a tour tomorrow?'] : ['Who is leading tours tomorrow?']),
+    'What should I wear on tour?'
+  ];
+}
+
+/* Open her from anywhere — the rail, the top bar, the home screen, a hint
+   under a page title. With a question, she is asked it straight away; with
+   none, she opens and greets as she always has. Routed through the same
+   launcher click, so there is still exactly one way she opens. */
+export function openVanessa(question) {
+  const launch = $('#v-launch');
+  if (!launch || !appState.me) return;
+  if (!open) launch.click();
+  if (question && question.trim()) send(question);
+  else setTimeout(() => $('#v-input')?.focus(), 60);
+}
+export function toggleVanessa() { $('#v-launch')?.click(); }
+const vanessaListeners = new Set();
+export function onVanessaToggle(fn) { vanessaListeners.add(fn); return () => vanessaListeners.delete(fn); }
+const tellToggle = () => vanessaListeners.forEach(fn => { try { fn(open); } catch {} });
 
 export function resetVanessa() {
   resetLlmHistory();
   resetActions();
   resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
-  $('#v-launch')?.remove(); $('#v-panel')?.remove();
+  $('#v-launch')?.remove(); $('#v-panel')?.remove(); tellToggle();
 }
 export function initVanessa() {
   if ($('#v-launch') || !appState.me) return;
@@ -388,12 +435,10 @@ export function initVanessa() {
   document.body.appendChild(launch);
   const panel = document.createElement('div');
   panel.id = 'v-panel'; panel.className = 'v-panel'; panel.hidden = true;
-  const suggestions = [
-    ...(inTraining() ? ['Help me write an eval', 'What do I need to do?'] : []),
-    ...(inRecruitment() ? ['Who is worth discussing?', 'Who has not checked in?'] : []),
-    ...(inTraining()?['Who needs an eval and has a tour tomorrow?']:['Who is leading tours tomorrow?']), 'What should I wear on tour?'
-  ];
-  panel.innerHTML = `<div class="v-head"><span><strong>Vanessa</strong><span class="sub">Answers from your loaded hub data</span></span>
+  const suggestions = vanessaSuggestions();
+  panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Vanessa');
+  panel.innerHTML = `<div class="v-head"><span class="v-head-id"><span class="orb orb-sm" id="v-orb"><i></i></span>
+      <span><strong>Vanessa</strong><span class="sub">Answers from your loaded hub data</span></span></span>
     <button type="button" class="icon-btn" id="v-close" aria-label="Close">✕</button></div>
     <div id="v-saved" class="v-saved" hidden></div>
     <div class="v-log" id="v-log" role="log" aria-live="polite"></div>
@@ -418,11 +463,11 @@ export function initVanessa() {
   resumeLlmIfWanted().catch(() => {});
   if(!voiceSupported())$('#v-voice-status').textContent='Dictation is not supported in this browser. You can still type.';
   checkAvailability().then(() => { if (ticket === epoch && appState.me) resumeIfEnabled(); });
-  const close = () => { readEvalEdits(); resetVoice(); voiceDraftRef=null; open = false; panel.hidden = true; launch.setAttribute('aria-expanded','false'); };
+  const close = () => { readEvalEdits(); resetVoice(); voiceDraftRef=null; open = false; panel.hidden = true; launch.setAttribute('aria-expanded','false'); tellToggle(); };
   launch.addEventListener('click', async () => {
     if (!appState.me) return;
     if(open){close();return;}
-    open = !open; panel.hidden = !open; launch.setAttribute('aria-expanded', String(open));
+    open = !open; panel.hidden = !open; launch.setAttribute('aria-expanded', String(open)); tellToggle();
     if (open) {
       $('#v-input')?.focus();
       await warmUp();

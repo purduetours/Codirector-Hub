@@ -65,7 +65,7 @@ injectStyle('gr-css', `
 .gr-scale label em { font-style:normal; font-size:.6rem; color:var(--text-faint); line-height:1.2; }
 .gr-scale label:hover { border-color:var(--accent); }
 .gr-scale input:checked + label { background:var(--accent); border-color:var(--accent); }
-.gr-scale input:checked + label b, .gr-scale input:checked + label em { color:#fff; }
+.gr-scale input:checked + label b, .gr-scale input:checked + label em { color:var(--accent-text); }
 .gr-tbl { width:100%; border-collapse:collapse; font-size:.82rem; }
 .gr-tbl th, .gr-tbl td { padding:9px 11px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
 .gr-tbl th { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint);
@@ -115,7 +115,7 @@ injectStyle('gr-css', `
 .dec-chip.on.y { background:var(--good); }
 .dec-chip.on.m { background:var(--warn); }
 .dec-chip.on.n { background:var(--danger); }
-.dec-chip.on.a { background:var(--accent); }
+.dec-chip.on.a { background:var(--accent); color:var(--accent-text); }
 
 .dec-row { display:flex; align-items:center; gap:14px; padding:12px 15px;
   border-bottom:1px solid var(--line); }

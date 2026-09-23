@@ -13,7 +13,7 @@ const local = { search: '', from: '', days: 14 };
 injectStyle('sch-css', `
 .sch-day { margin-bottom: 18px; }
 .sch-date { font-size:.82rem; font-weight:700; color:var(--text-soft); margin-bottom:7px;
-  position:sticky; top:0; background:var(--bg); padding:4px 0; z-index:1; }
+  position:sticky; top:var(--topbar); background:var(--bg); padding:4px 0; z-index:1; }
 .sch-date .rel { font-weight:500; color:var(--text-faint); margin-left:7px; }
 .sch-slot { display:flex; gap:12px; align-items:flex-start; padding:10px 13px;
   border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--bg-elev);

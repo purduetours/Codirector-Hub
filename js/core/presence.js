@@ -17,8 +17,9 @@ export function createPresence({call,draw,visible,now=Date.now,schedule=setInter
   stop(){stopped=true;if(timer!==null)unschedule(timer);timer=null;draw({users:[],error:false});}
  };
 }
-let cleanup=null;
-export function resetPresence(){cleanup?.();cleanup=null;}
+let cleanup=null,lastPresence=null;
+export const presenceSnapshot=()=>lastPresence;
+export function resetPresence(){cleanup?.();cleanup=null;lastPresence=null;}
 export function initPresence(){
  resetPresence();if(!state.me)return;
  const host=document.querySelector('.topbar-actions');if(!host)return;
@@ -36,7 +37,9 @@ export function initPresence(){
   },
   draw:({users,error})=>{
    if(!current())return;
-   summary.textContent=error?'Active now · unavailable':`Active now · ${users.length}`;body.replaceChildren();
+   // The home screen shows the same list; it listens rather than polling twice.
+   lastPresence={users,error};document.dispatchEvent(new CustomEvent('hub:presence',{detail:lastPresence}));
+   summary.replaceChildren(Object.assign(document.createElement('span'),{className:'au-lbl',textContent:'Active now · '}),error?'unavailable':String(users.length));summary.setAttribute('aria-label',error?'Active now: unavailable':`Active now: ${users.length}`);body.replaceChildren();
    const note=document.createElement('p');note.textContent=error?'Active members could not load. Retrying automatically.':'Members with a visible tab and activity in the last five minutes. Updates about every 30 seconds.';body.append(note);
    if(!error){const list=document.createElement('ul');for(const user of users){const row=document.createElement('li');row.textContent=user.full_name+(user.member_id===owner?' (you)':'');list.append(row);}body.append(list);if(!users.length){const empty=document.createElement('p');empty.textContent='No active members right now.';body.append(empty);}}
   }

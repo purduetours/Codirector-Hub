@@ -2,12 +2,14 @@
 import { initPresence, resetPresence } from './core/presence.js';
 import { state, myName, isAdmin, inTraining, onSessionReset } from './core/state.js';
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
-import { register, buildNav, render, paintNav, go, list, visibleModules } from './core/router.js';
-import { $, $$, initials, toast } from './core/ui.js';
+import { register, buildNav, render, paintNav, go, list, visibleModules, onRoute } from './core/router.js';
+import { $, $$, esc, initials, toast } from './core/ui.js';
+import { ICONS } from './core/icons.js';
+import { hintsFor } from './core/vanessa-hints.js';
 import { bustSheets, loadAbsences, formStamp } from './core/sheets.js';
 import { registerEvalActions } from './core/vanessa-eval.js';
 import { submitReviewedEval } from './core/vanessa-eval-submit.js';
-import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup } from './core/vanessa-ui.js';
+import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup, openVanessa, toggleVanessa, onVanessaToggle } from './core/vanessa-ui.js';
 import { initQuickSearch } from './core/quicksearch.js';
 
 import evals, { loadRoster } from './modules/evals.js';
@@ -160,7 +162,7 @@ function paintTheme() {
   const dark = isDark();
   const btn = $('#btn-theme');
   if (!btn) return;
-  $('#theme-ico').textContent = dark ? '☀️' : '🌙';
+  $('#theme-ico').innerHTML = dark ? ICONS.sun : ICONS.moon;
   $('#theme-lbl').textContent = dark ? 'Light mode' : 'Dark mode';
   btn.setAttribute('aria-pressed', String(dark));
   btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
@@ -181,7 +183,40 @@ window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change',
 
 paintTheme();
 
+const app = $('#app');
+
 /* --- shell chrome ------------------------------------------------------ */
+$('#burger').innerHTML = ICONS.menu;
+$('#refresh-ico').innerHTML = ICONS.refresh;
+$('#rollover-ico').innerHTML = ICONS.rollover;
+$('#who-out').innerHTML = ICONS.signout;
+$('#dock-home-ico').innerHTML = ICONS.today;
+$('#dock-menu-ico').innerHTML = ICONS.menu;
+
+/* Vanessa is opened from the rail, the top bar and the phone dock. All three
+   go through the one launcher, so her open/closed state has one owner. */
+['#rail-ask', '#v-top', '#dock-vanessa'].forEach(sel =>
+  $(sel).addEventListener('click', () => { app.classList.remove('nav-open'); toggleVanessa(); }));
+onVanessaToggle(isOpen => $('#v-top').setAttribute('aria-expanded', String(isOpen)));
+
+/* Her one contextual question for the page you are on. */
+onRoute(mod => {
+  const box = $('#v-hint');
+  const qs = hintsFor(mod.id);
+  box.hidden = !qs.length;
+  box.innerHTML = qs.length
+    ? `<span class="v-hint-lead"><span class="orb orb-xs"><i></i></span><span>Ask Vanessa</span></span>` +
+      qs.map(q => `<button type="button" class="v-hint-chip" data-ask="${esc(q)}">${esc(q)}</button>`).join('')
+    : '';
+});
+$('#v-hint').addEventListener('click', e => {
+  const chip = e.target.closest('[data-ask]');
+  if (chip) openVanessa(chip.dataset.ask);
+});
+
+/* The home screen asks her things too; it raises this rather than importing
+   her panel, so the module stays a plain page. */
+document.addEventListener('hub:ask', e => openVanessa(e.detail?.question || ''));
 $('#btn-refresh').addEventListener('click', async function () {
   this.classList.add('is-busy');
   try {
@@ -203,8 +238,8 @@ $('#btn-rollover').addEventListener('click', async () => {
 });
 
 // mobile nav
-const app = $('#app');
 $('#burger').addEventListener('click', () => app.classList.toggle('nav-open'));
+$('#dock-menu').addEventListener('click', () => app.classList.toggle('nav-open'));
 $('#nav-scrim').addEventListener('click', () => app.classList.remove('nav-open'));
 $('#nav').addEventListener('click', e => { if (e.target.closest('.navlink')) app.classList.remove('nav-open'); });
 

@@ -503,7 +503,8 @@ const DESTINATIONS = [
   { to: 'directory',     k: ['directory', 'guide list', 'guides'] },
   { to: 'announcements', k: ['announcement', 'announcements', 'notices'] },
   { to: 'training',      k: ['training', 'makeup', 'makeups', 'attendance', 'absence form'] },
-  { to: 'people',        k: ['people', 'members', 'accounts', 'who can sign in'] }
+  { to: 'people',        k: ['people', 'members', 'accounts', 'who can sign in'] },
+  { to: 'today',         k: ['home', 'today', 'start', 'dashboard'] }
 ];
 
 function navigation(q) {
@@ -517,7 +518,7 @@ function navigation(q) {
         (d.to === 'interviews' && !inRecruitment()) ||
         false;
       if (barred) return { say: 'Your current role does not include that tool.' };
-      const NICE = { evals: 'Eval Tracker', training: 'Training', people: 'People', desks: 'Desk Coverage' };
+      const NICE = { evals: 'Eval Tracker', training: 'Training', people: 'People', desks: 'Desk Coverage', today: 'Home' };
       return { go: d.to, say: `Opening ${NICE[d.to] || d.to}.` };
     }
   }

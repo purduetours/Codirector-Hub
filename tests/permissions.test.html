@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hub permission tests</title>
+<!--
+  Checks that each role sees exactly the tools it should — in the sidebar, on
+  Vanessa's home launcher and in her page hints — using the real modules and
+  the real router. Nothing here talks to the database: it sets the role in
+  memory and asks the router what it would show.
+
+  Run it by serving the project folder and opening this page, e.g.
+    python3 -m http.server 8000   then   http://localhost:8000/tests/permissions.test.html
+-->
+<style>
+  body { font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 32px; color: #17150f; background: #f5f2eb; }
+  h1 { font-size: 20px; } .ok { color: #2e7d4f; } .bad { color: #a3222a; font-weight: 700; }
+  li { margin: 3px 0; } #sum { font-weight: 700; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Hub permission tests</h1>
+<ul id="out"></ul>
+<p id="sum"></p>
+<script>window.CONFIG = { SUPABASE_URL: 'https://example.invalid', SUPABASE_KEY: 'test', TERM_LABEL: 'Fall 2026' };</script>
+<script type="module">
+  import { state } from '../js/core/state.js';
+  import { register, visibleModules } from '../js/core/router.js';
+  import { hintsFor } from '../js/core/vanessa-hints.js';
+  import { vanessaSuggestions } from '../js/core/vanessa-ui.js';
+
+  import evals from '../js/modules/evals.js';
+  import interviews from '../js/modules/interviews.js';
+  import schedule from '../js/modules/schedule.js';
+  import directory from '../js/modules/directory.js';
+  import desks from '../js/modules/desks.js';
+  import announcements from '../js/modules/announcements.js';
+  import today from '../js/modules/today.js';
+  import people from '../js/modules/people.js';
+  import training from '../js/modules/training.js';
+  import health from '../js/modules/health.js';
+
+  [today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
+
+  const ROLES = {
+    guide:     { name: 'Tour Guide',            is_admin: false, in_training: false, in_recruitment: false },
+    training:  { name: 'Training Committee',    is_admin: false, in_training: true,  in_recruitment: false },
+    recruit:   { name: 'Recruitment Committee', is_admin: false, in_training: false, in_recruitment: true  },
+    developer: { name: 'Developer',             is_admin: false, in_training: true,  in_recruitment: true  },
+    admin:     { name: 'Codirector',            is_admin: true,  in_training: true,  in_recruitment: true  }
+  };
+  const EXPECT = {
+    guide:     ['today', 'announcements', 'schedule'],
+    training:  ['today', 'announcements', 'evals', 'schedule', 'directory', 'desks'],
+    recruit:   ['today', 'announcements', 'interviews', 'schedule'],
+    developer: ['today', 'announcements', 'evals', 'interviews', 'schedule', 'directory', 'desks'],
+    admin:     ['today', 'announcements', 'evals', 'interviews', 'training', 'schedule', 'directory', 'desks', 'people', 'health']
+  };
+  const ADMIN_ONLY = ['training', 'people', 'health'];
+
+  let pass = 0, fail = 0;
+  const out = document.getElementById('out');
+  const check = (label, ok, detail = '') => {
+    ok ? pass++ : fail++;
+    out.insertAdjacentHTML('beforeend',
+      `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}</li>`);
+  };
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+  for (const [key, role] of Object.entries(ROLES)) {
+    state.role = role;
+    state.me = { id: 'test', full_name: 'Test Person', role: role.name };
+
+    const ids = visibleModules().map(m => m.id);
+    check(`${key}: sidebar and home launcher show exactly the right tools`, same(ids, EXPECT[key]), ids.join(', '));
+
+    if (!role.is_admin) {
+      check(`${key}: no codirector-only tool is reachable`, !ids.some(id => ADMIN_ONLY.includes(id)));
+    }
+
+    // A hint only renders on its own page, and only for a tool the role can open.
+    const leaked = ['evals', 'interviews', 'training', 'desks', 'directory']
+      .filter(id => !ids.includes(id) && hintsFor(id).length);
+    check(`${key}: Vanessa offers no hint for a tool it cannot open`, !leaked.length, leaked.join(', '));
+
+    const chips = vanessaSuggestions();
+    const offTopic = chips.filter(q =>
+      (/eval/i.test(q) && !role.in_training) ||
+      (/discussing|checked in/i.test(q) && !role.in_recruitment));
+    check(`${key}: Vanessa's suggestions match the role`, !offTopic.length, offTopic.join(' | '));
+  }
+
+  document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;
+  document.getElementById('sum').className = fail ? 'bad' : 'ok';
+  document.title = fail ? `✗ ${fail} failed` : `✓ ${pass} passed`;
+</script>
+</body>
+</html>

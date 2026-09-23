@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f5f2eb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f0e0c" media="(prefers-color-scheme: dark)">
 <title>Codirector Hub</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><radialGradient id='g' cx='38%25' cy='32%25' r='75%25'><stop offset='0' stop-color='%23fff6d6'/><stop offset='.45' stop-color='%23daaa00'/><stop offset='1' stop-color='%238e6f3e'/></radialGradient></defs><circle cx='32' cy='32' r='26' fill='url(%23g)'/></svg>">
 <script>
 /* Runs before the stylesheets so a dark-mode user never gets a white flash on
    load. Deliberately inline and tiny: anything imported would arrive too late.
@@ -14,18 +16,28 @@ window.__hubLoadedAt = Date.now();
 try { var t = localStorage.getItem('hub2.theme');
       if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:wght@400..800&family=JetBrains+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/shell.css">
 <link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/home.css">
 </head>
 <body>
 
 <!-- ===================================================== sign-in gate -->
 <div id="gate" class="gate" hidden>
+  <div class="gate-stage" aria-hidden="true">
+    <div class="orb orb-xl"><i></i></div>
+  </div>
   <form class="gate-card" id="gate-form">
-    <div class="gate-mark">🎓</div>
-    <h1>Codirector Hub</h1>
-    <p class="muted">Sign in with your Purdue email.</p>
+    <div class="gate-brand">
+      <span class="orb orb-sm"><i></i></span>
+      <span>Codirector Hub <em>Purdue Admissions · Tour Guides</em></span>
+    </div>
+    <h1 class="gate-title">Welcome back.</h1>
+    <p class="muted gate-lede">Sign in with your Purdue email and Vanessa will have your day ready.</p>
     <div class="gate-news" id="gate-news" hidden></div>
 
     <label class="field">
@@ -45,7 +57,7 @@ try { var t = localStorage.getItem('hub2.theme');
 
     <p class="form-error" id="gate-error" hidden></p>
     <button class="btn btn-primary btn-block" type="submit" id="gate-submit">Continue</button>
-    <p class="hint">
+    <p class="hint gate-swap">
       <span id="gate-swap-text">First time here?</span>
       <button type="button" class="linkish" id="gate-swap">Make a password</button>
     </p>
@@ -56,52 +68,70 @@ try { var t = localStorage.getItem('hub2.theme');
 <div class="app" id="app" hidden>
   <div class="nav-scrim" id="nav-scrim"></div>
 
-  <aside class="rail">
-    <div class="rail-brand">
-      <span class="rail-mark">🎓</span>
-      <div>
+  <aside class="rail" aria-label="Main navigation">
+    <a class="rail-brand" href="#/today" title="Home">
+      <span class="orb orb-sm"><i></i></span>
+      <span class="rail-brand-text">
         <h1>Codirector Hub</h1>
-        <div class="sub" id="hub-term"></div>
-      </div>
-    </div>
+        <span class="sub" id="hub-term"></span>
+      </span>
+    </a>
 
-    <div id="nav"></div>
+    <button class="rail-ask" id="rail-ask" type="button" title="Ask Vanessa">
+      <span class="rail-ask-orb"><span class="orb orb-xs"><i></i></span></span>
+      <span class="lbl">Ask Vanessa</span>
+    </button>
+
+    <nav id="nav"></nav>
 
     <div class="rail-foot">
       <button class="navlink" id="btn-rollover" hidden>
-        <span class="ico">🔄</span><span class="lbl">End of semester</span>
+        <span class="ico" id="rollover-ico"></span><span class="lbl">End of semester</span>
       </button>
-      <div class="rail-ver" id="rail-ver" title="When this hub was last uploaded"></div>
       <button class="navlink" id="btn-theme" type="button" aria-pressed="false">
-        <span class="ico" id="theme-ico">🌙</span><span class="lbl" id="theme-lbl">Dark mode</span>
+        <span class="ico" id="theme-ico"></span><span class="lbl" id="theme-lbl">Dark mode</span>
       </button>
-      <button class="who" data-signout title="Switch user">
+      <button class="who" data-signout title="Sign out">
         <span class="avatar" id="who-avatar">?</span>
-        <span style="min-width:0">
+        <span class="who-text">
           <span class="who-name" id="who-name">—</span>
           <span class="who-role" id="who-role"></span>
         </span>
+        <span class="who-out" id="who-out"></span>
       </button>
+      <div class="rail-ver" id="rail-ver" title="When this hub was last uploaded"></div>
     </div>
   </aside>
 
   <div class="main">
     <header class="topbar">
-      <div style="display:flex;align-items:center;gap:10px;min-width:0">
-        <button class="icon-btn burger" id="burger" aria-label="Menu">☰</button>
-        <div style="min-width:0">
+      <div class="topbar-lead">
+        <button class="icon-btn burger" id="burger" aria-label="Menu"></button>
+        <span class="view-ico" id="view-ico" aria-hidden="true"></span>
+        <div class="topbar-title">
           <h2 id="view-title">—</h2>
           <div class="crumb" id="view-crumb"></div>
         </div>
       </div>
       <div class="topbar-actions">
-        <span class="crumb" id="sync"></span>
-        <button class="btn btn-ghost btn-sm" id="btn-refresh"><span class="spin">⟳</span> Refresh</button>
+        <span class="crumb sync" id="sync"></span>
+        <button class="icon-btn" id="btn-refresh" aria-label="Refresh" title="Refresh everything"><span class="spin" id="refresh-ico"></span></button>
+        <button class="v-top" id="v-top" type="button" aria-label="Ask Vanessa">
+          <span class="orb orb-xs"><i></i></span><span class="v-top-lbl">Vanessa</span>
+        </button>
       </div>
     </header>
 
+    <div class="v-hint" id="v-hint" hidden></div>
     <main class="view" id="view"></main>
   </div>
+
+  <!-- phone dock: the four things you always need within a thumb's reach -->
+  <nav class="dock" aria-label="Quick navigation">
+    <a class="dock-btn" href="#/today" data-dock="today"><span class="ico" id="dock-home-ico"></span><span>Home</span></a>
+    <button class="dock-btn dock-v" type="button" id="dock-vanessa"><span class="orb orb-sm"><i></i></span><span>Vanessa</span></button>
+    <button class="dock-btn" type="button" id="dock-menu"><span class="ico" id="dock-menu-ico"></span><span>Tools</span></button>
+  </nav>
 </div>
 
 <div id="toasts" class="toasts" aria-live="polite"></div>

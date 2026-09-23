@@ -18,19 +18,35 @@ import { interviewData } from '../modules/interviews.js';
 
 injectStyle('qs-css', `
 .qs-wrap { position:relative; flex:none; }
-.qs-input { font:inherit; font-size:.82rem; padding:6px 10px; width:190px;
-  border:1px solid var(--line-strong); border-radius:999px; background:var(--bg-elev); color:var(--text); }
-.qs-input:focus { outline:2px solid var(--accent); outline-offset:-1px; width:250px; }
-.qs-pop { position:absolute; top:calc(100% + 6px); right:0; z-index:70; width:290px;
+.qs-wrap::before { content:""; position:absolute; left:13px; top:50%; width:15px; height:15px; transform:translateY(-50%);
+  pointer-events:none; opacity:.55;
+  background:currentColor; color:var(--text-faint);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='m20 20-4.2-4.2'/%3E%3C/svg%3E") center/contain no-repeat;
+          mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='m20 20-4.2-4.2'/%3E%3C/svg%3E") center/contain no-repeat; }
+.qs-input { font:inherit; font-size:var(--fs-sm) !important; padding:8px 30px 8px 35px !important; width:210px !important;
+  min-height:36px; border:1px solid var(--line) !important; border-radius:999px !important;
+  background:var(--bg-elev) !important; color:var(--text); box-shadow:none !important;
+  transition:width var(--dur-3) var(--ease), border-color var(--dur-2) !important; }
+.qs-input:focus { outline:none; border-color:var(--gold-deep) !important; box-shadow:var(--ring) !important; width:280px !important; }
+.qs-wrap::after { content:"/"; position:absolute; right:11px; top:50%; transform:translateY(-50%);
+  font:600 .68rem var(--mono); color:var(--text-faint); border:1px solid var(--line-strong);
+  border-radius:5px; padding:0 5px; line-height:1.5; pointer-events:none; }
+.qs-wrap:focus-within::after { display:none; }
+.qs-pop { position:absolute; top:calc(100% + 8px); right:0; z-index:70; width:310px; padding:6px;
   background:var(--bg-elev); border:1px solid var(--line); border-radius:var(--radius);
-  box-shadow:var(--shadow-lg); overflow:hidden; }
+  box-shadow:var(--shadow-lg); overflow:hidden; animation:pop var(--dur-2) var(--ease-out); }
 .qs-hit { display:block; width:100%; text-align:left; font:inherit; border:0; background:none;
-  padding:8px 12px; cursor:pointer; color:var(--text); }
-.qs-hit:hover, .qs-hit.on { background:var(--accent-soft); }
-.qs-hit b { display:block; font-size:.85rem; font-weight:600; }
-.qs-hit em { display:block; font-style:normal; font-size:.72rem; color:var(--text-faint); }
-.qs-none { padding:10px 12px; font-size:.8rem; color:var(--text-faint); }
-@media (max-width:760px){ .qs-input { width:120px; } .qs-input:focus { width:160px; } }
+  padding:9px 12px; cursor:pointer; color:var(--text); border-radius:10px; }
+.qs-hit:hover, .qs-hit.on { background:var(--gold-wash); }
+.qs-hit b { display:block; font-size:var(--fs-sm); font-weight:700; }
+.qs-hit em { display:block; font-style:normal; font-size:var(--fs-xs); color:var(--text-faint); }
+.qs-none { padding:10px 12px; font-size:var(--fs-sm); color:var(--text-faint); }
+@media (max-width:1100px){ .qs-input { width:160px !important; } .qs-input:focus { width:220px !important; } }
+@media (max-width:860px){ .qs-wrap::after { display:none; } .qs-input { width:40px !important; padding-right:8px !important; color:transparent; cursor:pointer; }
+  .qs-input::placeholder { color:transparent; }
+  .qs-input:focus { width:min(60vw,240px) !important; color:var(--text); cursor:text; }
+  .qs-input:focus::placeholder { color:var(--text-faint); }
+  .qs-pop { position:fixed; left:12px; right:12px; top:calc(64px + env(safe-area-inset-top)); width:auto; } }
 @media print { .qs-wrap { display:none; } }
 `);
 

@@ -55,7 +55,7 @@ injectStyle('evals-css', `
 .ev-cal-day:not(.none):not(.sel):hover { border-color:var(--accent); }
 .ev-day { margin-bottom:18px; }
 .ev-day-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
-  padding:0 2px 7px; border-bottom:1px solid var(--line); margin-bottom:8px; position:sticky; top:0;
+  padding:0 2px 7px; border-bottom:1px solid var(--line); margin-bottom:8px; position:sticky; top:var(--topbar);
   background:var(--bg); z-index:1; }
 .ev-day-name { font-size:.95rem; font-weight:650; letter-spacing:-.01em; }
 .ev-day-name .soon { color:var(--accent); }
