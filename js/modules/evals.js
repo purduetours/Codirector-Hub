@@ -122,6 +122,8 @@ injectStyle('evals-css', `
 .preview-row:last-child { border-bottom:0; }
 .preview-row .n { font-variant-numeric:tabular-nums; font-weight:650; flex:none; }
 .preview-note { margin-top:9px; color:var(--text-soft); font-size:.8rem; }
+.ev-card.is-viewable { cursor:pointer; transition:border-color .13s; }
+.ev-card.is-viewable:hover, .ev-card.is-viewable:focus-visible { border-color:var(--accent); }
 .ev-resp { display:grid; gap:14px; }
 .ev-resp-rating { display:flex; align-items:baseline; gap:8px; }
 .ev-resp-rating .n { font-size:1.6rem; font-weight:700; color:var(--accent); font-variant-numeric:tabular-nums; }
@@ -333,7 +335,9 @@ function card(g) {
     actions.push(b('review', g.status === 'reviewed' ? 'Undo reviewed' : 'Mark reviewed', 'btn-ghost'));
   }
 
-  return `<article class="card ev-card ${mine ? 'is-mine' : ''}" data-status="${esc(g.status)}"
+  const viewable = (g.status === 'submitted' || g.status === 'reviewed') && (canReadEvals() || mine);
+  return `<article class="card ev-card ${mine ? 'is-mine' : ''}${viewable ? ' is-viewable' : ''}" data-status="${esc(g.status)}"
+      ${viewable ? `data-view="${esc(g.id)}" tabindex="0" title="Open responses"` : ''}
       style="--tone:var(--${g.status === 'open' ? 'open' : g.status === 'claimed' ? 'warn' : g.status === 'submitted' ? 'good' : g.status === 'reviewed' ? 'info' : 'mute'})">
     <div class="ev-top">
       <div><div class="ev-name">${esc(g.name)}</div><div class="ev-prio">${esc(g.priority || '—')}</div></div>
@@ -924,6 +928,15 @@ export default {
 
     $('#ev-export').addEventListener('click', exportEvals);
 
+    $('#ev-list').addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const c = e.target.closest?.('[data-view]');
+      if (!c || e.target !== c) return;
+      e.preventDefault();
+      const g = state.guides.find(x => x.id === c.dataset.view);
+      if (g) openView(g);
+    });
+
     $('#ev-list').addEventListener('click', async e => {
       const day = e.target.closest('[data-day]');
       if (day) { local.day = day.dataset.day; local.month = local.day.slice(0, 7); return paint(); }
@@ -941,7 +954,13 @@ export default {
       }
 
       const b = e.target.closest('button[data-act]');
-      if (!b) return;
+      if (!b) {
+        // Anywhere else on a submitted card opens what was written.
+        const c = e.target.closest('[data-view]');
+        const cg = c && state.guides.find(x => x.id === c.dataset.view);
+        if (cg) openView(cg);
+        return;
+      }
       const g = state.guides.find(x => x.id === b.dataset.id);
       if (!g) return;
 
