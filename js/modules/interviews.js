@@ -5,11 +5,8 @@
    Shown as "Interviews"; the backend is still the standalone Guide Room Apps
    Script, on its own spreadsheet and token auth.
 ============================================================================ */
-import { select, update, upsert, insert, remove, toCandidate } from '../core/db.js';
-import { state, myName, isAdmin } from '../core/state.js';
-import { shareInterviews } from '../core/vanessa-ui.js';
-import { downloadCsv } from '../core/csv.js';
-import { takeJumpTarget } from '../core/quicksearch.js';
+import { gr, grConfigured } from '../core/guideRoomApi.js';
+import { state } from '../core/state.js';
 import {
   $, $$, esc, sameName, toast, showError, debounce, injectStyle,
   openModal, closeModal, wireModal, SEARCH_ICON
@@ -27,18 +24,12 @@ const DECISIONS = ['', 'Yes', 'Maybe', 'No'];
 const YEARS = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate'];
 
 let data = null;                 // { cycle, groups, interviewers, candidates[] }
-
-/** What this tab has loaded, for the Today screen. Null until it has run. */
-export const interviewData = () => data;
-let nameOf = new Map();          // member id -> full name
 let pending = [];                // parsed roster rows awaiting Add/Replace
-/* No `who` any more. The old app made each interviewer pick their own name from
-   a dropdown, which is how scores could be filed under the wrong person and why
-   removing an interviewer left a tab grading as a ghost. You are whoever signed
-   in, and the database refuses a score written under anyone else's name. */
-const local = { tab: 'checkin', search: '', group: '', decision: '',
+const local = { tab: 'checkin', search: '', who: '', group: '', decision: '',
                 decFilter: '__undecided', target: null, detail: null,
-                sort: 'final', sortAsc: false };
+                // set when refresh() drops a who that no longer exists, so mount
+                // knows not to quietly pick a replacement on their behalf
+                whoDropped: false };
 
 injectStyle('gr-css', `
 .gr-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
@@ -83,10 +74,6 @@ injectStyle('gr-css', `
 .gr-group i { width:9px; height:9px; border-radius:50%; flex:none; display:inline-block;
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.14); }
 .gr-clickrow { cursor:pointer; }
-.gr-sort { cursor:pointer; user-select:none; white-space:nowrap; }
-.gr-sort:hover { color:var(--accent); }
-.gr-sort.on { color:var(--accent); }
-.gr-sort:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .gr-brk { width:100%; border-collapse:collapse; font-size:.83rem; }
 .gr-brk th, .gr-brk td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; }
 .gr-brk th { font-size:.68rem; text-transform:uppercase; letter-spacing:.05em;
@@ -437,17 +424,30 @@ function checkinView() {
 }
 
 function gradeView() {
+  if (!local.who) {
+    return `<div class="callout"><strong>Pick who you are first.</strong>
+      Scores are filed under your exact name so the averages line up.</div>
+      <div class="gr-bar" style="margin-top:14px">
+        <select class="select" id="gr-who" style="flex:0 1 260px">
+          <option value="">Who are you?</option>
+          ${data.interviewers.map(w => `<option value="${esc(w)}">${esc(w)}</option>`).join('')}
+        </select>
+      </div>`;
+  }
+
   const list = filtered(data.candidates.filter(isIn));
-  const done = list.filter(c => c.scores?.[myName()]).length;
+  const done = list.filter(c => c.scores?.[local.who]).length;
 
   return `
     <div class="gr-bar">
-      <span class="muted">Grading as <strong>${esc(myName())}</strong></span>
+      <select class="select" id="gr-who" style="flex:0 1 220px">
+        ${data.interviewers.map(w => `<option value="${esc(w)}" ${w === local.who ? 'selected' : ''}>${esc(w)}</option>`).join('')}
+      </select>
       <label class="search">${SEARCH_ICON}<input type="search" id="gr-search" placeholder="Find a candidate…" value="${esc(local.search)}"></label>
       <span class="muted">${done} of ${list.length} graded</span>
     </div>
     <div class="panel">${list.length ? list.map(c => {
-      const s = c.scores?.[myName()];
+      const s = c.scores?.[local.who];
       return `<button class="gr-cand" data-grade="${esc(c.key)}">
         <span class="gr-main">
           <span class="gr-name">${esc(c.name)}</span>
@@ -465,62 +465,10 @@ function gradeView() {
     </div>`;
 }
 
-/* Which column the Results table is sorted by. Final score descending is the
-   right default — it is the question the room is usually asking — but "who has
-   nobody scored yet" and "show me the strong speakers" are real questions too,
-   and re-sorting by hand in a spreadsheet afterwards defeats the point of the
-   table being here. */
-const RESULT_COLS = {
-  name:   { label: 'Name',    get: r => r.c.name || '',      text: true },
-  group:  { label: 'Group',   get: r => r.c.group || '',     text: true },
-  year:   { label: 'Year',    get: r => r.c.year || '',      text: true },
-  grad:   { label: 'Grad',    get: r => r.c.grad || '',      text: true },
-  raters: { label: 'Raters',  get: r => r.t.raters ?? -1 },
-  spk:    { label: 'Speak',   get: r => r.t.spk ?? -1 },
-  per:    { label: 'Person',  get: r => r.t.per ?? -1 },
-  imp:    { label: 'Impress', get: r => r.t.imp ?? -1 },
-  final:  { label: 'Final',   get: r => r.t.final ?? -1 }
-};
-
-function sortResults(rows) {
-  const key = local.sort || 'final';
-  const col = RESULT_COLS[key] || RESULT_COLS.final;
-  const dir = local.sortAsc ? 1 : -1;
-  return rows.sort((a, b) => col.text
-    ? String(col.get(a)).localeCompare(String(col.get(b))) * dir
-    : (col.get(a) - col.get(b)) * dir);
-}
-
-const sortableHead = () => Object.entries(RESULT_COLS).map(([k, c]) => {
-  const on = (local.sort || 'final') === k;
-  const arrow = on ? (local.sortAsc ? ' ▲' : ' ▼') : '';
-  return `<th class="gr-sort${on ? ' on' : ''}" data-sort="${k}" role="button" tabindex="0"
-    aria-sort="${on ? (local.sortAsc ? 'ascending' : 'descending') : 'none'}"
-    title="Sort by ${c.label}">${c.label}${arrow}</th>`;
-}).join('');
-
-/* The record of a hiring decision, and until now it existed only inside the
-   database. One bad afternoon and there is no copy. Includes each criterion
-   and the rater count, because a final score with no workings behind it is not
-   much use to whoever inherits the file. */
-function exportResults() {
-  let rows = filtered(data.candidates).map(c => ({ c, t: averages(c) }));
-  if (local.decision) rows = rows.filter(r => (r.c.decision || '') === local.decision);
-  sortResults(rows);
-
-  const head = ['Name', 'Group', 'Year', 'Grad', 'Major', 'Email',
-                'Raters', 'Speaking', 'Personable', 'Impression', 'Final', 'Decision'];
-  const body = rows.map(({ c, t }) => [
-    c.name, c.group || '', c.year || '', c.grad || '', c.major || '', c.email || '',
-    t.raters, fmt(t.spk), fmt(t.per), fmt(t.imp), fmt(t.final), c.decision || ''
-  ]);
-  toast(`Downloaded ${downloadCsv('interview-results', [head, ...body])} candidates.`);
-}
-
 function resultsView() {
   let rows = filtered(data.candidates).map(c => ({ c, t: averages(c) }));
   if (local.decision) rows = rows.filter(r => (r.c.decision || '') === local.decision);
-  sortResults(rows);
+  rows.sort((a, b) => (b.t.final ?? -1) - (a.t.final ?? -1));
 
   return `
     <div class="gr-bar">
@@ -530,10 +478,10 @@ function resultsView() {
         ${['Yes', 'Maybe', 'No'].map(d => `<option value="${d}" ${local.decision === d ? 'selected' : ''}>${d}</option>`).join('')}
       </select>
       <button class="btn btn-ghost btn-sm" id="gr-copy">Copy emails (${rows.length})</button>
-      <button class="btn btn-ghost btn-sm" id="gr-export" title="Download these results, including every interviewer's scores">Download CSV</button>
     </div>
     <div class="gr-wrap"><table class="gr-tbl">
-      <thead><tr>${sortableHead()}<th>Decision</th></tr></thead>
+      <thead><tr><th>Name</th><th>Group</th><th>Year</th><th>Grad</th><th>Raters</th>
+        <th>Speak</th><th>Person</th><th>Impress</th><th>Final</th><th>Decision</th></tr></thead>
       <tbody>${rows.length ? rows.map(({ c, t }) => `
         <tr class="gr-clickrow" data-open="${esc(c.key)}">
           <td><strong>${esc(c.name)}</strong><br><span class="gr-sub">${esc(c.major || '')}</span></td>
@@ -764,59 +712,54 @@ function setupView() {
 let canBatchGrade = true;
 let warnedSlow = false;
 
-/**
- * One interviewer's whole grade for one candidate: a single row.
- *
- * This is the change that fixes interview day. The spreadsheet held a COLUMN per
- * interviewer, so every save rewrote a shared row and had to take a global lock
- * -- nine people therefore graded strictly one at a time, three seconds each,
- * while the client retried five times into the same queue.
- *
- * Here two people grading the same candidate write two different rows and never
- * touch each other. Nothing to queue behind, nothing to retry into, and no
- * fallback path that could leave a grade half written.
- */
 async function saveGradeCall(key, who, scores, note) {
-  await upsert('interview_scores', {
-    candidate_id:   key,
-    interviewer_id: state.me.id,
-    speaking:       scores.spk ?? null,
-    personable:     scores.per ?? null,
-    impression:     scores.imp ?? null,
-    note:           note || null,
-    updated_at:     new Date().toISOString()
-  }, 'candidate_id,interviewer_id');
+  if (canBatchGrade) {
+    try {
+      return await gr('saveGrade', [key, who, scores, note]);
+    } catch (err) {
+      // Fall back for THIS save either way — a written grade matters more than a
+      // fast one. But only a deployment that genuinely has no saveGrade should put
+      // the tab on the slow path for good: latching on any error meant one dropped
+      // request tripled every save for the rest of the session and told the
+      // codirector their backend was out of date when it wasn't.
+      if (/unknown function/i.test(err.message || '')) canBatchGrade = false;
+      console.warn('saveGrade failed, using per-field writes:', err.message);
+    }
+  }
+
+  // Set each criterion individually. Same end state as saveGrade, four round trips.
+  // Spaced out on purpose: firing four at Apps Script back to back is exactly when
+  // it starts dropping them.
+  //
+  // Every part is attempted even after one fails. Stopping at the first error left
+  // the sheet holding, say, a speaking score and nothing else — and a row with one
+  // criterion still counts as a whole rater, so it quietly dragged that candidate's
+  // final average toward a number nobody actually gave them. Pressing Save again
+  // rewrites all four, so the fix is simply to say clearly that it must be pressed.
+  const gap = () => new Promise(r => setTimeout(r, 350));
+  const failed = [];
+
+  for (const cr of CRIT) {
+    try { await gr('setScore', [key, who, cr.k, scores[cr.k]]); }
+    catch { failed.push(cr.name.toLowerCase()); }
+    await gap();
+  }
+  try { await gr('setNote', [key, who, note]); }
+  catch { failed.push('the note'); }
+
+  if (failed.length) {
+    throw new Error(
+      `Only part of that grade saved — ${failed.join(', ')} did not go through. ` +
+      `Press Save again to rewrite the whole grade.`);
+  }
   return true;
-}
-
-/**
- * Adds candidates to the current cycle, dealing them into the interview groups
- * in turn exactly as the old importer did.
- */
-async function importCandidates(rows, replace) {
-  const cycles = await select('interview_cycles', 'select=id&is_current=eq.true&limit=1');
-  const cycleId = cycles[0].id;
-  if (replace) await remove('candidates', `cycle_id=eq.${cycleId}`);
-
-  const groups = data.groups || [];
-  const base = replace ? 0 : (data.candidates || []).length;
-  await insert('candidates', rows.map((p, i) => ({
-    cycle_id:   cycleId,
-    name:       p.name,
-    puid:       p.puid  || null,
-    year:       p.year  || null,
-    grad:       p.grad  || null,
-    major:      p.major || null,
-    email:      p.email || null,
-    group_name: groups.length ? groups[(base + i) % groups.length] : null
-  })));
 }
 
 /* ---------------------------------------------------------------- breakdown */
 
 /** Who may wipe an interviewer's rating: that interviewer, or an admin. */
 function canClear(who) {
-  return isAdmin() || who.toLowerCase() === String(myName() || '').trim().toLowerCase();
+  return state.isAdmin || who.toLowerCase() === String(local.who || '').trim().toLowerCase();
 }
 
 function renderDetail(c) {
@@ -878,7 +821,7 @@ function openDetail(c) {
 
 function openGrade(c) {
   local.target = c;
-  const s = c.scores?.[myName()] || {};
+  const s = c.scores?.[local.who] || {};
   $('#gr-g-name').textContent = c.name;
   $('#gr-g-sub').textContent = [subLine(c), c.group].filter(Boolean).join(' · ');
   $('#gr-g-body').innerHTML = CRIT.map(cr => `
@@ -889,75 +832,32 @@ function openGrade(c) {
         <label for="gr-${cr.k}-${n}"><b>${n}</b><em>${esc(cr.labels[n - 1])}</em></label>`).join('')}
       </div>
     </div>`).join('') +
-    `<label class="field"><span>Notes</span><textarea id="gr-note" rows="3">${esc(c.comments?.[myName()] || '')}</textarea></label>`;
+    `<label class="field"><span>Notes</span><textarea id="gr-note" rows="3">${esc(c.comments?.[local.who] || '')}</textarea></label>`;
   $('#gr-g-error').hidden = true;
   openModal($('#gr-modal'));
 }
 
 /* ---------------------------------------------------------------- module */
 
-/**
- * Everything the board needs, in four parallel queries.
- *
- * The old backend returned this as one enormous spreadsheet read taking six-odd
- * seconds, which is why the tab had to cache it. These are indexed reads and
- * come back in well under a second, so it simply asks again.
- */
 async function refresh() {
-  const [cands, rawScores, panel, groups] = await Promise.all([
-    select('candidate_results', 'select=*&order=name.asc'),
-    select('interview_scores',  'select=*'),
-    select('members',           'select=id,full_name&active=eq.true&order=full_name.asc'),
-    select('interview_groups',  'select=name&order=sort_order.asc')
-  ]);
+  data = await gr('getState');
 
-  nameOf = new Map((panel || []).map(m => [m.id, m.full_name]));
-  const candidates = (cands || []).map(toCandidate);
-  const byKey = new Map(candidates.map(c => [c.key, c]));
-
-  // One row per interviewer per candidate is what makes concurrent grading
-  // safe; fold them back into the shape these screens already render.
-  for (const r of rawScores || []) {
-    const c = byKey.get(r.candidate_id);
-    const who = nameOf.get(r.interviewer_id);
-    if (!c || !who) continue;
-    if (r.speaking !== null || r.personable !== null || r.impression !== null) {
-      c.scores[who] = { spk: r.speaking, per: r.personable, imp: r.impression };
-    }
-    if (r.note) c.comments[who] = r.note;
+  // Settings can change while this tab is open — an interviewer renamed or removed,
+  // a group dropped. A stale local.who files scores under a column that no longer
+  // exists (the save just fails); a stale group quietly filters everyone out with
+  // no hint as to why. Drop either the moment it stops being real.
+  if (local.who && !(data.interviewers || []).includes(local.who)) {
+    // Say so out loud. Silently moving someone onto a different interviewer would
+    // file their next grade under the wrong name, which nothing downstream could
+    // detect — far worse than making them pick again.
+    toast(`${local.who} is no longer on the interviewer list — pick who you are again.`, 'err');
+    local.who = '';
+    local.whoDropped = true;
   }
-
-  data = {
-    cycle: window.CONFIG?.TERM_LABEL || '',
-    groups: (groups || []).map(g => g.name),
-    interviewers: (panel || []).map(m => m.full_name),
-    candidates
-  };
-  // Vanessa reads what is already here rather than asking the database herself,
-  // so she can never surface something this person was not sent.
-  shareInterviews(data);
-
   if (local.group && !(data.groups || []).includes(local.group)) local.group = '';
 }
 
-/**
- * Redraws the current tab.
- *
- * Everything on the tab is rebuilt, INCLUDING the search box, so whatever you
- * were typing in is thrown away and replaced mid-keystroke. Left alone that
- * makes search unusable: you type one letter, the box you are typing in
- * vanishes, and the second letter goes nowhere.
- *
- * So note what had focus and where the cursor was, and put it back afterwards.
- */
 function paint() {
-  const active = document.activeElement;
-  const keep = active && active.id && $('#gr-body')?.contains(active)
-    ? { id: active.id,
-        start: active.selectionStart ?? null,
-        end: active.selectionEnd ?? null }
-    : null;
-
   $$('#gr-tabs .tab').forEach(t => t.classList.toggle('is-active', t.dataset.tab === local.tab));
   const body = $('#gr-body');
   if (local.tab === 'checkin') body.innerHTML = checkinView();
@@ -966,39 +866,34 @@ function paint() {
   else if (local.tab === 'decisions') body.innerHTML = decisionsView();
   else if (local.tab === 'roster') body.innerHTML = rosterView();
   else body.innerHTML = setupView();
-
-  if (keep) {
-    const el = document.getElementById(keep.id);
-    if (el) {
-      el.focus();
-      // Text inputs keep the caret where it was, so typing carries on mid-word
-      // instead of jumping to the end.
-      if (keep.start !== null && el.setSelectionRange) {
-        try { el.setSelectionRange(keep.start, keep.end); } catch { /* not a text field */ }
-      }
-    }
-  }
 }
 
 export default {
   id: 'interviews',
-  needs: 'recruitment',
+  adminOnly: true,
   prefetch: async () => { if (!data) await refresh(); },
-  bust: () => { data = null; shareInterviews(null); },
+  bust: () => { data = null; },
   title: 'Interviews',
   crumb: 'Check-in, grading and results',
   icon: '🎤',
   section: 'Tools',
 
   async mount(view) {
+    if (!grConfigured()) {
+      view.innerHTML = `<div class="empty"><div class="empty-mark">🎤</div>
+        <p>Interviews isn't connected. Add its <code>apiUrl</code> and <code>token</code>
+        to the <code>GUIDE_ROOM</code> block in <code>config.js</code>.</p></div>`;
+      return;
+    }
+
     view.innerHTML = `
       <nav class="tabs" id="gr-tabs" style="margin-bottom:16px">
         <button class="tab is-active" data-tab="checkin">Check in</button>
         <button class="tab" data-tab="grade">Grade</button>
         <button class="tab" data-tab="results">Results</button>
         <button class="tab" data-tab="decisions">Decisions</button>
-        ${isAdmin() ? '<button class="tab" data-tab="roster">Roster</button>' : ''}
-        ${isAdmin() ? '<button class="tab" data-tab="setup">Setup</button>' : ''}
+        ${state.isAdmin ? '<button class="tab" data-tab="roster">Roster</button>' : ''}
+        ${state.isAdmin ? '<button class="tab" data-tab="setup">Setup</button>' : ''}
       </nav>
       <div id="gr-body"><div class="loading"><div class="spinner"></div><p>Loading interviews…</p></div></div>
 
@@ -1034,9 +929,10 @@ export default {
     // Re-entering the tab shouldn't cost another 6-second round trip; the toolbar's
     // Refresh is there when someone wants the sheet re-read.
     if (!data) await refresh();
-    // Sent here by the search box; show that candidate rather than everybody.
-    const jump = takeJumpTarget();
-    if (jump) { local.search = jump; local.tab = 'results'; }
+    // Default to yourself, but never straight after an interviewer was dropped —
+    // that is exactly when a silent reassignment would go unnoticed.
+    if (local.whoDropped) local.whoDropped = false;
+    else if (!local.who && data.interviewers.includes(state.name)) local.who = state.name;
     paint();
 
     $('#gr-tabs').addEventListener('click', e => {
@@ -1048,18 +944,6 @@ export default {
 
     const body = $('#gr-body');
 
-    /* A sortable heading is a button, so it must answer the keyboard too.
-       Declared after `body` on purpose — putting it above the const threw
-       "Cannot access 'body' before initialization" and silently killed every
-       handler below it, which left the whole Interviews tab inert. */
-    body.addEventListener('keydown', e => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      const th = e.target.closest?.('.gr-sort');
-      if (!th) return;
-      e.preventDefault();
-      th.click();
-    });
-
     body.addEventListener('input', debounce(e => {
       if (e.target.id === 'gr-search') { local.search = e.target.value; paint(); }
     }));
@@ -1069,6 +953,7 @@ export default {
 
       if (t.id === 'gr-group')    { local.group = t.value; return paint(); }
       if (t.id === 'gr-decision') { local.decision = t.value; return paint(); }
+      if (t.id === 'gr-who')      { local.who = t.value; return paint(); }
 
       if (t.classList.contains('gr-in')) {
         // Optimistic: the tick lands immediately and the write happens behind it.
@@ -1086,7 +971,7 @@ export default {
         if (hadFocus) $(`.gr-in[data-key="${key}"]`)?.focus();
 
         try {
-          await update('candidates', `id=eq.${key}`, { checked_in_at: want ? new Date().toISOString() : null });
+          await gr('setField', [key, 'checkin', want ? 'Yes' : '']);
         } catch (err) {
           const back = data.candidates.find(x => x.key === key);
           if (back) back.checkin = want ? '' : 'Yes';     // put it back
@@ -1101,8 +986,7 @@ export default {
         if (c) c.decision = t.value;
         t.dataset.v = t.value;                            // colour updates at once
         try {
-          await update('candidates', `id=eq.${t.dataset.dec}`,
-            { decision: t.value || null, decided_by: state.me.id, decided_at: new Date().toISOString() });
+          await gr('setField', [t.dataset.dec, 'decision', t.value]);
         } catch (err) {
           if (c) c.decision = prev;
           t.value = prev; t.dataset.v = prev;
@@ -1132,19 +1016,6 @@ export default {
     });
 
     body.addEventListener('click', async e => {
-      /* Clicking a column heading sorts by it; clicking the same one again
-         reverses. Default direction per column is the useful one: highest
-         score first for numbers, A–Z for names. */
-      if (e.target.id === 'gr-export') return exportResults();
-
-      const th = e.target.closest('.gr-sort');
-      if (th) {
-        const key = th.dataset.sort;
-        if (local.sort === key) local.sortAsc = !local.sortAsc;
-        else { local.sort = key; local.sortAsc = !!RESULT_COLS[key]?.text; }
-        return paint();
-      }
-
       const openRow = e.target.closest('[data-open]');
       if (openRow && !e.target.closest('[data-noopen]')) {
         const c = data.candidates.find(x => x.key === openRow.dataset.open);
@@ -1172,8 +1043,7 @@ export default {
         paint();
         if (hadFocus) $(`[data-key="${key}"] [data-set="${setBtn.dataset.set}"]`)?.focus();
         try {
-          await update('candidates', `id=eq.${key}`,
-            { decision: next || null, decided_by: state.me.id, decided_at: new Date().toISOString() });
+          await gr('setField', [key, 'decision', next]);
         } catch (err) {
           c.decision = prev;
           paint();
@@ -1217,7 +1087,7 @@ export default {
 
         rm.disabled = true;
         try {
-          await remove('candidates', `id=eq.${c.key}`);
+          await gr('removeCandidate', [c.key]);
           await refresh();
           paint();
           toast(`Removed ${c.name}.`);
@@ -1242,13 +1112,7 @@ export default {
 
         btn.disabled = true;
         try {
-          const cycles = await select('interview_cycles', 'select=id&is_current=eq.true&limit=1');
-          const cycleId = cycles[0].id;
-          await remove('interview_groups', `cycle_id=eq.${cycleId}`);
-          if (groups.length) {
-            await insert('interview_groups',
-              groups.map((name, i) => ({ cycle_id: cycleId, name, sort_order: i })));
-          }
+          await gr('saveSettings', [$('#gr-cycle').value.trim(), groups, people]);
           await refresh(); paint(); toast('Settings saved.');
         } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
       }
@@ -1318,7 +1182,7 @@ export default {
         const n = pending.length;
         btn.disabled = true;
         try {
-          await importCandidates(pending, replace);
+          await gr('importRoster', [pending, replace]);
           await refresh();
           $('#gr-roster').value = '';
           pending = [];
@@ -1355,7 +1219,7 @@ export default {
         btn.disabled = true;
         btn.textContent = 'Adding…';
         try {
-          await importCandidates([person], false);
+          await gr('importRoster', [[person], false]);
           await refresh();
           paint();                       // rebuilds the tab, which clears the form
           toast(`Added ${person.name}.`);
@@ -1368,17 +1232,14 @@ export default {
 
       if (e.target.id === 'gr-clear-roster') {
         if (!confirm('Delete every candidate and every score? Interviewers and groups are kept.')) return;
-        try {
-          const cy = await select('interview_cycles', 'select=id&is_current=eq.true&limit=1');
-          await remove('candidates', `cycle_id=eq.${cy[0].id}`);
-          await refresh(); paint(); toast('Roster cleared.');
-        }
+        try { await gr('clearRoster'); await refresh(); paint(); toast('Roster cleared.'); }
         catch (err) { toast(err.message, 'err'); }
       }
 
       if (e.target.id === 'gr-clear-people') {
-        toast('Interviewers are set by their role now — change someone in Members.', 'err');
-        return;
+        if (!confirm('Remove all interviewers and their score columns? This deletes their scores.')) return;
+        try { await gr('clearInterviewers'); await refresh(); paint(); toast('Interviewers cleared.'); }
+        catch (err) { toast(err.message, 'err'); }
       }
     });
 
@@ -1399,17 +1260,17 @@ export default {
         // One request for all four values, instead of the four separate calls this
         // used to make — at ~4s each that was fifteen-odd seconds per candidate.
         // Older deployments don't have saveGrade, so fall back rather than break.
-        await saveGradeCall(c.key, myName(), scores, note);
+        await saveGradeCall(c.key, local.who, scores, note);
 
         // Update in place rather than refetching the whole roster — another 6s
         // round trip for data we already know the shape of.
         if (Object.values(scores).some(v => v !== null)) {
-          c.scores = { ...(c.scores || {}), [myName()]: scores };
+          c.scores = { ...(c.scores || {}), [local.who]: scores };
         } else if (c.scores) {
-          delete c.scores[myName()];
+          delete c.scores[local.who];
         }
         c.comments = { ...(c.comments || {}) };
-        if (note) c.comments[myName()] = note; else delete c.comments[myName()];
+        if (note) c.comments[local.who] = note; else delete c.comments[local.who];
 
         closeModal($('#gr-modal'));
         paint();

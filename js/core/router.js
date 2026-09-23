@@ -3,7 +3,7 @@
    so it works on GitHub Pages with no server rewrites.
 ============================================================================ */
 import { $, $$, closeAllModals } from './ui.js';
-import { isAdmin, inTraining, inRecruitment } from './state.js';
+import { state } from './state.js';
 
 const modules = new Map();
 let current = null;
@@ -20,21 +20,8 @@ export function list() {
   return [...modules.values()];
 }
 
-/**
- * What this person is allowed to see in the sidebar.
- *
- * A module declares what it needs -- 'admin', 'training' or 'recruitment' --
- * and the answer comes from their role in the database. Hiding a tab is only
- * tidiness: the database refuses the data regardless, so typing the address in
- * by hand gets an empty screen rather than somebody else's evals.
- */
 export function visibleModules() {
-  return list().filter(m => {
-    if (m.needs === 'admin')       return isAdmin();
-    if (m.needs === 'training')    return inTraining();
-    if (m.needs === 'recruitment') return inRecruitment();
-    return true;
-  });
+  return list().filter(m => !m.adminOnly || state.isAdmin);
 }
 
 export function go(id) {
@@ -46,20 +33,7 @@ function currentId() {
   const id = location.hash.replace(/^#\/?/, '').split('?')[0];
   const mods = visibleModules().filter(m => !m.soon);
   if (modules.has(id) && mods.some(m => m.id === id)) return id;
-
-  /* Bounced somewhere else, so say so.
-
-     Asking for a tab your role cannot see used to land you on Eval Tracker
-     while the address bar still read #/interviews — so bookmarking it, copying
-     the link to somebody, or pressing Back all did something other than what
-     the URL promised. Rewriting the hash costs nothing and keeps the address
-     honest. `replace` rather than assignment, so the route you cannot reach
-     does not become a Back-button trap. */
-  const fallback = mods[0]?.id || null;
-  if (fallback && id && id !== fallback) {
-    location.replace(`${location.pathname}${location.search}#/${fallback}`);
-  }
-  return fallback;
+  return mods[0]?.id || null;
 }
 
 let rendering = false;

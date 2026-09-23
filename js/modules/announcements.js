@@ -2,9 +2,8 @@
    Notices codirectors post for the committee. Everyone reads; admins write.
    Backed by an `Announcements` tab that setup() creates.
 ============================================================================ */
-import { select, insert, remove } from '../core/db.js';
-import { state, isAdmin } from '../core/state.js';
-import { paintNav } from '../core/router.js';
+import { api } from '../core/api.js';
+import { state } from '../core/state.js';
 import {
   $, esc, prettyDate, toast, showError, injectStyle,
   openModal, closeModal, wireModal
@@ -30,49 +29,15 @@ function card(a) {
         <div class="ann-title">${a.pinned ? '📌 ' : ''}${esc(a.title)}</div>
         <div class="ann-meta">${esc(a.author || 'Committee')} · ${esc(prettyDate(a.date) || a.date || '')}</div>
       </div>
-      ${isAdmin() ? `<button class="icon-btn" data-del="${esc(a.id)}" title="Delete">✕</button>` : ''}
+      ${state.isAdmin ? `<button class="icon-btn" data-del="${esc(a.id)}" title="Delete">✕</button>` : ''}
     </div>
     <div class="ann-body">${esc(a.body)}</div>
   </article>`;
 }
 
-/* -------------------------------------------------------------- unread
-   An announcement nobody notices is the same as one nobody posted.
-
-   The badge used to count PINNED notices, which never changes and so stops
-   meaning anything within a day. It now counts what THIS person has not yet
-   seen: the newest announcement they have looked at is remembered on their
-   device, and anything newer than that is unread. Opening the tab marks them
-   read, which is the moment they actually appear on screen.
-
-   Kept on the device rather than in the database on purpose — a per-person
-   read receipt for every notice is a table, a policy and a write on every page
-   view, to solve a problem a timestamp in localStorage solves.
--------------------------------------------------------------------------- */
-const SEEN_KEY = () => `hub2.ann.seen.${state.me?.id || 'anon'}`;
-
-const lastSeen = () => { try { return localStorage.getItem(SEEN_KEY()) || ''; } catch { return ''; } };
-
-/** Announcements posted since this person last opened the tab. */
-export const unreadCount = () =>
-  (items || []).filter(a => (a.at || '') > lastSeen()).length;
-
-function markAllRead() {
-  const newest = (items || []).reduce((max, a) => (a.at || '') > max ? a.at : max, '');
-  if (!newest) return;
-  try { localStorage.setItem(SEEN_KEY(), newest); } catch { /* private window */ }
-  paintNav();
-}
-
 async function prime() {
-  const rows = await select('announcements',
-    'select=id,title,body,pinned,created_at,author:members(full_name)&order=pinned.desc,created_at.desc');
-  items = (rows || []).map(r => ({
-    id: r.id, title: r.title, body: r.body, pinned: r.pinned,
-    date: (r.created_at || '').slice(0, 10),
-    at:   r.created_at || '',        // full stamp: two on one day must not tie
-    author: r.author?.full_name || 'Committee'
-  }));
+  const data = await api('announcements');
+  items = data.items || [];
 }
 
 async function load() {
@@ -94,15 +59,13 @@ export default {
   crumb: 'Notices for the committee',
   icon: '📣',
   section: 'Hub',
-  badge: () => unreadCount() || null,
+  badge: () => (items || []).filter(a => a.pinned).length || null,
   prefetch: prime,
   bust: () => { items = null; },
 
   async mount(view) {
-    // Seen means on screen, so this happens on mount rather than on load.
-    setTimeout(markAllRead, 400);
     view.innerHTML = `
-      ${isAdmin() ? `<div style="margin-bottom:16px"><button class="btn btn-primary" id="ann-new">＋ New announcement</button></div>` : ''}
+      ${state.isAdmin ? `<div style="margin-bottom:16px"><button class="btn btn-primary" id="ann-new">＋ New announcement</button></div>` : ''}
       <div id="ann-list"></div>
 
       <div class="modal-root" id="ann-modal" hidden>
@@ -132,7 +95,7 @@ export default {
     if (items === null) await prime();
     paint();
 
-    if (!isAdmin()) return;
+    if (!state.isAdmin) return;
     wireModal($('#ann-modal'));
 
     $('#ann-new').addEventListener('click', () => {
@@ -149,11 +112,10 @@ export default {
       const go = $('#ann-post'), err = $('#ann-error');
       go.disabled = true; go.textContent = 'Posting…'; err.hidden = true;
       try {
-        await insert('announcements', {
-          title:  $('#ann-title').value,
-          body:   $('#ann-body').value,
-          pinned: $('#ann-pin').checked,
-          author_id: state.me.id
+        await api('postAnnouncement', {
+          title: $('#ann-title').value,
+          body: $('#ann-body').value,
+          pinned: $('#ann-pin').checked
         });
         closeModal($('#ann-modal'));
         toast('Announcement posted.');
@@ -166,7 +128,7 @@ export default {
       const b = e.target.closest('[data-del]');
       if (!b || !confirm('Delete this announcement?')) return;
       b.disabled = true;
-      try { await remove('announcements', `id=eq.${b.dataset.del}`); toast('Deleted.'); await load(); }
+      try { await api('deleteAnnouncement', { id: b.dataset.del }); toast('Deleted.'); await load(); }
       catch (e2) { toast(e2.message, 'err'); b.disabled = false; }
     });
   }

@@ -64,66 +64,17 @@ export function showError(el, message) {
 }
 
 /* --- modals ------------------------------------------------------------ */
-/* Who had focus before the dialog opened, so it can be given back. */
-const focusBefore = new WeakMap();
-
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
-                  'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-const focusables = root => [...root.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
-
-/**
- * Opens a dialog properly.
- *
- * Previously this only hid and showed markup, which is fine with a mouse and
- * poor with anything else: focus stayed behind on the page, Tab wandered off
- * into the sidebar underneath, and closing left focus on <body> so the next
- * Tab started again from the top of the document. Anyone on a keyboard or a
- * screen reader had to hunt for their place every time they claimed an eval.
- */
 export function openModal(root) {
-  focusBefore.set(root, document.activeElement);
   root.hidden = false;
   document.body.style.overflow = 'hidden';
-
-  const panel = root.querySelector('.modal') || root;
-  panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-modal', 'true');
-  const title = panel.querySelector('h2');
-  if (title) {
-    if (!title.id) title.id = 'modal-title-' + Math.random().toString(36).slice(2, 8);
-    panel.setAttribute('aria-labelledby', title.id);
-  }
-
-  // First real field, or the panel itself — never a Cancel button.
-  const first = focusables(panel).find(el => !el.hasAttribute('data-close'));
-  (first || panel).focus?.();
-  if (!first) panel.tabIndex = -1;
 }
-
 export function closeModal(root) {
   root.hidden = true;
   document.body.style.overflow = '';
-  const back = focusBefore.get(root);
-  focusBefore.delete(root);
-  // Put them back where they were, if it is still on the page.
-  if (back?.isConnected) back.focus?.();
 }
-
 export function wireModal(root) {
   root.addEventListener('click', e => {
     if (e.target.closest('[data-close]')) closeModal(root);
-  });
-
-  /* Keep Tab inside the dialog. Without this it walks out of the modal and
-     into the page behind it, which is still there and still clickable. */
-  root.addEventListener('keydown', e => {
-    if (e.key !== 'Tab' || root.hidden) return;
-    const panel = root.querySelector('.modal') || root;
-    const items = focusables(panel);
-    if (!items.length) return;
-    const first = items[0], last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
 }
 

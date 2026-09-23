@@ -1,12 +1,10 @@
-import { state } from '../core/state.js';
 /* ============================================================ Desk Coverage
    Front Desk and Welcome Desk shifts. The source grid is a weekly template
    rather than dated, so this shows a recurring Mon–Fri week and flags any slot
    nobody is covering.
 ============================================================================ */
-import { loadDesks } from '../core/sheets.js';
+import { api } from '../core/api.js';
 import { $, esc, prettyTime, injectStyle } from '../core/ui.js';
-import { shareData } from '../core/vanessa-ui.js';
 
 let rows = null;
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -36,7 +34,7 @@ function paint() {
   let gaps = 0;
   const body = slots.map(slot => {
     const cells = DAYS.map(day => {
-      const people = mine.filter(r => r.slot === slot && r.day === day && r.person).map(r => r.person);
+      const people = mine.filter(r => r.slot === slot && r.day === day).map(r => r.person);
       if (!people.length) { gaps++; return '<td><span class="desk-gap">⚠ uncovered</span></td>'; }
       return `<td>${people.map(p => `<span class="desk-person">${esc(p)}</span>`).join('')}</td>`;
     }).join('');
@@ -58,18 +56,15 @@ function paint() {
 /** Loads desk coverage once per session. Safe to call in the background. */
 async function prime() {
   if (rows) return;
-  const version = state.sessionVersion;
-  const result = await loadDesks();
-  if (version !== state.sessionVersion) return;
-  rows = result;
-  shareData('desks', rows);
+  const data = await api('desks');
+  rows = data.rows || [];
 }
 
 export default {
   id: 'desks',
   prefetch: prime,
-  bust: () => { rows = null; shareData('desks', null); },
-  needs: 'training',
+  bust: () => { rows = null; },
+  adminOnly: true,
   title: 'Desk Coverage',
   crumb: 'Front and Welcome desk shifts',
   icon: '🛎️',
@@ -90,7 +85,7 @@ export default {
     if (!rows.length) {
       $('#desk-body').innerHTML =
         `<div class="empty"><div class="empty-mark">🛎️</div>
-         <p>No desk data in the shared workbook.</p></div>`;
+         <p>No desk data. Import <code>data/Desks.csv</code> as a <code>Desks</code> tab in the sheet.</p></div>`;
       return;
     }
 
@@ -104,15 +99,3 @@ export default {
     });
   }
 };
-
-/** Which desk shifts this person covers, for the Directory profile. */
-export function deskShiftsFor(name) {
-  if (!rows) return null;
-  const want = String(name || '').toLowerCase();
-  const first = want.split(/\s+/)[0];
-  // The rota abbreviates surnames ("Jane H."); the roster spells them out.
-  return rows.filter(r => {
-    const p = String(r.person || '').toLowerCase();
-    return p === want || (p.startsWith(first) && first.length > 2);
-  });
-}

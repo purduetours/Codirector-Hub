@@ -1,72 +1,34 @@
 /* ============================================================ design tokens
    One source of truth for colour, type and spacing across every hub module.
    Modules should never hardcode a hex value — reach for a token.
-
-   Purdue's official palette, from the University brand guidelines:
-
-     Boilermaker Gold  #CFB991     Aged (dark gold)  #8E6F3E
-     Black             #000000     Rush              #DAAA00
-     Steel             #555960     Field             #DDB945
-     Cool Gray         #6F727B     Dust              #EBD99F
-     Railway Gray      #9D9795     Steam             #C4BFC0
-
-   Two notes on how that palette is actually used here.
-
-   Boilermaker Gold is a light colour. White text on it is unreadable, and a
-   button-sized block of the darker Aged gold just reads brown. So this follows
-   what Purdue itself does: BLACK carries the action, gold is the signature on
-   top of it. In daylight a primary button is black and turns gold under the
-   cursor; at night the whole thing inverts and gold becomes the action colour
-   with black text on it, at 11:1.
-
-   That is why --accent-text flips between the modes. Anything painted on
-   --accent must use it rather than assuming white, or dark mode ends up with
-   white text on gold.
-
-   The status colours stay semantic rather than going gold. Green still means
-   done and red still means danger — a roomful of people reading a screen at
-   speed should not have to learn a new colour language — but they are warmed
-   and desaturated so they sit beside the gold instead of fighting it.
-
-   The one exception is the interview group swatches in interviews.js, which
-   are deliberately literal: the green group has to look green.
 ============================================================================ */
 :root {
-  /* Warm paper rather than blue-grey; gold looks jaundiced on a cool ground. */
-  --bg:          #f7f6f2;
+  --bg:          #f6f7fb;
   --bg-elev:     #ffffff;
-  --bg-sunken:   #efece4;
-  --line:        #e3ded1;
-  --line-strong: #cdc5b2;
-  --text:        #14130f;
-  --text-soft:   #555960;   /* Steel */
-  --text-faint:  #6b6e77;   /* Cool Gray, a shade down — the official
-                               #6F727B lands at 4.44:1 on this warm paper,
-                               just under the 4.5:1 readability bar. */
+  --bg-sunken:   #eef0f7;
+  --line:        #e2e5ef;
+  --line-strong: #cbd0e0;
+  --text:        #1b1f2e;
+  --text-soft:   #5b6376;
+  --text-faint:  #8b92a6;
 
-  --accent:       #000000;  /* Purdue black carries the action */
-  --accent-hover: #8e6f3e;  /* …and turns Aged gold under the cursor */
-  --accent-soft:  #f3ebda;  /* a wash of Dust */
+  --accent:       #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft:  #eceafe;
   --accent-text:  #ffffff;
 
-  /* The signature. Used for the marks that should read "Purdue" at a glance —
-     the active rail, focus rings, the brand rule — rather than for large areas,
-     which is where this colour turns muddy. */
-  --gold:      #cfb991;     /* Boilermaker Gold */
-  --gold-deep: #8e6f3e;     /* Aged, for gold that must carry small text */
-
   /* status palette, shared by every module */
-  --open:    #35607f;  --open-bg:    #e9eff4;
-  --warn:    #8a6a12;  --warn-bg:    #f8efd7;
-  --good:    #2e7d4f;  --good-bg:    #e5f1e9;
-  --info:    #555960;  --info-bg:    #ecedef;
-  --mute:    #6f727b;  --mute-bg:    #efeeec;
-  --danger:  #a3222a;  --danger-bg:  #f9e9ea;
+  --open:    #2563eb;  --open-bg:    #e6efff;
+  --warn:    #b45309;  --warn-bg:    #fdf0dc;
+  --good:    #15803d;  --good-bg:    #e2f5e9;
+  --info:    #7c3aed;  --info-bg:    #f0e9fe;
+  --mute:    #6b7280;  --mute-bg:    #eef0f4;
+  --danger:  #dc2626;  --danger-bg:  #fdecec;
 
   --radius:    14px;
   --radius-sm: 9px;
-  --shadow:    0 1px 2px rgba(30,24,10,.06), 0 8px 24px -12px rgba(30,24,10,.20);
-  --shadow-lg: 0 24px 60px -18px rgba(30,24,10,.38);
+  --shadow:    0 1px 2px rgba(16,20,40,.05), 0 8px 24px -12px rgba(16,20,40,.16);
+  --shadow-lg: 0 24px 60px -18px rgba(16,20,40,.35);
 
   --font: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -74,83 +36,29 @@
   --rail: 232px;   /* sidebar width */
 }
 
-/* ---------------------------------------------------------------- dark mode
-
-   Two ways in, and they must not fight.
-
-   By default the hub follows whatever the laptop is set to. Once somebody uses
-   the toggle in the sidebar, that choice is stamped on <html> as data-theme and
-   wins from then on — including the case people forget, where the machine is
-   dark and the person has explicitly asked for light.
-
-   That is why the media query is guarded with :not([data-theme="light"]).
-   Without it, choosing light on a dark laptop would do nothing at all.
-
-   `color-scheme` is set alongside the tokens so the browser's own furniture —
-   scrollbars, date pickers, form controls — follows the same choice. Without
-   it you get a white date picker on a black page.
--------------------------------------------------------------------------- */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    /* Purdue black, warmed very slightly so the gold reads as gold. */
-    --bg:          #121110;
-    --bg-elev:     #1b1a17;
-    --bg-sunken:   #23211c;
-    --line:        #2f2c25;
-    --line-strong: #443f34;
-    --text:        #f1ece1;
-    --text-soft:   #b6afa1;
-    --text-faint:  #8b8577;
+  :root {
+    --bg:          #0f1118;
+    --bg-elev:     #171a24;
+    --bg-sunken:   #1e2230;
+    --line:        #272c3b;
+    --line-strong: #363d51;
+    --text:        #e9ebf2;
+    --text-soft:   #a2a9bd;
+    --text-faint:  #7a8197;
 
-    --accent:       #cfb991;  /* at night, gold takes the action */
-    --accent-hover: #dcc9a8;
-    --accent-soft:  #2b2418;
-    --accent-text:  #000000;  /* black on gold — 11:1, and unmistakably Purdue */
+    --accent:       #7c74ff;
+    --accent-hover: #8f88ff;
+    --accent-soft:  #221f3d;
 
-    --gold:      #cfb991;
-    --gold-deep: #cfb991;     /* the dark ground already gives it contrast */
+    --open:   #7aa8ff;  --open-bg:   #17233c;
+    --warn:   #f0b45f;  --warn-bg:   #33260f;
+    --good:   #63d18d;  --good-bg:   #102b1c;
+    --info:   #b69bff;  --info-bg:   #241a3d;
+    --mute:   #98a0b4;  --mute-bg:   #20242f;
+    --danger: #ff8080;  --danger-bg: #351919;
 
-    --open:   #8fb6d4;  --open-bg:   #172430;
-    --warn:   #ddb945;  --warn-bg:   #322708;   /* Field */
-    --good:   #6cc190;  --good-bg:   #13291d;
-    --info:   #c4bfc0;  --info-bg:   #26251f;   /* Steam */
-    --mute:   #9d9795;  --mute-bg:   #221f1b;   /* Railway Gray */
-    --danger: #e98a8a;  --danger-bg: #33191a;
-
-    --shadow:    0 1px 2px rgba(0,0,0,.45), 0 8px 24px -12px rgba(0,0,0,.65);
-    --shadow-lg: 0 24px 60px -18px rgba(0,0,0,.78);
+    --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    --shadow-lg: 0 24px 60px -18px rgba(0,0,0,.75);
   }
 }
-
-:root[data-theme="dark"] {
-    /* Purdue black, warmed very slightly so the gold reads as gold. */
-    --bg:          #121110;
-    --bg-elev:     #1b1a17;
-    --bg-sunken:   #23211c;
-    --line:        #2f2c25;
-    --line-strong: #443f34;
-    --text:        #f1ece1;
-    --text-soft:   #b6afa1;
-    --text-faint:  #8b8577;
-
-    --accent:       #cfb991;  /* at night, gold takes the action */
-    --accent-hover: #dcc9a8;
-    --accent-soft:  #2b2418;
-    --accent-text:  #000000;  /* black on gold — 11:1, and unmistakably Purdue */
-
-    --gold:      #cfb991;
-    --gold-deep: #cfb991;     /* the dark ground already gives it contrast */
-
-    --open:   #8fb6d4;  --open-bg:   #172430;
-    --warn:   #ddb945;  --warn-bg:   #322708;   /* Field */
-    --good:   #6cc190;  --good-bg:   #13291d;
-    --info:   #c4bfc0;  --info-bg:   #26251f;   /* Steam */
-    --mute:   #9d9795;  --mute-bg:   #221f1b;   /* Railway Gray */
-    --danger: #e98a8a;  --danger-bg: #33191a;
-
-    --shadow:    0 1px 2px rgba(0,0,0,.45), 0 8px 24px -12px rgba(0,0,0,.65);
-    --shadow-lg: 0 24px 60px -18px rgba(0,0,0,.78);
-}
-
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"]  { color-scheme: dark; }

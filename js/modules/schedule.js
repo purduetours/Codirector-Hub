@@ -1,11 +1,9 @@
-import { state } from '../core/state.js';
 /* ============================================================ Tour Schedule
    A day-by-day view of the semester schedule. Reads the same `Schedule` tab the
    eval tracker uses, via a `schedule` action that returns it whole.
 ============================================================================ */
-import { loadTours } from '../core/sheets.js';
+import { api } from '../core/api.js';
 import { $, $$, esc, prettyDate, prettyTime, todayISO, debounce, injectStyle, SEARCH_ICON } from '../core/ui.js';
-import { shareData } from '../core/vanessa-ui.js';
 
 let rows = null;                       // cached for the session
 const local = { search: '', from: '', days: 14 };
@@ -22,7 +20,7 @@ injectStyle('sch-css', `
   font-variant-numeric:tabular-nums; }
 .sch-guides { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
 .sch-guide { font-size:.8rem; background:var(--bg-sunken); border-radius:999px; padding:3px 10px; }
-.sch-guide.hit { background:var(--accent); color: var(--accent-text); font-weight:600; }
+.sch-guide.hit { background:var(--accent); color:#fff; font-weight:600; }
 .sch-count { font-size:.74rem; color:var(--text-faint); flex:none; }
 `);
 
@@ -85,21 +83,16 @@ function paint() {
 }
 
 /** Loads the schedule once per session. Safe to call in the background. */
-/* Read straight out of the shared workbook by the browser. No key, no server,
-   and no Apps Script -- which is the last thing it was still being used for. */
 async function prime() {
   if (rows) return;
-  const version = state.sessionVersion;
-  const result = await loadTours();
-  if (version !== state.sessionVersion) return;
-  rows = result;
-  shareData('tours', rows);
+  const data = await api('tourSchedule');
+  rows = data.rows || [];
 }
 
 export default {
   id: 'schedule',
   prefetch: prime,
-  bust: () => { rows = null; shareData('tours', null); },
+  bust: () => { rows = null; },
   title: 'Tour Schedule',
   crumb: 'Who is leading which tour, and when',
   icon: '📅',
@@ -124,8 +117,7 @@ export default {
     if (!rows.length) {
       $('#sch-body').innerHTML =
         `<div class="empty"><div class="empty-mark">📅</div>
-         <p>Nothing scheduled from today onward. If that looks wrong, check the
-         term label in <code>config.js</code> matches the workbook's month tabs.</p></div>`;
+         <p>No schedule data. Import <code>data/Schedule.csv</code> as a <code>Schedule</code> tab in the sheet.</p></div>`;
       return;
     }
 
