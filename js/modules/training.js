@@ -122,10 +122,11 @@ const local = { tab: 'attendance', search: '', session: '' };
    on the session held that day, when there is one. Returns what it found so
    she can say so honestly. */
 let focusDate = null;
-export function focusTraining({ date = null } = {}) {
-  local.tab = 'attendance';
-  focusDate = date;
-  const hit = date && sessions ? sessions.find(x => x.held_on === date) : null;
+export function focusTraining({ date = null, tab = 'attendance', session = null } = {}) {
+  local.tab = ['attendance', 'makeups', 'absences'].includes(tab) ? tab : 'attendance';
+  focusDate = session ? null : date;
+  const hit = session && sessions ? sessions.find(x => x.id === session)
+            : date && sessions ? sessions.find(x => x.held_on === date) : null;
   if (hit) local.session = hit.id;
   return hit ? { label: hit.label } : null;
 }

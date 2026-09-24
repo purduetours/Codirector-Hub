@@ -41,6 +41,10 @@ const openGuides  = () => (state.guides || []).filter(g => g.status === 'open');
 const urgentOpen  = () => openGuides().filter(g => g.rank <= 2);
 const toReview    = () => (state.guides || []).filter(g => g.status === 'submitted');
 const n = (k, one, many = one + 's') => `${k} ${k === 1 ? one : many}`;
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+/** The claimed eval whose tour is today, soonest first — the most relevant thing on Home. */
+const evalToday = () => myClaimed().filter(g => g.date === todayStr()).sort((a, b) => (a.time || '99').localeCompare(b.time || '99'))[0] || null;
+const clock = t => { const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
 
 const NEEDS = { any: () => true, training: inTraining, recruitment: inRecruitment, admin: isAdmin };
 
@@ -48,27 +52,39 @@ const NEEDS = { any: () => true, training: inTraining, recruitment: inRecruitmen
    One plain-language line per tool, used when somebody asks Vanessa what a
    tool is, and as the description on its action. */
 export const TOOL_INFO = {
-  today: { names: ['home', 'vanessa'], explain: 'Home is where I live: what needs you today, and every tool your account can open.', helps: "" },
-  announcements: { names: ['announcements', 'notices'], explain: 'Notices for the committee. Everyone can read them; codirectors post them.', helps: "I can tell you what needs doing." },
-  evals: { names: ['eval tracker', 'evaluation tool', 'evaluations', 'evaluation', 'evals', 'eval'], explain: 'The Eval Tracker is where tour guide evaluations happen: claim a guide, pick one of their tours, then submit your feedback.', helps: "I can help you write feedback or find a tour to evaluate." },
-  interviews: { names: ['interviews', 'interview tool', 'grading'], explain: 'Interviews runs recruitment day: check candidates in, grade them, and see results and decisions.', helps: "I can find who is ungraded or worth discussing." },
-  training: { names: ['training', 'attendance'], explain: 'Training tracks attendance at each session, who owes a makeup, and absences filed in advance.', helps: "I can find who owes a makeup or who filed an absence." },
-  schedule: { names: ['tour schedule', 'schedule'], explain: 'The Tour Schedule shows who is leading which tour, read live from the shared workbook.', helps: "I can tell you who is leading, any day." },
-  directory: { names: ['guide directory', 'directory'], explain: 'The Guide Directory is everyone on the roster, with their eval status, tours and details in one place.', helps: "I can find who still needs an eval." },
-  desks: { names: ['desk coverage', 'desks', 'desk'], explain: 'Desk Coverage is the weekly Front and Welcome desk rota, with any uncovered slots called out.', helps: "I can find uncovered slots." },
-  people: { names: ['people', 'accounts', 'access'], explain: 'People controls who can sign in to the hub and which role — and so which tools — each person has.', helps: "I can explain what each role can see." },
-  health: { names: ['data health'], explain: 'Data health lists where the hub and the spreadsheets disagree, so records can be put right.', helps: "I can explain what each check means." }
+  today: { names: ['home', 'vanessa'], explain: 'Home is where I live: what needs you today, and every tool your account can open.', helps: "",
+    howto: ['Tell me what you are trying to do — “I need to do an eval”, “who has the 2 PM?”.', 'Or pick one of the actions below; the most pressing come first.', 'Every tool your account can open is one click away.'] },
+  announcements: { names: ['announcements', 'notices'], explain: 'Notices for the committee. Everyone can read them; codirectors post them.', helps: "I can tell you what needs doing.",
+    howto: ['Newest notices are at the top.', 'Codirectors can post, edit and pin notices here.'] },
+  evals: { names: ['eval tracker', 'evaluation tool', 'evaluations', 'evaluation', 'evals', 'eval'], also: ['tracker'], explain: 'The Eval Tracker is where tour guide evaluations happen: claim a guide, pick one of their tours, then submit your feedback.', helps: "I can help you write feedback or find a tour to evaluate.",
+    howto: ['Available lists guides nobody has claimed yet — claim one and pick their tour.', 'Mine holds the ones you claimed; open one to write and submit the evaluation.', 'Or just tell me “I need to do an eval” and I’ll walk you through it.'] },
+  interviews: { names: ['interviews', 'interview tool', 'grading'], explain: 'Interviews runs recruitment day: check candidates in, grade them, and see results and decisions.', helps: "I can find who is ungraded or worth discussing.",
+    howto: ['Check candidates in as they arrive.', 'Grade each one you interviewed.', 'Results shows scores, disagreements and decisions.'] },
+  training: { names: ['training', 'attendance'], also: ['attendance tool', 'absence form'], explain: 'Training tracks attendance at each session, who owes a makeup, and absences filed in advance.', helps: "I can find who owes a makeup or who filed an absence.",
+    howto: ['Attendance: pick a session, then set each person’s status in the grid.', 'Makeups owed: mark a makeup done when someone completes it.', 'Absence form: responses people filed ahead of time.'] },
+  schedule: { names: ['tour schedule', 'schedule'], explain: 'The Tour Schedule shows who is leading which tour, read live from the shared workbook.', helps: "I can tell you who is leading, any day.",
+    howto: ['Search for a guide, or change the start date and range.', 'It reads the shared workbook live, so changes there show up here.'] },
+  directory: { names: ['guide directory', 'directory'], explain: 'The Guide Directory is everyone on the roster, with their eval status, tours and details in one place.', helps: "I can find who still needs an eval.",
+    howto: ['Search by name, or filter by priority.', 'Open a guide to see their tours, evaluation and training at a glance.'] },
+  desks: { names: ['desk coverage', 'desks', 'desk'], explain: 'Desk Coverage is the weekly Front and Welcome desk rota, with any uncovered slots called out.', helps: "I can find uncovered slots.",
+    howto: ['Each day shows who covers the Front and Welcome desks.', 'Uncovered slots are called out so they can be filled.'] },
+  people: { names: ['people', 'accounts', 'access'], explain: 'People controls who can sign in to the hub and which role — and so which tools — each person has.', helps: "I can explain what each role can see.",
+    howto: ['Add someone’s email so they can sign in.', 'Their role decides which tools they see.', 'Changes take effect at their next sign-in.'] },
+  health: { names: ['data health'], explain: 'Data health lists where the hub and the spreadsheets disagree, so records can be put right.', helps: "I can explain what each check means.",
+    howto: ['Each check lists records that disagree between the hub and a sheet.', 'Fix the record at its source, then refresh.'] }
 };
 
 /* ------------------------------------------------------------ registry */
 const ACTIONS = [
   /* --- home: the day ------------------------------------------------- */
-  { id: 'complete-eval', kind: 'ask', q: 'Help me write an eval', needs: 'training', context: ['today', 'evals'],
+  { id: 'complete-eval', kind: 'ask', q: 'I need to do an evaluation', needs: 'training', context: ['today', 'evals'],
     title: 'Complete an evaluation', icon: 'evals', category: 'task',
-    description: 'I will walk you through the write-up',
-    priority: () => (myClaimed().length ? 92 : null),
+    description: 'Pick the tour, tell me how it went, approve the wording',
+    // A tour happening today outranks everything; a claim waiting is next.
+    priority: () => (evalToday() ? 98 : myClaimed().length ? 92 : null),
     badge: () => myClaimed().length || null,
-    reason: () => myClaimed().length ? `You have ${n(myClaimed().length, 'claimed evaluation')} waiting.` : null },
+    reason: () => evalToday() ? `${evalToday().name.split(' ')[0]}’s tour is today${evalToday().time ? ` at ${clock(evalToday().time)}` : ''}.`
+                : myClaimed().length ? `You have ${n(myClaimed().length, 'claimed evaluation')} waiting.` : null },
 
   { id: 'review-evals', kind: 'open', to: 'evals', context: ['today'],
     title: 'Review submitted evals', icon: 'evals', category: 'task',

@@ -204,3 +204,38 @@ textarea.is-filled { box-shadow: 0 0 0 3px rgba(255,79,163,.35), var(--glow-sm);
 /* Her halo belongs to the orb, not to the column the thread runs down. */
 .hm-halo { inset: auto; top: -40px; left: 50%; margin-left: -92px; width: 184px; height: 184px; }
 @media (max-width: 860px) { .hm-halo { top: -28px; margin-left: -63px; width: 126px; height: 126px; } }
+
+/* ---------------------------------------------------------------- pass 6
+   Only what Vanessa's workflows need to read clearly. No new effects. */
+/* Facts say where they came from; her own writing says it is hers. */
+.v-src { margin: 10px 0 0 !important; font-size: var(--fs-2xs); color: var(--text-faint); letter-spacing: .02em; }
+.v-src::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--open); margin: 0 6px 1px 0; vertical-align: middle; }
+.v-gen { display: flex; align-items: center; gap: 6px; margin: 10px 0 0 !important; font-size: var(--fs-2xs); color: var(--pink-soft); font-weight: 650; }
+.v-gen svg { width: 12px; height: 12px; }
+/* Long values (feedback, a list of names) stack under their label. */
+.v-rows-wide div { display: grid; gap: 2px; }
+.v-rows-wide dd { text-align: left; font-weight: 550; white-space: pre-wrap; line-height: 1.5; }
+.v-rows-wide dt { font-size: var(--fs-2xs); font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.v-rate { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; font-size: var(--fs-xs); color: var(--text-soft); }
+.v-rate span { margin-right: 4px; font-weight: 650; }
+.v-rate .v-chip { min-width: 34px; justify-content: center; }
+.v-tone { margin-top: 8px; }
+.v-flow-cancel { display: block; margin: 10px 0 0 auto; font: inherit; font-size: var(--fs-xs); font-weight: 650; color: var(--text-faint);
+  background: none; border: 0; padding: 4px 2px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.v-flow-cancel:hover { color: var(--text); }
+.v-plan.is-settled .v-flow-cancel { display: none; }
+.v-items .v-opt { padding-block: 9px; }
+/* A task under way stays one tap away even mid-conversation. */
+.v-panel.has-chat.has-task [data-suggestions] { display: flex; }
+.v-panel.has-chat.has-task [data-suggestions] .v-chip:not(.is-resume) { display: none; }
+.v-chip.is-resume { border-color: rgba(255,79,163,.5); color: var(--text); }
+:root[data-theme="light"] .v-rows div { background: rgba(60,20,45,.04); }
+/* When Vanessa is docked beside the workspace (wide screens), a form she is
+   helping with opens beside her rather than under a scrim that dims her —
+   the two are meant to be used together. */
+@media (min-width: 1280px) {
+  body.v-open .modal-root { right: 432px; }
+}
+.v-steps { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 5px; font-size: var(--fs-sm); color: var(--text-soft); line-height: 1.5; }
+.v-steps li::marker { color: var(--pink-soft); font-weight: 750; }
+.v-plan.v-k-summary .v-steps:only-of-type { }

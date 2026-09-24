@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vanessa tests</title>
+<!--
+  Vanessa's understanding, writing, memory and permissions, with the real
+  modules and in-memory data — nothing here talks to the database.
+  Serve the project folder and open this page, e.g.
+    python3 -m http.server 8000   then   http://localhost:8000/tests/vanessa.test.html
+-->
+<style>
+  body { font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 32px; color: #17150f; background: #f5f2eb; }
+  h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 22px; } .ok { color: #2e7d4f; } .bad { color: #a3222a; font-weight: 700; }
+  li { margin: 3px 0; } #sum { font-weight: 700; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Vanessa tests</h1>
+<div id="out"></div>
+<p id="sum"></p>
+<script>window.CONFIG = { SUPABASE_URL: 'https://example.invalid', SUPABASE_KEY: 'test', TERM_LABEL: 'Fall 2026' };</script>
+<script type="module">
+  import { state } from '../js/core/state.js';
+  import { register } from '../js/core/router.js';
+  import { understand } from '../js/core/vanessa-language.js';
+  import { polishFeedback, explicitRating } from '../js/core/vanessa-write.js';
+  import { explainError } from '../js/core/vanessa-errors.js';
+  import * as mem from '../js/core/vanessa-memory.js';
+  import { interpret } from '../js/core/vanessa-os.js';
+  import { share, registerLoaders } from '../js/core/vanessa-data.js';
+  import evals from '../js/modules/evals.js';
+  import interviews from '../js/modules/interviews.js';
+  import schedule from '../js/modules/schedule.js';
+  import directory from '../js/modules/directory.js';
+  import desks from '../js/modules/desks.js';
+  import announcements from '../js/modules/announcements.js';
+  import today from '../js/modules/today.js';
+  import people from '../js/modules/people.js';
+  import training from '../js/modules/training.js';
+  import health from '../js/modules/health.js';
+  [today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
+
+  let pass = 0, fail = 0, list = null;
+  const out = document.getElementById('out');
+  const section = t => { out.insertAdjacentHTML('beforeend', `<h2>${t}</h2><ul></ul>`); list = out.lastElementChild; };
+  const check = (label, ok, detail = '') => { ok ? pass++ : fail++;
+    list.insertAdjacentHTML('beforeend', `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${label}${detail && !ok ? ` — ${String(detail).replace(/</g, '&lt;')}` : ''}</li>`); };
+  const console_error = console.error; console.error = () => {};              // explainError logs on purpose
+
+  /* ---------------------------------------------------------------- language */
+  section('Understanding what people mean');
+  const SAME = {
+    evaluate: ['I need to do an eval', 'Can I evaluate someone?', 'I need to fill out a tour evaluation', 'Help me evaluate my tour', 'I need to give feedback', 'yo I need to do an eval', 'evaluate the 2pm tour', 'i gotta do an evaluation tmrw'],
+    open_tool: ['Open evaluations', "where's attendance", 'Evaluations', 'Attendance', 'Take me to training', 'take me to the eval tracker'],
+    tours: ['who has tours today', 'What tours are happening today?', 'Who has the 2 PM?', "What's my next tour?", "Find today's tours", 'who is leading tours tomorrow'],
+    evaluating: ['Who is evaluating today?', 'Who is evaluating the 1:30?'],
+    attendance: ['Who was absent today?', "Show today's attendance", "Check Caleb's attendance", 'Open the absence form'],
+    mark_attendance: ['I need to mark someone'],
+    people: ['Find John', "Show me Max's information"],
+    active: ['who is active', 'Who is active right now?'],
+    help_here: ['what am I supposed to do here', 'What is this page?', 'How do I use this?'],
+    explain_tool: ['What does attendance do?', 'What is the eval tracker?'],
+    cancel: ['actually never mind', 'cancel', 'never mind', 'nvm'],
+    home: ['go home'], back: ['go back'],
+    refine: ['that sounded too harsh', 'make it shorter', 'more direct', 'start over'],
+    reference: ['open the second one', 'that one'],
+    write_feedback: ['help me write this', 'help me write this comment'],
+    feedback_note: ['He was really confident and knew a lot, but I think he talked too fast and sometimes gave way too much information. Overall really good though.']
+  };
+  for (const [intent, phrases] of Object.entries(SAME)) {
+    const wrong = phrases.filter(p => understand(p).intent !== intent).map(p => `"${p}" → ${understand(p).intent}`);
+    check(`${intent}: ${phrases.length} phrasings read the same way`, !wrong.length, wrong.join(' | '));
+  }
+  // Questions her existing answers handle must be left to them.
+  const LEAVE = ['who still needs an eval', 'What should I wear on tour?', 'Who needs an eval and has a tour tomorrow?', 'who owes a makeup',
+    'who filed an absence', 'How far along are the evals?', 'what are my evals', 'how do I claim someone', 'what do I need to do', 'claim noah', 'what can you do', 'when is Blake leading a tour'];
+  const stolen = LEAVE.filter(p => understand(p).intent && understand(p).intent !== 'people').map(p => `"${p}" → ${understand(p).intent}`);
+  check('existing questions still reach her existing answers', !stolen.length, stolen.join(' | '));
+  check('"the 2 PM" is two o\'clock; "2 evals" is not a time', understand('who has the 2 PM').time === '14:00' && understand('I have 2 evals').time === null);
+  check('"the second one" is the second item', understand('open the second one').ordinal === 1);
+  check('"what\'s my next tour" is not a date question', understand("what's my next tour").day === null);
+
+  /* ---------------------------------------------------------------- writing */
+  section('Polishing feedback without changing it');
+  const NOTE = 'He was really confident and knew a lot, but I think he talked too fast and sometimes gave way too much information. Overall really good though.';
+  const s = polishFeedback(NOTE, { name: 'Alex Rivera' });
+  check('the strengths are the ones given', /confident/.test(s.wentWell) && /knew a lot/.test(s.wentWell) && /really good/.test(s.wentWell), s.wentWell);
+  check('the improvements are the ones given', /slow/.test(s.improve) && /detail/.test(s.improve), s.improve);
+  check('"sometimes" is kept', /at times/.test(s.improve), s.improve);
+  check('"good" is never promoted', !/excellent|outstanding|amazing|exceptional/i.test(s.wentWell), s.wentWell);
+  const praiseOnly = polishFeedback('great energy and very friendly', { name: 'Sam' });
+  check('praise only → no invented criticism', !praiseOnly.improve, praiseOnly.improve);
+  const critOnly = polishFeedback('talked way too fast and was hard to hear', { name: 'Sam' });
+  check('criticism only → no invented praise', !critOnly.wentWell, critOnly.wentWell);
+  const odd = polishFeedback('forgot the library stop', { name: 'Sam' });
+  check('a point with no phrasing stays in their words', /forgot the library stop/.test(odd.wentWell + odd.improve), JSON.stringify(odd));
+  check('…and a criticism never lands under What went well', !/forgot/.test(odd.wentWell), odd.wentWell);
+  const pts = st => polishFeedback(NOTE, { name: 'Alex', style: st }).points;
+  check('shorter, more direct and softer keep every point', ['short', 'direct', 'soft'].every(st => pts(st) === pts('normal')));
+  const soft = polishFeedback(NOTE, { name: 'Alex', style: 'soft' }), direct = polishFeedback(NOTE, { name: 'Alex', style: 'direct' });
+  check('softer still says slow down and cut detail', /slow down/.test(soft.improve) && /detail/.test(soft.improve), soft.improve);
+  check('more direct is plainer, same points', /^Slow down/.test(direct.improve), direct.improve);
+  check('a rating is only ever one they gave', explicitRating("i'd give her a 4") === 4 && explicitRating('4/5') === 4 && explicitRating('really good, 2 stops were rushed') === null);
+
+  /* ---------------------------------------------------------------- errors */
+  section('Errors in normal language');
+  check('PGRST116 → record not available', /couldn’t load that record/.test(explainError({ message: 'JSON object requested, multiple (or no) rows returned', code: 'PGRST116' })));
+  check('network failure → connection', /reach the server/.test(explainError(new TypeError('Failed to fetch'))));
+  check('RLS → not available for your account', /isn’t available for your account/.test(explainError({ message: 'new row violates row-level security policy' })));
+  check('a sentence already written for people is kept', explainError(new Error('Blake was just claimed by somebody else.')) === 'Blake was just claimed by somebody else.');
+
+  /* ---------------------------------------------------------------- memory */
+  section('Short-term memory');
+  mem.resetMemory('t');
+  mem.startFlow('evaluate', 'choose', {});
+  mem.updateFlow({ step: 'notes', evalId: 'e1', name: 'Blake Rivera' });
+  check('a workflow remembers what was chosen', mem.activeFlow('evaluate')?.data.evalId === 'e1' && mem.activeFlow().step === 'notes');
+  check('cancelling ends it', mem.endFlow('cancelled')?.ended === 'cancelled' && !mem.activeFlow());
+  mem.rememberList('tour', [{ label: 'a', run: () => 'A' }, { label: 'b', run: () => 'B' }]);
+  check('"the second one" resolves from the last list', mem.recallOrdinal(1)?.run() === 'B');
+  check('"that one" with two in view asks which', !!mem.recallFocus()?.choices);
+  mem.resetMemory('t');
+  check('a reset forgets everything', !mem.recallOrdinal(0) && !mem.recallFocus() && !mem.activeFlow());
+
+  /* ---------------------------------------------------------------- permissions & data */
+  const ROLES = {
+    guide:     { name: 'Tour Guide',            is_admin: false, in_training: false, in_recruitment: false },
+    training:  { name: 'Training Committee',    is_admin: false, in_training: true,  in_recruitment: false },
+    developer: { name: 'Developer',             is_admin: false, in_training: true,  in_recruitment: true  },
+    admin:     { name: 'Codirector',            is_admin: true,  in_training: true,  in_recruitment: true  }
+  };
+  const NO = "That tool isn't available for your account.";
+  const refused = p => p && p.type === 'reply' && (p.text?.startsWith(NO) || p.kind === 'alert');
+  const guides = [{ id: 'e1', name: 'Blake Rivera', status: 'claimed', evaluatorId: 'me', evaluator: 'Test Person', date: '', time: '', tours: [], priority: 'First Priority', rank: 1 },
+                  { id: 'e2', name: 'Emery Hall', status: 'claimed', evaluatorId: 'x', evaluator: 'Sam Lee', date: '', time: '', tours: [], priority: 'Second Priority', rank: 2 }];
+  registerLoaders({ tours: async () => {}, training: async () => {}, roster: async () => {} });
+  for (const [key, role] of Object.entries(ROLES)) {
+    section(`Permissions · ${key}`);
+    state.role = role; state.me = { id: 'me', full_name: 'Test Person', role: role.name };
+    state.guides = role.in_training ? guides.map(g => ({ ...g })) : []; state.loadedAt = new Date();
+    share('tours', null); share('training', null);
+    mem.resetMemory('me');
+    const run = async q => { mem.resetMemory('me'); return interpret(q); };
+    const tasks = { training: ['I need to do an eval', 'Open Blake’s evaluation', 'Who is evaluating today?', 'help me write this'],
+                    admin: ['Who was absent today?', "Check Blake's attendance", 'I need to mark someone', 'Open the absence form', 'where is attendance'] };
+    for (const [need, qs] of Object.entries(tasks)) {
+      const may = need === 'admin' ? role.is_admin : role.in_training;
+      if (may) continue;
+      const leaks = [];
+      for (const q of qs) { const p = await run(q); if (!refused(p)) leaks.push(`${q} → ${p?.type}: ${p?.text || p?.title || ''}`); }
+      check(`${need} tasks are refused, before anything runs`, !leaks.length, leaks.join(' | '));
+    }
+    if (role.in_training) {
+      const p = await run('Open Emery’s evaluation');
+      check('someone else’s claimed eval is not opened', p?.type === 'reply' && /Sam Lee is evaluating/.test(p.text), p?.text);
+    }
+    // Nothing loaded: she says so instead of inventing tours or records.
+    const t = await run('who has tours today');
+    check('no schedule loaded → says so, invents nothing', t?.type === 'reply' && /couldn’t load the tour schedule/.test(t.text), JSON.stringify(t).slice(0, 160));
+    if (role.is_admin) {
+      const a = await run('Who was absent today?');
+      check('no training records loaded → says so', a?.type === 'reply' && /couldn’t load the training records/.test(a.text), a?.text);
+    }
+    // With a schedule: only the rows that exist.
+    const d = new Date(), localToday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    share('tours', [{ date: localToday, start: '14:00', slot: '2:00-3:00', guide: 'Blake R.' }]);
+    const t2 = await run('who has tours today');
+    const shown = (t2?.items || []).map(i => i.sub).join(',');
+    check('tours shown are exactly the loaded rows', t2?.type === 'summary' && shown === 'Blake R.', shown);
+  }
+
+  console.error = console_error;
+  document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;
+  document.getElementById('sum').className = fail ? 'bad' : 'ok';
+  document.title = fail ? `✗ ${fail} failed` : `✓ ${pass} passed`;
+</script>
+</body>
+</html>

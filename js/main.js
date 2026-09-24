@@ -12,6 +12,7 @@ import { registerEvalActions } from './core/vanessa-eval.js';
 import { submitReviewedEval } from './core/vanessa-eval-submit.js';
 import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup, openVanessa, toggleVanessa, onVanessaToggle } from './core/vanessa-ui.js';
 import { initQuickSearch } from './core/quicksearch.js';
+import { registerLoaders } from './core/vanessa-data.js';
 
 import evals, { loadRoster } from './modules/evals.js';
 import interviews    from './modules/interviews.js';
@@ -42,6 +43,15 @@ onSessionReset(() => {
 });
 
 registerEvalActions({ load: loadRoster, submit: submitReviewedEval });
+
+/* The same loaders, by kind, for Vanessa's facts: she asks the module that
+   owns the data to load it, once, only when a question needs it. */
+registerLoaders({
+  roster:     () => (state.guides.length ? null : loadRoster()),
+  tours:      () => schedule.prefetch?.(),
+  training:   () => (isAdmin() ? training.prefetch?.() : null),
+  interviews: () => interviews.prefetch?.()
+});
 
 function paintShell() {
   $('#who-name').textContent = myName();

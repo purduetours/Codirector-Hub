@@ -22,6 +22,7 @@ import { esc, todayISO } from './ui.js';
 import { taskSummary } from './vanessa-tasks.js';
 import { matchEvalTours } from './vanessa-tour-match.js';
 import { dateRange, dayISO, DAY_NAMES } from './vanessa-dates.js';
+import { shared, share, resetData } from './vanessa-data.js';
 
 /* --------------------------------------------------------------- matching
    People do not type the phrase you thought of. "who hasnt been graded",
@@ -230,9 +231,8 @@ const sameSession = (a, b) => {
 /* ------------------------------------------------- interview answers ------ */
 
 let interviewData = null;
-const shared = { tours: null, desks: null, training: null, majors: null };
 export function shareInterviews(d) { interviewData = d; }
-export function shareOther(kind, rows) { shared[kind] = rows; }
+export function shareOther(kind, rows) { share(kind, rows); }
 
 /**
  * How much the raters disagreed, and whether that is worth the room's time.
@@ -364,7 +364,7 @@ const prettyClock = t => {
  * how many parts of the name are present means a full name beats a surname and
  * the ambiguity resolves.
  */
-function findPeople(q, list, nameOf) {
+export function findPeople(q, list, nameOf) {
   const ws = tokens(q);
   const scored = list.map(p => {
     const parts = tokens(nameOf(p));
@@ -538,7 +538,7 @@ const memory = { list: [], person: null, pending: null, recent: [], lastQuestion
 
 export function forget() { memory.list = []; memory.person = null; memory.pending = null; memory.recent = []; }
 export function resetVanessaData() {
-  forget(); greeted = false; interviewData = null; shared.tours = shared.desks = null;
+  forget(); greeted = false; interviewData = null; resetData();
 }
 
 /** Called by the answers that read out a list, so "the second one" can work. */
@@ -1088,6 +1088,16 @@ function whatIsWaiting() {
 
   if (inTraining() && g.length) {
     const mine = g.filter(x => x.evaluatorId === me && x.status === 'claimed');
+    /* A tour you are evaluating in the next few hours matters more than a
+       count — said once, in the greeting, never as a popup. */
+    const now = new Date(), mins = now.getHours() * 60 + now.getMinutes();
+    const soon = mine.filter(x => x.date === todayISO() && x.time).map(x => ({ x, at: +x.time.slice(0, 2) * 60 + +x.time.slice(3, 5) }))
+      .filter(t => t.at >= mins && t.at - mins <= 180).sort((a, b) => a.at - b.at)[0];
+    if (soon) {
+      const d = soon.at - mins, h = Math.floor(soon.at / 60), m = soon.at % 60;
+      const when = d < 50 ? 'in under an hour' : d < 90 ? 'in about an hour' : `in about ${Math.round(d / 60)} hours`;
+      return `${soon.x.name.split(' ')[0]}’s tour is at ${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'} — ${when}.`;
+    }
     if (mine.length) return `You have ${mine.length} eval${mine.length === 1 ? '' : 's'} claimed and not submitted.`;
   }
 

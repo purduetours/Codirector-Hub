@@ -862,14 +862,30 @@ function openEval(g) {
   /* Tell Vanessa what is open, and give her the form's own field access, so
      "help me write this comment" means this evaluation and a suggestion she
      makes lands through the form — never around it. */
-  const FIELD = { wentWell: '#ev-well', improve: '#ev-improve', notes: '#ev-notes' };
+  const FIELD = { wentWell: '#ev-well', improve: '#ev-improve', notes: '#ev-notes', date: '#ev-eval-date', time: '#ev-eval-time' };
+  const isOpen = () => !!$('#ev-modal-eval') && !$('#ev-modal-eval').hidden && local.target?.id === g.id;
   setWorkContext({
     kind: 'eval-form', label: `${g.name}'s evaluation`,
-    data: { evalId: g.id, name: g.name },
-    isOpen: () => !!$('#ev-modal-eval') && !$('#ev-modal-eval').hidden && local.target?.id === g.id,
-    read: key => $(FIELD[key])?.value || '',
-    write: (key, value) => { const el = $(FIELD[key]); if (!el) return; el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); },
-    assist: rough => showAssist(rough)
+    data: { evalId: g.id, name: g.name, date: g.date, time: g.time, priority: g.priority },
+    isOpen,
+    read: key => key === 'rating' ? Number($('#ev-rating input:checked')?.value) || null : $(FIELD[key])?.value || '',
+    write: (key, value) => {
+      if (key === 'rating') { const hit = $$('#ev-rating input').find(i => i.value === String(value)); if (hit) { hit.checked = true; hit.dispatchEvent(new Event('change', { bubbles: true })); } return; }
+      const el = $(FIELD[key]); if (!el) return;
+      el.value = value; el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.classList.add('is-filled'); setTimeout(() => el.classList.remove('is-filled'), 900);
+    },
+    /* Hand the keyboard back: the person finishes it themselves. */
+    focus: key => { const el = $(FIELD[key] || '#ev-well'); el?.focus(); el?.setSelectionRange?.(el.value.length, el.value.length); },
+    assist: rough => showAssist(rough),
+    /* Vanessa's Submit is this form's own Submit — the same validation, the
+       same submit_eval call, the same draft clean-up. It resolves with what
+       that handler reported, so she can say how it went. */
+    submit: () => new Promise(resolve => {
+      if (!isOpen()) return resolve({ ok: false, error: new Error('That form has closed, so nothing was submitted.') });
+      pendingResult = resolve;
+      $('#ev-eval-form').requestSubmit();
+    })
   });
 }
 
@@ -877,13 +893,13 @@ function openEval(g) {
    Rough notes in a feedback box, polished wording offered underneath. Nothing
    changes in the form until "Use this" or "Edit" is pressed; "Try again"
    offers another phrasing of the same points. */
-let assist = { source: '', variant: 0 };
+let assist = { source: '', variant: 0, style: 'normal' };
 
-function showAssist(rough, variant = 0) {
+function showAssist(rough, variant = 0, style = 'normal') {
   const box = $('#ev-assist');
   if (!box || !local.target) return false;
-  assist = { source: rough, variant };
-  const s = polishFeedback(rough, { name: local.target.name, variant });
+  assist = { source: rough, variant, style };
+  const s = polishFeedback(rough, { name: local.target.name, variant, style });
   if (s.empty) {
     box.innerHTML = `<div class="v-suggest-head"><span class="orb orb-xs"><i></i></span><b>Vanessa</b></div>
       <p class="v-suggest-note">Jot down a few rough notes first — "confident, knew everything, but talked fast" is plenty — and I will suggest the wording.</p>`;
@@ -897,11 +913,22 @@ function showAssist(rough, variant = 0) {
       <span class="v-suggest-sub">from your notes — nothing is changed until you choose</span></div>
     ${part('wentWell', 'What went well', s.wentWell)}${part('improve', 'Areas to improve', s.improve)}
     <div class="v-suggest-foot"><button type="button" class="linkish" data-again>Try again</button>
+      <button type="button" class="linkish" data-tone="short">Shorter</button>
+      <button type="button" class="linkish" data-tone="direct">More direct</button>
+      <button type="button" class="linkish" data-tone="soft">Softer</button>
       <button type="button" class="linkish" data-dismiss>Dismiss</button></div>`;
   box.dataset.well = s.wentWell; box.dataset.improve = s.improve;
   box.hidden = false;
   box.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
   return true;
+}
+
+/* The result of a submit Vanessa started, reported back to her. */
+let pendingResult = null;
+function report(result) {
+  const fn = pendingResult; pendingResult = null;
+  fn?.(result);
+  if (result.ok) document.dispatchEvent(new CustomEvent('hub:eval-submitted', { detail: { evalId: result.evalId } }));
 }
 
 /** Vanessa's handoff: open the submit form for a claimed guide. */
@@ -914,8 +941,12 @@ function flushPendingOpen() {
   if (!pendingOpen) return;
   const g = state.guides.find(x => x.id === pendingOpen);
   pendingOpen = null;
-  if (g && isMine(g) && g.status === 'claimed') openEval(g);
+  if (!g) return;
+  if (isMine(g) && g.status === 'claimed') openEval(g);
+  else if (['submitted', 'reviewed'].includes(g.status) && (canReadEvals() || isMine(g))) openView(g);
 }
+/** May this account read a submitted eval's feedback? The same rule as the Done tab. */
+export const mayReadEval = g => !!g && (canReadEvals() || isMine(g));
 
 /* Read-only view of what was submitted. Fetched on open rather than with the
    roster: the feedback is the sensitive part and there is no reason to pull
@@ -1131,7 +1162,9 @@ export default {
         use.closest('.v-suggest-part')?.classList.add('is-used');
         return;
       }
-      if (e.target.closest('[data-again]')) { showAssist(assist.source, assist.variant + 1); return; }
+      if (e.target.closest('[data-again]')) { showAssist(assist.source, assist.variant + 1, assist.style); return; }
+      const tone = e.target.closest('[data-tone]');
+      if (tone) { showAssist(assist.source, 0, tone.dataset.tone); return; }
       if (e.target.closest('[data-dismiss]')) { box.hidden = true; }
     });
 
@@ -1139,6 +1172,7 @@ export default {
       e.preventDefault();
       const go = $('#ev-eval-submit'), err = $('#ev-eval-error');
       if (!$('#ev-well').value.trim() && !$('#ev-improve').value.trim()) {
+        report({ ok: false, error: new Error('Add at least a little feedback before submitting.') });
         return showError(err, 'Add at least a little feedback before submitting.');
       }
       const checked = $('#ev-rating input:checked');
@@ -1157,11 +1191,13 @@ export default {
           p_improve:   $('#ev-improve').value,
           p_notes:     $('#ev-notes').value
         });
-        clearDraft(local.target.id);      // it is on the server now
+        const done = local.target;
+        clearDraft(done.id);              // it is on the server now
         closeModal($('#ev-modal-eval'));
         toast(r?.message || 'Eval submitted.');
+        report({ ok: true, evalId: done.id, name: done.name, message: r?.message || 'Eval submitted.' });
         await reload();
-      } catch (e2) { showError(err, e2.message); }
+      } catch (e2) { report({ ok: false, error: e2 }); showError(err, e2.message); }
       finally { go.disabled = false; go.textContent = 'Submit eval'; }
     });
 

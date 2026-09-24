@@ -157,6 +157,11 @@ export function initQuickSearch() {
   });
 }
 
+/** Set the person the next screen should open on — Vanessa uses the same hand-off. */
+export function setJumpTarget(name) {
+  try { sessionStorage.setItem('hub2.qs.jump', name); } catch { /* the screen just opens unfiltered */ }
+}
+
 /** Consumed by whichever screen was opened, so it can jump to the person. */
 export function takeJumpTarget() {
   const v = sessionStorage.getItem('hub2.qs.jump');
