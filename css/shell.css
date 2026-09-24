@@ -421,3 +421,11 @@ svg { display: block; }
   a[href]::after { content: ""; }
   @page { margin: 14mm; }
 }
+
+/* A sheet is open: the dock and Vanessa's pill step aside, so nothing sits
+   over the sheet's Claim / Submit / Cancel buttons (iOS Safari can otherwise
+   paint the fixed dock above it). */
+body.modal-open .dock, body.modal-open .v-float { display: none !important; }
+@media (max-width: 620px) {
+  .modal { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+}

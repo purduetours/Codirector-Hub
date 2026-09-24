@@ -93,6 +93,7 @@ export function openModal(root) {
   focusBefore.set(root, document.activeElement);
   root.hidden = false;
   document.body.style.overflow = 'hidden';
+  document.body.classList.add('modal-open');     // the phone dock steps aside so it never covers the sheet's buttons
 
   const panel = root.querySelector('.modal') || root;
   panel.setAttribute('role', 'dialog');
@@ -120,6 +121,8 @@ export function closeModal(root) {
     leaving.set(root, setTimeout(() => { root.hidden = true; root.classList.remove('is-leaving'); }, 170));
   }
   document.body.style.overflow = '';
+  if (![...document.querySelectorAll('.modal-root:not([hidden])')].some(m => m !== root && !m.classList.contains('is-leaving')))
+    document.body.classList.remove('modal-open');
   const back = focusBefore.get(root);
   focusBefore.delete(root);
   // Put them back where they were, if it is still on the page.
