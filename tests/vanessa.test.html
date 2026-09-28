@@ -57,6 +57,7 @@
     evaluating: ['Who is evaluating today?', 'Who is evaluating the 1:30?'],
     attendance: ['Who was absent today?', "Show today's attendance", "Check Caleb's attendance", 'Open the absence form'],
     mark_attendance: ['I need to mark someone'],
+    complete_makeup: ['Ella completed makeup training', 'Ella did her makeup', 'Can you mark Ella’s makeup training as complete?', 'Mark Ella’s makeup done', 'Someone finished their makeup training'],
     people: ['Find John', "Show me Max's information"],
     active: ['who is active', 'Who is active right now?'],
     help_here: ['what am I supposed to do here', 'What is this page?', 'How do I use this?'],
@@ -169,6 +170,76 @@
     const shown = (t2?.items || []).map(i => i.sub).join(',');
     check('tours shown are exactly the loaded rows', t2?.type === 'summary' && shown === 'Blake R.', shown);
   }
+
+  section('Makeup completion language and obsolete form option');
+  const { makeupRequest, ignoredAbsenceSession } = await import('../js/core/vanessa-makeup.js');
+  for (const q of ['Ella has not completed makeup training', 'Did Ella complete makeup training?', 'Ella will complete makeup tomorrow', 'Who completed makeup training?', 'Ella needs her makeup marked done']) {
+    check('No completion action: ' + q, makeupRequest(q) === null && understand(q).intent !== 'complete_makeup');
+  }
+  for (const q of ['Ella completed makeup training', 'Ella did her makeup', 'Can you mark Ella’s makeup training as complete?']) check('Resolves Ella: ' + q, makeupRequest(q)?.name === 'ella');
+  for (const label of ['September 7th', 'September 7', 'Sept. 7th', '9/7', '09/07/2026']) check('Ignores obsolete option: ' + label, ignoredAbsenceSession(label));
+  for (const label of ['September 21st', 'October 7th', '9/17', 'September 7th 2027']) check('Keeps other session: ' + label, !ignoredAbsenceSession(label));
+
+  section('Makeup workflow and persistence');
+  const realFetch = window.fetch;
+  const sessions = [{id:'s1',label:'September 21st',held_on:'2026-09-21'},{id:'s2',label:'October 5th',held_on:'2026-10-05'}];
+  let records, writes, failId, emptyWrite;
+  window.fetch = async (url, opts = {}) => {
+    if (!String(url).startsWith('https://example.invalid/rest/v1/')) throw new Error('External requests disabled during test');
+    const u = new URL(url), table = u.pathname.split('/').at(-1);
+    if (opts.method === 'PATCH') {
+      const id = u.searchParams.get('id').slice(3); writes.push(id);
+      if (id === failId) return new Response(JSON.stringify({message:'Test save failure'}), {status:500});
+      const row = records.find(r => r.id === id);
+      if (emptyWrite) return new Response('[]');
+      Object.assign(row, JSON.parse(opts.body));
+      return new Response(JSON.stringify([row]));
+    }
+    return new Response(JSON.stringify(table === 'training_sessions' ? sessions : table === 'training_attendance' ? records : []));
+  };
+  const setup = rows => {
+    records = rows.map(([id, name, session]) => ({id, person_name:name, session_id:session, actual:'Absent, Need Makeup'}));
+    writes = []; failId = null; emptyWrite = false;
+    state.role = {is_admin:true,in_training:true}; state.me = {id:'me',full_name:'Tester'};
+    mem.resetMemory(); training.bust(); registerLoaders({training:()=>training.prefetch()});
+  };
+  setup([['a','Ella Smith','s1'],['old','Ella Smith','previous-term']]);
+  let result = await interpret('Ella completed makeup training');
+  check('Loads training and saves completion without opening Training', writes.join() === 'a' && /All set/.test(result.text), result.text);
+  result = await interpret('Ella completed makeup training');
+  check('Repeated report is idempotent', writes.length === 1 && /caught up/.test(result.text));
+  setup([['a','Ella Smith','s1'],['b','Ella Jones','s1']]);
+  result = await interpret('Ella completed makeup training');
+  check('Ambiguous name asks before writing', result.type === 'select' && result.options.length === 2 && !writes.length);
+  await result.options[1].run();
+  check('Person selection updates only that person', writes.join() === 'b');
+  setup([['a','Ella Smith','s1'],['b','Ella Smith','s2']]);
+  result = await interpret('Ella completed makeup training');
+  check('Multiple sessions asks which makeup', result.type === 'select' && result.options.length === 3 && !writes.length);
+  await result.options[0].run();
+  check('Session selection updates only that session', writes.join() === 'a');
+  setup([['a','Ella Smith','s1'],['b','Ella Smith','s2']]);
+  result = await interpret('Ella completed makeup training for September 21st');
+  check('Explicit session is respected', writes.join() === 'a', result.text);
+  setup([['a','Ella Smith','s1']]);
+  result = await interpret('Someone completed makeup training');
+  check('Missing name prompts naturally', /who completed/i.test(result.text) && !writes.length);
+  await interpret('Ella Smith');
+  check('Bare-name follow-up completes the task', writes.join() === 'a');
+  setup([['a','Ella Smith','s1']]);
+  state.role = {is_admin:false,in_training:true};
+  await interpret('Ella completed makeup training');
+  check('Committee member cannot mark makeup complete', !writes.length);
+  setup([['a','Ella Smith','s1']]); emptyWrite = true;
+  result = await interpret('Ella completed makeup training');
+  check('Empty server response is an error, not success', result.kind === 'error');
+  setup([['a','Ella Smith','s1'],['b','Ella Smith','s2']]); failId = 'b';
+  result = await interpret('Ella completed makeup training');
+  result = await result.options[2].run();
+  check('Partial failure is reported', result.kind === 'error' && /1 of 2/.test(result.text), result.text);
+  const { shared } = await import('../js/core/vanessa-data.js');
+  check('Partial success refreshes counts', shared.training.perPerson.get('Ella Smith').owed === 1);
+  window.fetch = realFetch;
 
   console.error = console_error;
   document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;

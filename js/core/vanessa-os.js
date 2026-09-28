@@ -97,6 +97,7 @@ const HANDLERS = {
   },
   evaluating:      u => info.whoEvaluating(u),
   attendance:      u => info.attendance(u),
+  complete_makeup: u => info.completeMakeup(u),
   mark_attendance: () => info.markAttendance(),
   active:          () => info.showActive(),
   tours:           u => u.sub === 'mine' ? info.myNextTour()
@@ -157,6 +158,9 @@ export async function interpret(question) {
     const plan = await evalFlow.continueEvaluation(u);
     if (plan) return { ...plan, intent: 'evaluate' };
   }
+
+  if (activeFlow('makeup') && !u.intent) return info.completeMakeup(u, true);
+  if (activeFlow('makeup') && u.intent !== 'complete_makeup') endFlow('replaced');
 
   // 3–4. references and intents
   const run = HANDLERS[u.intent];

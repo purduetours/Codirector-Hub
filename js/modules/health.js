@@ -17,6 +17,7 @@
    have joined last week. The page says what does not line up and leaves the
    judgement to a person.
 ============================================================================ */
+import { ignoredAbsenceSession } from '../core/vanessa-makeup.js';
 import { state, isAdmin } from '../core/state.js';
 import { loadAbsences, loadMajors } from '../core/sheets.js';
 import { matchPerson } from '../core/people-match.js';
@@ -85,7 +86,7 @@ async function runChecks() {
 
       for (const a of absences) {
         if (!matchPerson(a.name, people)) noMatch.push(a.name);
-        a.sessions.forEach(x => { if (!known.has(sessionKey(x))) unknownSessions.add(x); });
+        a.sessions.forEach(x => { if (!known.has(sessionKey(x)) && !ignoredAbsenceSession(x)) unknownSessions.add(x); });
       }
       out.push({
         title: 'Absence submissions matching nobody on the tracker',

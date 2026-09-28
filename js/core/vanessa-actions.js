@@ -21,10 +21,6 @@ import { markMakeupDone } from '../modules/training.js';
 /* "claim noah", "put me down for Jane Boilermaker", "I'll take Zach" */
 const CLAIM = /\b(?:claim|put me down for|sign me up for|i(?:'| wi)?ll take|give me|assign me)\b\s*(.*)$/i;
 
-/* "mark Abigail's makeup done", "Ella did her makeup", "clear Noah's makeup" */
-const MAKEUP = /\b(?:mark|clear|log|record)?\s*(.+?)(?:'s|s')?\s*(?:makeup|make ?up)\s*(?:is\s*)?(?:as\s*)?(?:done|complete[d]?|finished)\b/i;
-const MAKEUP_ALT = /\b(?:did|completed|finished)\s+(?:their|his|her)\s+(?:makeup|make ?up)\b/i;
-
 let pending = null;                    // { kind, guide|person } awaiting a yes
 export const resetActions = () => { pending = null; };
 /** Is she waiting on a yes or no? The panel shows buttons for it. */
@@ -80,26 +76,6 @@ export async function handleAction(question) {
     }
     if (NO.test(q)) { pending = null; return { text: 'Left it alone.' }; }
     pending = null;               // anything else: drop it and answer normally
-  }
-
-  /* --- marking a makeup as done ----------------------------------------- */
-  const mk = MAKEUP.exec(q) || (MAKEUP_ALT.test(q) ? [null, q.replace(MAKEUP_ALT, '')] : null);
-  if (mk) {
-    if (!isAdmin()) return { text: "That tool isn't available for your account." };
-    const who = String(mk[1] || '').replace(/\b(mark|clear|log|record|the|as|for)\b/gi, '').trim();
-    if (!who) return { text: 'Whose makeup? Give me a name.' };
-
-    const { owedBy } = await import('../modules/training.js');
-    const list = owedBy();
-    if (!list) return { text: 'The training records have not loaded yet — try me again in a moment.' };
-
-    const hits = matchOwed(who, [...list.keys()]);
-    if (!hits.length)    return { text: `Nobody called "${who}" owes a makeup.` };
-    if (hits.length > 1) return { text: `Which one — ${hits.slice(0, 4).join(', ')}?` };
-
-    const n = list.get(hits[0]);
-    pending = { kind: 'makeup', person: hits[0] };
-    return { text: `Mark ${hits[0]}'s ${n} outstanding session${n === 1 ? '' : 's'} as a completed makeup?` };
   }
 
   const m = CLAIM.exec(q);

@@ -12,6 +12,7 @@
    Nobody edits them here, they only ever grow, and a stale copy of who will be
    missing on Monday is worse than no copy at all.
 ============================================================================ */
+import { ignoredAbsenceSession } from '../core/vanessa-makeup.js';
 import { select, update, insert, remove } from '../core/db.js';
 import { loadAbsences, formStamp } from '../core/sheets.js';
 import { state, isAdmin, termId } from '../core/state.js';
@@ -147,7 +148,8 @@ async function loadAll() {
       select('training_attendance', 'select=id,session_id,guide_id,person_name,expectation,actual,updated_at,updated_by,makeup_on,makeup_note')
     ]);
     sessions = s || [];
-    attendance = a || [];
+    const sessionIds = new Set(sessions.map(s => s.id));
+    attendance = (a || []).filter(row => sessionIds.has(row.session_id));
     /* Who touched a cell. The trigger has been stamping updated_by since the
        table was created and nothing ever showed it, so a surprising value had
        no story attached — which is exactly the situation that cost an
@@ -193,7 +195,7 @@ function indexFiled() {
     if (!person) { filedUnmatched.push(a.name); continue; }
     for (const raw of a.sessions) {
       const k = sessionKey(raw);
-      if (!known.has(k)) { unknown.add(raw); continue; }
+      if (!known.has(k)) { if (!ignoredAbsenceSession(raw)) unknown.add(raw); continue; }
       filedIndex.set(`${person}|${k}`, a.reason || 'No reason given');
     }
   }
@@ -628,7 +630,8 @@ export default {
   icon: '🎓',
   section: 'Tools',
   prefetch: async () => {
-    if (!sessions) await loadAll();
+    if (!sessions || loadError) await loadAll();
+    if (loadError) throw new Error(loadError);
     if (absences === null) absences = await loadAbsences().catch(() => []);
     indexFiled(); shareWithVanessa();
   },
@@ -805,17 +808,34 @@ export function owedBy() {
 }
 
 /** Mark everything this person owes as completed. Returns how many changed. */
-export async function markMakeupDone(person) {
-  const rows = (attendance || []).filter(a => a.person_name === person &&
+export function outstandingMakeups(person) {
+  return (attendance || []).filter(a => a.person_name === person &&
     (/absent/i.test(a.actual || '') || inferredAbsent(a)));
-  if (!rows.length) throw new Error(`${person} does not owe a makeup.`);
-  for (const r of rows) {
-    await update('training_attendance', `id=eq.${r.id}`, { actual: 'Makeup Completed' });
-    r.actual = 'Makeup Completed';
+}
+
+export async function markMakeupDone(person, { sessionIds = null } = {}) {
+  if (!isAdmin()) throw new Error('Only codirectors can update training attendance.');
+  if (!attendance) await loadAll();
+  if (loadError) throw new Error(loadError);
+  const rows = outstandingMakeups(person).filter(row => !sessionIds || sessionIds.includes(row.session_id));
+  let saved = 0;
+  try {
+    for (const r of rows) {
+      const changed = await update('training_attendance', `id=eq.${r.id}`, { actual: 'Makeup Completed' });
+      if (!changed?.some(row => row.id === r.id)) throw new Error('The server did not update this attendance record.');
+      r.actual = 'Makeup Completed';
+      saved++;
+    }
+  } catch (err) {
+    const failure = new Error(`I saved ${saved} of ${rows.length} sessions, but couldn’t save the rest. Try again to finish the remaining makeups.`);
+    failure.code = 'MAKEUP_SAVE_FAILED';
+    failure.cause = err;
+    throw failure;
+  } finally {
+    indexFiled(); shareWithVanessa();
+    if ($('#tr-body')) paint();
   }
-  indexFiled(); shareWithVanessa();
-  if ($('#tr-body')) paint();
-  return rows.length;
+  return saved;
 }
 
 /** One guide's training term at a glance, for the Directory profile. */

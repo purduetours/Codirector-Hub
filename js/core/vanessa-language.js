@@ -24,6 +24,7 @@
        question, words, text, raw
      }
 ============================================================================ */
+import { makeupRequest } from './vanessa-makeup.js';
 import { TOOL_INFO } from './vanessa-context.js';
 import { dateRange } from './vanessa-dates.js';
 
@@ -177,6 +178,7 @@ export function refineFrom(t) {
    breaks ties. The OS layer decides what an intent does, and whether this
    account may. */
 const RULES = [
+  ['complete_makeup', u => makeupRequest(u.raw) ? 0.98 : 0],
   ['cancel',        u => u.c.cancel && u.words <= 7 ? 1 : 0],
   ['home',          u => u.c.home ? 1 : 0],
   ['back',          u => u.c.back ? 1 : 0],

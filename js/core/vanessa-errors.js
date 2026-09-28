@@ -35,6 +35,7 @@ const human = m => m && m.length < 160 && /^[A-Z][^{}<>]*[.!?]$/.test(m) && !/\b
 export function explainError(err, what = 'that') {
   const msg = String(err?.message || err || '');
   console.error(`[Vanessa] ${what} failed:`, err);
+  if (err?.code === 'MAKEUP_SAVE_FAILED') return msg;
   if (human(msg)) return msg;
   const hit = RULES.find(([re]) => re.test(msg) || re.test(String(err?.code || '')));
   return hit ? hit[1] : 'That didn’t go through. Nothing was changed — try again in a moment.';

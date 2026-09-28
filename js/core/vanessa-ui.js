@@ -483,9 +483,11 @@ function typedChoice(q) {
   const opts = plan.options || [];
   const t = q.trim().toLowerCase();
   const ord = t.split(/\s+/).length <= 5 ? understand(t).ordinal : null;
+  const exact = opts.map((o, i) => ({ o, i })).filter(({ o }) => o.label.toLowerCase() === t);
+  const partial = opts.map((o, i) => ({ o, i })).filter(({ o }) => `${o.label} ${o.sub || ''}`.toLowerCase().split(/[\s—·,-]+/).includes(t));
   let idx = /^\d+$/.test(t) ? Number(t) - 1 : ord !== null ? (ord < 0 ? opts.length - 1 : ord)
-    : opts.findIndex(o => `${o.label} ${o.sub || ''}`.toLowerCase().split(/[\s—·,-]+/).includes(t));
-  if (idx < 0 || idx >= opts.length) return false;
+    : exact.length === 1 ? exact[0].i : partial.length === 1 ? partial[0].i : -1;
+  if (idx < 0 || idx >= opts.length) { pendingSelect = null; return false; }
   pendingSelect = null;
   const el = document.querySelector(`[data-plan="${id}"]`);
   el?.querySelector(`[data-opt="${idx}"]`)?.classList.add('is-chosen');

@@ -50,9 +50,9 @@ export const SMALLTALK = [
                'you ok','are you ok','you good','you alright','how you doing','how are you doing',
                'hows your day','how is your day','whats up','what is up','what up','sup','wyd','what you up to','hows things','you busy'],
     replies: [
-      "Perfectly fine, in the way a help system is fine. More to the point — what do you need?",
-      "No complaints; I don't have the equipment for them. What are you working on?",
-      "Same as always, which is the point of me. What can I get you?"
+      "Hey! I’m here and ready to help. What are you working on?",
+      "Good to hear from you! What can I help you get done today?",
+      "Ready when you are. We can look something up or take care of a task together."
     ]
   },
   {
@@ -67,7 +67,7 @@ export const SMALLTALK = [
                'what model are you','how do you work'],
     replies: [
       "I'm Vanessa. I live in this hub and answer questions about what is in it — evals, interviews, the tour schedule, the desk rota, and the handbook.\n\nEverything I tell you is counted from the same data your screen is showing, so the answer depends on what has loaded and which records you can see. I also only see what you are allowed to see.",
-      "Vanessa. Think of me as the hub with a mouth. I add up what is in front of you, point you at the right tab, and quote the handbook when the answer is in there."
+      "I’m Vanessa, your assistant for the hub. Ask me about your guides, tours, or training—or tell me someone completed their makeup and I can update their record."
     ]
   },
   {
@@ -102,7 +102,7 @@ export const SMALLTALK = [
                'you are wrong','thats wrong','you are bad','stupid','dumb','trash','you are broken',
                'this is broken','doesnt work','does not work','not working'],
     replies: [
-      "Fair enough, and probably deserved. Tell me what you actually wanted and I'll have another go.",
+      "Sorry—that didn’t help. Tell me what you were trying to do, and we’ll work through it.",
       "Noted. Say what I got wrong and I'll try again — or ask it in different words and I'll aim better."
     ]
   },
@@ -132,8 +132,8 @@ export const SMALLTALK = [
     keywords: ['are you sure','is that true','is that right','is that correct','are you certain',
                'prove it','says who','how do you know','where did you get that'],
     replies: [
-      "Yes, and you can check me. Every number I give you is counted from the rows already on your screen — open the tab and you will get the same figure. I do not estimate and I do not guess.",
-      "Confident, because I am not making anything up: I add up the same data the tab renders. If a count looks wrong, the data is wrong, and that is worth knowing."
+      "I’m using the hub’s loaded records. If something looks off, we can check the relevant record together.",
+      "Let’s double-check. My answer depends on the records that loaded, and I may have misunderstood the question. Which part looks wrong?"
     ]
   },
   {
@@ -150,7 +150,7 @@ export const SMALLTALK = [
                'favourite food','favorite food','do you like'],
     replies: [
       "None of that applies to me, I'm afraid. I'm a set of counts with opinions. Ask me about the hub and I get considerably more interesting.",
-      "I don't do any of that. What I do is keep track of 67 candidates and a roster of guides, which is a narrower life but a useful one."
+      "I don’t have a life outside the app, but I’m happy to chat while we work. What’s on your mind?"
     ]
   },
   {
