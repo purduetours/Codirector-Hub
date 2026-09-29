@@ -1,0 +1,18 @@
+import { esc } from '../core/ui.js';
+import { setWorkContext } from '../core/vanessa-work.js';
+import { reminders, saveReminder, deleteReminder, notifications, workspaceError } from '../services/workspace.js';
+import { rememberEntity } from '../services/memory.js';
+import { workspacePage, hero, card, empty, ask } from './workspace-shell.js';
+
+let reminderFilter='open';
+export const reminderPage=workspacePage('reminders','Your Reminders',null,async(root,alive,paint)=>{
+ const rows=await reminders();if(!alive())return;const linked=new URLSearchParams(location.hash.split('?')[1]||'').get('item');const filtered=rows.filter(r=>(!linked||r.id===linked)).filter(r=>reminderFilter==='all'||(reminderFilter==='open'?!r.completed_at:!!r.completed_at));
+ root.innerHTML=hero('A little less to keep in your head.','Personal reminders stay private to your account. Times use this device’s time zone.')+
+ `<form class="op-form op-card"><label>Remind me to<input name="title" maxlength="240" required placeholder="Review an evaluation"></label><label>Due<input type="datetime-local" name="due" required></label><button class="btn btn-primary">Create reminder</button><p role="status" data-result></p></form><div class="op-toolbar"><label>Show<select data-filter><option value="open">Open</option><option value="done">Completed</option><option value="all">All</option></select></label></div><div class="op-list">${filtered.map(r=>`<article class="op-row"><div><b>${esc(r.title)}</b><p><time>${esc(new Date(r.due_at).toLocaleString())}</time>${r.completed_at?' · Completed':''}</p></div><div class="op-actions"><button class="btn" data-edit="${r.id}">Edit</button><button class="btn" data-context="${r.id}">Ask Vanessa</button><button class="btn" data-complete="${r.id}">${r.completed_at?'Reopen':'Complete'}</button><button class="btn btn-ghost" data-delete="${r.id}">Delete</button></div></article>`).join('')||empty('No reminders in this view.')}</div><p class="op-muted">Showing up to 500 reminders. Due notifications are created when you open the Hub; this does not send email.</p>`;
+ const filter=root.querySelector('[data-filter]');filter.value=reminderFilter;filter.onchange=()=>{reminderFilter=filter.value;paint();};let editing=null;
+ root.querySelector('form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button'),result=e.target.querySelector('[data-result]');btn.disabled=true;try{const f=new FormData(e.target);await saveReminder({id:editing,title:f.get('title'),dueAt:new Date(f.get('due')).toISOString()});await paint();}catch(error){result.textContent=workspaceError(error);}finally{btn.disabled=false;}};
+ root.onclick=async e=>{const b=e.target.closest('[data-complete],[data-delete],[data-context],[data-edit]');if(!b)return;const id=b.dataset.complete||b.dataset.delete||b.dataset.context||b.dataset.edit,r=rows.find(x=>x.id===id);if(!r)return;
+ if(b.dataset.context){setWorkContext({kind:'reminder',label:r.title,data:{id:r.id},isOpen:alive});rememberEntity('reminder',r.id);ask('What can you do with this reminder?');return;}
+ if(b.dataset.edit){editing=r.id;const form=root.querySelector('form');form.elements.title.value=r.title;const d=new Date(r.due_at);form.elements.due.value=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);form.querySelector('button').textContent='Save reminder';form.elements.title.focus();return;}
+ if(b.dataset.delete&&!confirm(`Delete “${r.title}”?`))return;b.disabled=true;try{if(b.dataset.delete)await deleteReminder(id);else await saveReminder({id,completed:!r.completed_at});await paint();}catch(error){b.disabled=false;root.querySelector('[data-result]').textContent=workspaceError(error);}};
+});

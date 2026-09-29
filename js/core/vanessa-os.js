@@ -1,3 +1,4 @@
+import { handleWorkspace } from '../actions/workspace-actions.js';
 /* ============================================================ Vanessa OS
    The coordinator. Every typed request goes through one pipeline:
 
@@ -149,6 +150,8 @@ export async function interpret(question) {
   let q = String(question || '').trim();
   if (conversationContext()?.topic === 'training' && /^.+? (?:has )?(?:finished|completed|did) (?:hers|his|theirs|it)[.!]*$/i.test(q)) q = q.replace(/(?:hers|his|theirs|it)[.!]*$/i, 'makeup training');
   if (!q || !state.me) return null;
+  const workspace = await handleWorkspace(q);
+  if (workspace) return {...workspace, intent: 'workspace'};
   const u = understand(q);
 
   // 1. control — her older yes/no confirmations and chat draft keep their own words

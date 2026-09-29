@@ -1,3 +1,5 @@
+import { rememberEntity } from '../services/memory.js';
+import { changeEvaluation } from '../services/evaluations.js';
 /* ============================================================ Evals module
    The tour-guide eval tracker, ported into the hub. Same backend, same rules:
    claim -> schedule -> submit, with completed evals visible only to admins
@@ -585,19 +587,20 @@ function paint() {
  * gets nothing back rather than quietly overwriting.
  */
 export async function claimGuide(g, { date = null, time = null } = {}) {
-  const rows = await update('evals', `id=eq.${g.id}&evaluator_id=is.null`, {
-    evaluator_id: state.me.id,
-    claimed_at:   new Date().toISOString(),
-    tour_date:    date,
-    tour_time:    time
-  });
-  if (!rows || !rows.length) throw new Error(`${g.name} was just claimed by somebody else.`);
+  const saved = await changeEvaluation('claim', g, {date, time});
   await loadRoster();
   paintNav();
-  return rows[0];
+  return saved;
 }
 
-export async function loadRoster() {
+let rosterFlight = null;
+export function loadRoster() {
+  const version=state.sessionVersion;
+  if(rosterFlight?.version===version)return rosterFlight.promise;
+  const entry={version};entry.promise=fetchRoster().finally(()=>{if(rosterFlight===entry)rosterFlight=null;});
+  rosterFlight=entry;return entry.promise;
+}
+async function fetchRoster() {
   const version = state.sessionVersion;
   const rows = await select('eval_roster',
     `select=*&term_id=eq.${termId()}&order=priority_rank.asc,last_name.asc`);
@@ -710,7 +713,7 @@ async function attachTours() {
   for (const t of tourCache) {
     const g = resolveGuide(t.guide, index, byName);
     if (!g) { unmatched.add(t.guide); continue; }
-    g.tours.push({ date: t.date, start: t.start, slot: t.slot });
+    g.tours.push({ date: t.date, start: t.start, slot: t.slot, guide: t.guide });
   }
   state.guides.forEach(g => g.tours.sort((a, b) =>
     a.date === b.date ? a.start.localeCompare(b.start) : a.date.localeCompare(b.date)));
@@ -864,6 +867,7 @@ function openEval(g) {
      makes lands through the form — never around it. */
   const FIELD = { wentWell: '#ev-well', improve: '#ev-improve', notes: '#ev-notes', date: '#ev-eval-date', time: '#ev-eval-time' };
   const isOpen = () => !!$('#ev-modal-eval') && !$('#ev-modal-eval').hidden && local.target?.id === g.id;
+  rememberEntity('evaluation',g.id);
   setWorkContext({
     kind: 'eval-form', label: `${g.name}'s evaluation`,
     data: { evalId: g.id, name: g.name, date: g.date, time: g.time, priority: g.priority },
@@ -993,7 +997,7 @@ export default {
   title: 'Eval Tracker',
   crumb: 'Claim and submit tour guide evaluations',
   icon: '📋',
-  section: 'Tools',
+  section: 'Operations',
   badge: () => state.guides.filter(g => isMine(g) && g.status === 'claimed').length || null,
 
   async mount(view) {
@@ -1070,8 +1074,7 @@ export default {
         if (!confirm(`Release ${g.name} back to the open list?`)) return;
         b.disabled = true;
         try {
-          await update('evals', `id=eq.${g.id}`,
-            { evaluator_id: null, claimed_at: null, tour_date: null, tour_time: null });
+          await changeEvaluation('release', g);
           toast(`Released ${g.name}.`);
           await reload();
         } catch (err) { toast(err.message, 'err'); b.disabled = false; }
@@ -1113,19 +1116,7 @@ export default {
           tour_time: $('#ev-claim-time').value || null,
           scheduling_notes: $('#ev-claim-notes').value || null
         };
-        // Claiming filters on "nobody has it yet", so if two people press the
-        // button at the same instant one gets the row back and the other gets
-        // none. No lock, no queue -- Postgres settles it.
-        let filter = `id=eq.${local.target.id}`;
-        if (mode === 'claim') {
-          patch.evaluator_id = state.me.id;
-          patch.claimed_at = new Date().toISOString();
-          filter += '&evaluator_id=is.null';
-        }
-        const rows = await update('evals', filter, patch);
-        if (mode === 'claim' && (!rows || !rows.length)) {
-          throw new Error(`${local.target.name} was just claimed by somebody else.`);
-        }
+        await changeEvaluation(mode, local.target, {date:patch.tour_date, time:patch.tour_time, notes:patch.scheduling_notes});
         closeModal($('#ev-modal-claim'));
         toast(mode === 'claim' ? `You claimed ${local.target.name}.` : 'Schedule updated.');
         await reload();

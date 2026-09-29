@@ -951,14 +951,14 @@ export function ask(question) {
     if (!inTraining() && (/\bevals?\b/i.test(q) || !inRecruitment())) return { text: "That tool isn't available for your account." };
     q = inTraining() ? 'who still needs an eval' : 'who is ungraded';
   }
+  const tasks=taskSummary(q);
+  if(tasks)return tasks;
   /* "anything for me", "whos free", "idk what to do" -- all one question. */
   if (NEEDS_ME.test(q)) return { text: needsMe() };
 
   const vague = clarify(q);
   if (vague) return { text: vague };
 
-  const tasks=taskSummary(q);
-  if(tasks)return tasks;
   const tourMatch=matchEvalTours(q);
   if(tourMatch){if(tourMatch.names)remember(tourMatch.names);return {text:tourMatch.text};}
   const nav = navigation(q);

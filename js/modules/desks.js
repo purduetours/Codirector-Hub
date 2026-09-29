@@ -73,7 +73,7 @@ export default {
   title: 'Desk Coverage',
   crumb: 'Front and Welcome desk shifts',
   icon: '🛎️',
-  section: 'Tools',
+  section: 'Operations',
 
   async mount(view) {
     view.innerHTML = `

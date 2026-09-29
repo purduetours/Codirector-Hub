@@ -447,9 +447,9 @@ function shell() {
         <button class="btn btn-primary btn-sm" type="submit">Let’s do it ${ICONS.send}</button>
       </form>
       <div class="hm-vanessa-starts" aria-label="Start with Vanessa">
-        <button type="button" data-vanessa="Brief me"><span>Start my day</span><b>What needs my attention?</b><em>I’ll pull your priorities together.</em></button>
-        ${isAdmin() ? `<button type="button" data-vanessa="Who owes makeup?"><span>Training</span><b>Let’s get everyone caught up.</b><em>Review makeups, update records, draft reminders.</em></button>` : ''}
-        <button type="button" data-vanessa="Prepare a meeting agenda"><span>Think ahead</span><b>Help me prepare for a meeting.</b><em>A brief and an editable agenda, right here.</em></button>
+        <button type="button" data-vanessa-ask="Brief me"><span>Start my day</span><b>What needs my attention?</b><em>I’ll pull your priorities together.</em></button>
+        ${isAdmin() ? `<button type="button" data-vanessa-ask="Who owes makeup?"><span>Training</span><b>Let’s get everyone caught up.</b><em>Review makeups, update records, draft reminders.</em></button>` : ''}
+        <button type="button" data-vanessa-ask="Prepare a meeting agenda"><span>Think ahead</span><b>Help me prepare for a meeting.</b><em>A brief and an editable agenda, right here.</em></button>
       </div>
       <div class="hm-focus" id="hm-focus">${sk(96)}${sk(96)}</div>
       <div class="hm-agenda" id="hm-agenda" hidden></div>
@@ -504,7 +504,7 @@ function handoff(action, el) {
   setTimeout(() => { handing = false; performAction(action, { from: el }); }, 240);
 }
 
-let onPresence = null;
+let onPresence = null, homeEvents = null;
 
 export default {
   id: 'today',
@@ -518,14 +518,20 @@ export default {
   bust: () => { changesCache = null; },
 
   unmount() {
+    homeEvents?.abort(); homeEvents=null;
     if (onPresence) document.removeEventListener('hub:presence', onPresence);
     onPresence = null;
     handing = false;
   },
 
   async mount(view) {
+    homeEvents?.abort();homeEvents=new AbortController();
     if (!view.querySelector('.hm-stage')) view.innerHTML = shell();
     setVanessaState('ready');
+    const commandLink=document.createElement('div');
+    commandLink.className='op-mini op-card';
+    commandLink.innerHTML='<b>Your Vanessa Command Center</b><p>See your day, reminders, notifications and recent changes in one place.</p><a href="#/command-center">Open your command center →</a>';
+    view.prepend(commandLink);
 
     const ask = q => document.dispatchEvent(new CustomEvent('hub:ask', { detail: { question: q } }));
     $('#hm-ask').addEventListener('submit', e => {
@@ -537,15 +543,16 @@ export default {
     });
 
     view.addEventListener('click', e => {
-      const start = e.target.closest('[data-vanessa]');
-      if (start) { ask(start.dataset.vanessa); return; }
+      if (document.body.dataset.route !== 'today') return;
+      const start = e.target.closest('button[data-vanessa-ask]');
+      if (start && view.contains(start)) { ask(start.dataset.vanessaAsk); return; }
       const to = e.target.closest('[data-scroll]');
       if (to) { $(to.dataset.scroll)?.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }); return; }
       const act = e.target.closest('[data-action]');
       if (act) { e.preventDefault(); handoff(actionById(act.dataset.action), act); return; }
       const dest = e.target.closest('[data-go]');
       if (dest) { e.preventDefault(); handoff(openAction(dest.dataset.go), dest); }
-    });
+    }, {signal:homeEvents.signal});
 
     paintPresence(presenceSnapshot());
     onPresence = e => paintPresence(e.detail);

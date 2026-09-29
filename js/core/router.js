@@ -1,8 +1,9 @@
+import { setContextPage, clearWorkContext } from './vanessa-work.js';
 /* ============================================================ hash router
    Modules register themselves; the router owns which one is mounted. Hash-based
    so it works on GitHub Pages with no server rewrites.
 ============================================================================ */
-import { $, $$, closeAllModals, settle } from './ui.js';
+import { $, $$, closeAllModals, settle, clearViewObservers } from './ui.js';
 import { isAdmin, inTraining, inRecruitment } from './state.js';
 import { iconFor } from './icons.js';
 import { setVanessaState } from './vanessa-state.js';
@@ -126,13 +127,14 @@ async function renderOnce() {
   const firstPaint = !current;
   const fromId = current?.id || null;
 
-  if (current && current.id !== id && current.unmount) {
+  if (current && current.unmount) {
     try { current.unmount(); } catch { /* a broken teardown shouldn't block navigation */ }
   }
 
   // Anything still open belongs to the outgoing view and is about to be wiped with
   // it. Close it properly first, or its scroll lock outlives it.
   closeAllModals();
+  clearViewObservers();
 
   const view = $('#view');
   const from = pendingMorph?.isConnected ? pendingMorph : null;
@@ -140,6 +142,8 @@ async function renderOnce() {
 
   const swap = () => {
     current = mod;
+    clearWorkContext();
+    setContextPage(mod.id);
     paintNav();
     $('#view-title').textContent = mod.title;
     $('#view-crumb').textContent = mod.crumb || '';
@@ -236,7 +240,7 @@ export function buildNav() {
   /* Codirector-only tools get their own group, so a codirector can see at a
      glance which screens are theirs alone — and nobody else ever sees the
      heading, because visibleModules() has already removed those tools. */
-  visibleModules().forEach(m => (sections[m.needs === 'admin' ? 'Codirectors' : m.section] ||= []).push(m));
+  visibleModules().forEach(m => (sections[m.section || 'Hub'] ||= []).push(m));
 
   rail.innerHTML = Object.entries(sections).map(([name, mods]) => `
     <div class="rail-section">${name}</div>

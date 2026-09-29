@@ -11,7 +11,9 @@ import { bustSheets, loadAbsences, formStamp } from './core/sheets.js';
 import { registerEvalActions } from './core/vanessa-eval.js';
 import { submitReviewedEval } from './core/vanessa-eval-submit.js';
 import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup, openVanessa, toggleVanessa, onVanessaToggle } from './core/vanessa-ui.js';
-import { initQuickSearch } from './core/quicksearch.js';
+import { initCommandPalette } from './core/command-palette.js';
+import workspaceModules from './modules/workspace.js';
+import { beginVisit } from './services/memory.js';
 import { registerLoaders } from './core/vanessa-data.js';
 
 import evals, { loadRoster } from './modules/evals.js';
@@ -25,7 +27,7 @@ import people        from './modules/people.js';
 import training      from './modules/training.js';
 import health        from './modules/health.js';
 
-[today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
+[...workspaceModules, today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
 
 /* The modules already know how to fetch their own data; Vanessa just asks them
    to, rather than reaching past them into the database herself. */
@@ -49,6 +51,7 @@ registerEvalActions({ load: loadRoster, submit: submitReviewedEval });
 registerLoaders({
   roster:     () => (state.guides.length ? null : loadRoster()),
   tours:      () => schedule.prefetch?.(),
+  desks:      () => (inTraining() ? desks.prefetch?.() : null),
   training:   () => (isAdmin() ? training.prefetch?.() : null),
   interviews: () => interviews.prefetch?.()
 });
@@ -68,7 +71,8 @@ async function start() {
   paintShell();
   buildNav();
   initVanessa();
-  initQuickSearch();
+  initCommandPalette();
+  beginVisit();
   initPresence();
   await render();
   paintShell();

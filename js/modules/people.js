@@ -179,7 +179,7 @@ export default {
   title: 'People',
   crumb: 'Who can sign in, and what they can see',
   icon: '🔑',
-  section: 'Tools',
+  section: 'Leadership',
 
   async mount(view) {
     view.innerHTML = `

@@ -32,3 +32,14 @@ export function workContext() {
   return current;
 }
 export function onWorkContext(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+
+// Page providers return IDs and small filter values, never whole datasets or DOM.
+const providers=new Map();let page=null;
+export function registerContextProvider(id,read){providers.set(id,read);return ()=>providers.delete(id);}
+export function setContextPage(id){page=id;}
+export function structuredContext(){
+ const active=workContext();const supplied=providers.get(page)?.()||{};
+ const source={...supplied,...active?.data},data={};
+ for(const key of ['id','evalId','guideId','name','date','time','from','to','filter'])if(typeof source[key]==='string')data[key]=source[key].slice(0,160);
+ return {page,kind:active?.kind||'page',data};
+}

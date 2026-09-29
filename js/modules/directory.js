@@ -1,3 +1,5 @@
+import { setWorkContext } from '../core/vanessa-work.js';
+import { rememberEntity } from '../services/memory.js';
 /* ============================================================ Guide Directory
    Every guide the hub knows about, with a profile pulling together their eval
    status and tour load. Built entirely from the roster payload already loaded
@@ -168,7 +170,7 @@ export default {
   title: 'Guide Directory',
   crumb: 'Everyone on the roster, and what we know about them',
   icon: '👥',
-  section: 'Tools',
+  section: 'People',
 
   async mount(view) {
     if (!state.guides.length) await loadRoster();
@@ -244,6 +246,8 @@ export default {
       $('#dir-p-prio').textContent = g.priority || '';
       $('#dir-p-body').innerHTML = profile(g);
       openModal($('#dir-modal'));
+      rememberEntity('guide',g.guideId || g.id);
+      setWorkContext({kind:'guide',label:g.name,data:{id:g.id,guideId:g.guideId,name:g.name},isOpen:()=>!!$('#dir-modal') && !$('#dir-modal').hidden});
     });
 
     /* Open them straight away. This runs AFTER the click handler above is

@@ -37,5 +37,5 @@ export const ICONS = {
 
 /** A module's icon: the line icon if there is one, else its own emoji. */
 export function iconFor(mod) {
-  return ICONS[mod?.id] || `<span class="ico-emoji" aria-hidden="true">${mod?.icon || '•'}</span>`;
+  return ICONS[mod?.id] || ICONS[mod?.icon] || `<span class="ico-emoji" aria-hidden="true">${mod?.icon || '•'}</span>`;
 }

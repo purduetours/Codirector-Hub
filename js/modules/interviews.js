@@ -988,7 +988,7 @@ export default {
   title: 'Interviews',
   crumb: 'Check-in, grading and results',
   icon: '🎤',
-  section: 'Tools',
+  section: 'Recruitment',
 
   async mount(view) {
     view.innerHTML = `
