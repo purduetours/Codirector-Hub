@@ -354,3 +354,14 @@ body[data-route="today"] .view { max-width: 1240px; padding-top: 4px; }
 }
 .hm-more-btn svg { width: 14px; height: 14px; transform: rotate(90deg); transition: transform var(--dur-3) var(--ease-out); }
 .hm-more-btn[aria-expanded="true"] svg { transform: rotate(-90deg); }
+
+/* Start with Vanessa; tools remain nearby when they are useful. */
+.hm-ask-primary { border-color:color-mix(in srgb,var(--gold) 55%,var(--line)); box-shadow:0 0 36px color-mix(in srgb,var(--gold) 9%,transparent); min-height:66px; }
+.hm-vanessa-starts { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
+.hm-vanessa-starts button { display:grid; gap:8px; text-align:left; padding:18px; border-radius:14px; border:1px solid var(--line); background:var(--bg-elev); color:var(--text); cursor:pointer; font:inherit; transition:transform .18s,border-color .18s; }
+.hm-vanessa-starts button:hover { transform:translateY(-2px);border-color:var(--gold); }
+.hm-vanessa-starts span { font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-deep);font-weight:700; }
+.hm-vanessa-starts b { font-size:.94rem;font-weight:650;line-height:1.4; }
+.hm-vanessa-starts em { font-size:.76rem;font-style:normal;color:var(--text-faint);line-height:1.5; }
+@media(max-width:620px) { .hm-vanessa-starts {grid-template-columns:1fr;} .hm-vanessa-starts button {padding:14px;} .hm-ask-primary .btn {font-size:.75rem;} }
+@media(prefers-reduced-motion:reduce) { .hm-vanessa-starts button {transition:none;} .hm-vanessa-starts button:hover {transform:none;} }

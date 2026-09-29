@@ -1150,7 +1150,7 @@ function greetText() {
 function capabilityText() {
   const can = [];
   if (inTraining())     can.push('• Evals — who still needs one, what you have claimed, how far along we are, who has no tour scheduled');
-  if (isAdmin())        can.push('• Training — who owes a makeup, who filed an absence, how a session went');
+  if (isAdmin())        can.push('• Training — record makeup completion, update several people together, add dates and notes, draft reminders, or undo my updates');
   if (inRecruitment())  can.push('• Interviews — who is ungraded, who is worth discussing, the top candidates, how many are undecided');
   can.push('• The schedule — who is leading tours today, tomorrow, or this week');
   if (inTraining()) can.push('• Desks — weekly coverage and uncovered slots');

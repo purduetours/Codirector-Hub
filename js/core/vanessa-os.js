@@ -34,6 +34,8 @@
    Buttons carry run(), which may return the next plan: that is how a
    workflow chains without anybody typing.
 ============================================================================ */
+import { handleOperations } from './vanessa-operations.js';
+import { clearReview, conversationContext } from './vanessa-conversation.js';
 import { state } from './state.js';
 import { canRun, TOOL_INFO } from './vanessa-context.js';
 import { understand } from './vanessa-language.js';
@@ -144,20 +146,24 @@ const LEGACY = [
 /* ------------------------------------------------------------ interpret */
 /** A typed request → a plan, or null for her ordinary answering. */
 export async function interpret(question) {
-  const q = String(question || '').trim();
+  let q = String(question || '').trim();
+  if (conversationContext()?.topic === 'training' && /^.+? (?:has )?(?:finished|completed|did) (?:hers|his|theirs|it)[.!]*$/i.test(q)) q = q.replace(/(?:hers|his|theirs|it)[.!]*$/i, 'makeup training');
   if (!q || !state.me) return null;
   const u = understand(q);
 
   // 1. control — her older yes/no confirmations and chat draft keep their own words
-  if (u.intent === 'cancel' && !pendingConfirmation() && !evalDraft()) { const out = cancel(); rememberList('choice', []); return { ...out, intent: 'cancel' }; }
-  if (u.intent === 'home') return { ...goHome(), intent: 'home' };
-  if (u.intent === 'back') return { ...goBack(), intent: 'back' };
+  if (u.intent === 'cancel' && !pendingConfirmation() && !evalDraft()) { clearReview(); const out = cancel(); rememberList('choice', []); return { ...out, intent: 'cancel' }; }
+  if (u.intent === 'home') { clearReview(); return { ...goHome(), intent: 'home' }; }
+  if (u.intent === 'back') { clearReview(); return { ...goBack(), intent: 'back' }; }
 
   // 2. the task under way
   if (activeFlow('evaluate')) {
     const plan = await evalFlow.continueEvaluation(u);
     if (plan) return { ...plan, intent: 'evaluate' };
   }
+
+  const operation = await handleOperations(q);
+  if (operation) return { ...operation, intent: 'operation' };
 
   if (activeFlow('makeup') && !u.intent) return info.completeMakeup(u, true);
   if (activeFlow('makeup') && u.intent !== 'complete_makeup') endFlow('replaced');

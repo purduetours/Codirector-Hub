@@ -383,14 +383,13 @@ function paintActions(ctx) {
   if (deck) deck.innerHTML = secondary.map((a, i) => actButton(a, 'deck', i)).join('');
   const block = deck?.closest('.hm-block');
   if (block) block.hidden = !secondary.length && !more.length;
-  return primary;
-
   const box = $('#hm-more');
   if (box) {
     box.hidden = !more.length;
     $('#hm-more-n').textContent = String(more.length);
     $('#hm-more-body').innerHTML = more.map((a, i) => actButton(a, 'mini', i)).join('');
   }
+  return primary;
 }
 
 /* ---------------------------------------------------------------- tours */
@@ -439,16 +438,21 @@ function shell() {
     <div class="hm-orb" aria-hidden="true"><span class="hm-halo"></span><span class="orb orb-lg"><i></i></span><span class="hm-thread"></span></div>
     <div class="hm-stage-body">
       <p class="hm-eyebrow"><span>${esc(dayPart())}</span><span>${esc(date)}</span>${termLabel() ? `<span>${esc(termLabel())}</span>` : ''}</p>
-      <h1 class="hm-title">${name ? `Welcome back, <span class="hm-name">${esc(name)}</span>.` : 'Welcome back.'}
-        <em>What are we working on today?</em></h1>
+      <h1 class="hm-title">${name ? `Hi <span class="hm-name">${esc(name)}</span>, I’m Vanessa.` : 'I’m Vanessa.'}
+        <em>Let’s move things forward.</em></h1>
       <p class="hm-says" id="hm-says" aria-live="polite"><span class="skel" style="display:inline-block;width:min(420px,70%);height:1em;vertical-align:middle"></span></p>
+      <form class="hm-ask hm-ask-primary" id="hm-ask" role="search">
+        <span class="hm-ask-ico">${ICONS.spark}</span>
+        <input id="hm-ask-input" autocomplete="off" aria-label="Tell Vanessa what you need" placeholder="Tell me what you need to get done…">
+        <button class="btn btn-primary btn-sm" type="submit">Let’s do it ${ICONS.send}</button>
+      </form>
+      <div class="hm-vanessa-starts" aria-label="Start with Vanessa">
+        <button type="button" data-vanessa="Brief me"><span>Start my day</span><b>What needs my attention?</b><em>I’ll pull your priorities together.</em></button>
+        ${isAdmin() ? `<button type="button" data-vanessa="Who owes makeup?"><span>Training</span><b>Let’s get everyone caught up.</b><em>Review makeups, update records, draft reminders.</em></button>` : ''}
+        <button type="button" data-vanessa="Prepare a meeting agenda"><span>Think ahead</span><b>Help me prepare for a meeting.</b><em>A brief and an editable agenda, right here.</em></button>
+      </div>
       <div class="hm-focus" id="hm-focus">${sk(96)}${sk(96)}</div>
       <div class="hm-agenda" id="hm-agenda" hidden></div>
-      <form class="hm-ask" id="hm-ask" role="search">
-        <span class="hm-ask-ico">${ICONS.spark}</span>
-        <input id="hm-ask-input" autocomplete="off" aria-label="Ask Vanessa" placeholder="Or ask me anything about the hub…">
-        <button class="btn btn-primary btn-sm" type="submit">Ask ${ICONS.send}</button>
-      </form>
       <p class="hm-presence" id="hm-presence" hidden></p>
     </div>
   </section>
@@ -533,6 +537,8 @@ export default {
     });
 
     view.addEventListener('click', e => {
+      const start = e.target.closest('[data-vanessa]');
+      if (start) { ask(start.dataset.vanessa); return; }
       const to = e.target.closest('[data-scroll]');
       if (to) { $(to.dataset.scroll)?.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }); return; }
       const act = e.target.closest('[data-action]');

@@ -1,4 +1,7 @@
 /* Vanessa panel, model controls, and session-scoped data loading. */
+import { proposeWorkflow } from './vanessa-understanding.js';
+import { runWorkflow } from './vanessa-operations.js';
+import { resetConversation, conversationContext, clearReview } from './vanessa-conversation.js';
 import { handbookContext, topicNote } from './vanessa.js';
 import {
   llmReady, llmSupported, llmStatus, llmWanted, loadLlm, unloadLlm,
@@ -25,6 +28,19 @@ let voiceDraftRef=null;
 export { shareInterviews };
 export const shareData = (kind, rows) => shareOther(kind, rows);
 injectStyle('vanessa-css', `
+/* Vanessa's conversation is the primary working surface. */
+.v-panel.v-workspace { width:min(760px, calc(100vw - 32px)); }
+.v-workbar { display:flex; flex-wrap:wrap; gap:6px; padding:10px 16px; border-bottom:1px solid var(--line); }
+.v-workbar button { font:inherit; font-size:.75rem; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg-sunken); color:var(--text-soft); cursor:pointer; }
+.v-workbar button:hover { border-color:var(--gold); color:var(--text); }
+.v-workbar #v-new { margin-left:auto; }
+.v-context { padding:8px 16px; color:var(--text-soft); font-size:.72rem; background:var(--bg-sunken); border-bottom:1px solid var(--line); }
+.v-document { width:100%; min-height:240px; max-height:420px; resize:vertical; padding:12px; border-radius:10px; border:1px solid var(--line-strong); background:var(--bg-elev); color:var(--text); font:inherit; line-height:1.6; }
+.v-draft-label { display:block; font-size:.75rem; margin:10px 0 6px; color:var(--text-soft); }
+.v-draft-status { font-size:.72rem; color:var(--text-faint); margin-top:8px; }
+.v-workspace .v-plan { width:100%; max-width:100%; }
+.v-workspace .v-msg.you { max-width:85%; }
+@media(max-width:620px) { .v-panel.v-workspace { width:calc(100vw - 16px); top:8px;right:8px;bottom:8px; } .v-size-toggle {display:none;} .v-workbar {gap:5px;padding:8px;} .v-workbar button {font-size:.7rem;} }
 /* The bubble is kept as the single source of open/closed truth, but the
    hub never shows it: Vanessa is opened from the rail, the top bar, the home
    screen or the phone dock. A floating chat bubble is exactly the "website
@@ -357,12 +373,18 @@ const actRow = (list, attr = 'data-pact') => (list || []).filter(Boolean).length
 function renderPlan(plan) {
   if (!plan) return null;
   if (plan.cancelled) settleFlowCards();
+  const context = conversationContext(), ribbon = $('#v-context');
+  if (ribbon) { ribbon.hidden=!context?.person; ribbon.textContent=context?.person ? `Working with ${context.person}` : ''; }
+  if (plan.type === 'confirm' || plan.type === 'select') settleFlowCards();
+  if (plan.text) { llmHistory.push({role:'assistant', content:[plan.title,plan.text].filter(Boolean).join(': ')}); llmHistory=llmHistory.slice(-6); }
   if (plan.type === 'reply' && !plan.actions?.filter(Boolean).length && !plan.retry && !plan.source) {
     const el = sayRich({ text: plan.text, kind: plan.kind });
     if (plan.closeOnNarrow && narrow()) setTimeout(() => closePanel(), 600);
     return el;
   }
   if (plan.type === 'handoff') {
+    $('#v-panel')?.classList.remove('v-workspace');
+    const size = $('#v-size'); if(size) { size.textContent='Expand';size.setAttribute('aria-pressed','false'); }
     const el = plan.text ? sayRich({ text: plan.text, kind: 'nav', title: visibleModules().find(m => m.id === plan.to)?.title }) : null;
     const next = typeof plan.next === 'function' ? plan.next() : plan.next;
     if (next) setTimeout(() => Promise.resolve(next).then(p => p && renderPlan(p)), 260);
@@ -421,6 +443,10 @@ function renderPlan(plan) {
     if (plan.more) html += `<p class="v-tail">${esc(plan.more)}</p>`;
     if (plan.steps?.length) html += `<ol class="v-steps">${plan.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>`;
   }
+  if (plan.type === 'draft') {
+    html += `<label class="v-draft-label" for="v-draft-${id}">Edit your draft</label><textarea id="v-draft-${id}" class="v-document" data-draft rows="10">${esc(plan.draft)}</textarea>
+      <div class="v-inline-acts"><button type="button" class="v-chip" data-copy-draft>Copy draft</button><button type="button" class="v-chip" data-download-draft>Download text</button></div><p class="v-draft-status" role="status">Draft only · ready for your review</p>`;
+  }
   if (plan.type === 'summary' || plan.type === 'reply') html += actRow(plan.actions);
   if (plan.retry) html += `<div class="v-inline-acts"><button type="button" class="v-chip" data-retry>Try again</button></div>`;
   if (plan.flow && plan.type !== 'confirm') html += `<button type="button" class="v-flow-cancel" data-flowcancel>Cancel</button>`;
@@ -428,7 +454,7 @@ function renderPlan(plan) {
   // Only the newest suggestion can be used; older ones stay readable.
   if (plan.type === 'suggest') document.querySelectorAll('#v-log .v-k-suggest:not(.is-settled)').forEach(c => { if (c !== el) { c.classList.add('is-settled'); c.querySelectorAll('button').forEach(b => { b.disabled = true; }); } });
   el.innerHTML = html.replace(/>\s+</g, '><');         // the bubble keeps whitespace; markup must not add any
-  if (plan.type === 'reply' || (plan.type === 'summary' && !plan.items?.length)) collapse(el);
+  if (plan.type === 'reply' && !plan.actions?.length) collapse(el);
   if (plan.kind === 'confirm') setVanessaState('success');
   else if (plan.kind === 'error') setVanessaState('error');
   scrollLog();
@@ -446,7 +472,7 @@ function addShowChip(el) {
 /* A cancelled task leaves its cards readable but inert. */
 function settleFlowCards() {
   pendingSelect = null;
-  document.querySelectorAll('#v-log [data-flow]:not(.is-settled), #v-log .v-k-select:not(.is-settled)').forEach(c => {
+  document.querySelectorAll('#v-log [data-flow]:not(.is-settled), #v-log .v-k-select:not(.is-settled), #v-log .v-k-confirm:not(.is-settled)').forEach(c => {
     c.classList.add('is-settled');
     c.querySelectorAll('button').forEach(b => { b.disabled = true; });
   });
@@ -458,9 +484,10 @@ async function runStep(el, fn) {
   el?.querySelectorAll('button').forEach(b => { b.disabled = true; });
   el?.classList.add('is-settled');
   setMood('thinking');
+  const ticket = epoch, user = appState.me?.id;
   try {
     const next = await fn();
-    if (next) renderPlan(next);
+    if (next && ticket === epoch && user === appState.me?.id) renderPlan(next);
   } catch (err) {
     renderPlan({ type: 'reply', kind: 'error', text: explainError(err, 'that step'), retry: fn });
   }
@@ -471,7 +498,8 @@ async function runStep(el, fn) {
 async function runLoose(fn) {
   if (!fn) return;
   setMood('thinking');
-  try { const next = await fn(); if (next) renderPlan(next); }
+  const ticket = epoch, user = appState.me?.id;
+  try { const next = await fn(); if (next && ticket === epoch && user === appState.me?.id) renderPlan(next); }
   catch (err) { renderPlan({ type: 'reply', kind: 'error', text: explainError(err, 'that step'), retry: fn }); }
   setMood('speaking');
 }
@@ -834,6 +862,16 @@ function send(question) {
       if (ticket !== epoch || user !== appState.me?.id) return;
       if (!r) r = ask(q);
       paintEvalDraft();
+      if (r.stuck && llmReady()) {
+        if (note) note.textContent = 'Let me work out what you need…';
+        const proposal = await proposeWorkflow(q);
+        if (ticket !== epoch || user !== appState.me?.id) return;
+        if (proposal) {
+          const result = await runWorkflow(proposal.id, {person: proposal.person, question: q});
+          if (ticket !== epoch || user !== appState.me?.id) return;
+          if (result) { note?.remove(); renderPlan(result); inFlow = true; return; }
+        }
+      }
       if (r.stuck && modelStatus().state === 'ready') {
         if (note) note.textContent = 'Let me think about that…';
         const canonical = await interpret(q);
@@ -885,12 +923,20 @@ export function onVanessaToggle(fn) { vanessaListeners.add(fn); return () => van
 const tellToggle = () => vanessaListeners.forEach(fn => { try { fn(open); } catch {} });
 
 export function resetVanessa() {
+  resetConversation();
   resetLlmHistory();
   resetActions();
   resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
   plans.clear(); pendingSelect = null; resetMemory(null);
   $('#v-launch')?.remove(); $('#v-panel')?.remove(); document.body.classList.remove('v-open');
   setVanessaState('idle'); tellToggle();
+}
+function welcomeWorkspace() {
+  renderPlan({type:'summary',title:`Hi ${myName().split(' ')[0] || 'there'} — let’s get things done.`,
+    text:'Tell me what you need, even if it’s a rough thought. I can pull the records together, help you decide what’s next, and take care of supported updates.',
+    actions:[{label:'Give me a briefing',run:()=>runWorkflow('briefing')},
+      ...(appState.role?.is_admin ? [{label:'Work through makeup training',run:()=>runWorkflow('makeups')},{label:'Prepare for a meeting',run:()=>runWorkflow('meeting')}] : []),
+      ...(inTraining() ? [{label:'Plan evaluations',run:()=>runWorkflow('eval_plan',{question:'this week'})}] : [])]});
 }
 export function initVanessa() {
   if ($('#v-launch') || !appState.me) return;
@@ -899,12 +945,15 @@ export function initVanessa() {
   launch.setAttribute('aria-label', 'Ask Vanessa'); launch.setAttribute('aria-expanded', 'false'); launch.textContent = '💬';
   document.body.appendChild(launch);
   const panel = document.createElement('div');
-  panel.id = 'v-panel'; panel.className = 'v-panel'; panel.hidden = true;
+  panel.id = 'v-panel'; panel.className = 'v-panel v-workspace'; panel.hidden = true;
   panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Vanessa');
   panel.innerHTML = `<div class="v-head"><span class="v-head-id"><span class="orb orb-sm" id="v-orb"><i></i></span>
       <span><strong>Vanessa<span class="v-live" id="v-live" hidden></span></strong><span class="sub" id="v-sub">Here with you</span></span></span>
     <span class="v-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    <button type="button" class="v-chip v-size-toggle" id="v-size" aria-pressed="true" title="Toggle compact conversation">Compact</button>
     <button type="button" class="icon-btn" id="v-close" aria-label="Close">✕</button></div>
+    <div class="v-workbar"><button type="button" data-question="Brief me">My briefing</button><button type="button" data-question="Prepare a meeting agenda">Meeting prep</button><button type="button" data-question="Who owes makeup?">Makeups</button><button type="button" id="v-new">New conversation</button></div>
+    <div id="v-context" class="v-context" hidden></div>
     <div id="v-saved" class="v-saved" hidden></div>
     <div class="v-log" id="v-log" role="log" aria-live="polite"></div>
     <div class="v-chips" data-suggestions></div>
@@ -919,8 +968,9 @@ export function initVanessa() {
       <label for="v-voice-target">Use transcript in</label><select id="v-voice-target"><option value="chat">Chat message</option><option value="wentWell">What went well</option><option value="improve">Areas to improve</option><option value="notes">Other notes</option></select>
       <button type="button" class="btn btn-sm" id="v-voice-use" disabled>Use transcript</button>
     </div></details>
-    <form class="v-ask" id="v-form"><input id="v-input" aria-label="Question for Vanessa" placeholder="Ask about the hub…" autocomplete="off">
+    <form class="v-ask" id="v-form"><input id="v-input" aria-label="Question for Vanessa" placeholder="Tell me what you need to get done…" autocomplete="off">
     <button class="btn btn-primary btn-sm" type="submit">Ask</button></form>`;
+  if (!appState.role?.is_admin) panel.querySelector('[data-question="Who owes makeup?"]')?.remove();
   document.body.appendChild(panel);
   const ticket = epoch;
   paintLlmRow();paintModelRow();paintSavedDraft();paintVoice();
@@ -950,14 +1000,29 @@ export function initVanessa() {
       await warmUp();
       if (ticket !== epoch || !open) return;
       paintSavedDraft();
-      if (!$('#v-log').children.length) say('her', greeting());
+      if (!$('#v-log').children.length) welcomeWorkspace();
     }
   });
   $('#v-close').addEventListener('click', close);
+  $('#v-size').addEventListener('click', () => {
+    const wide=panel.classList.toggle('v-workspace');
+    $('#v-size').textContent=wide?'Compact':'Expand';$('#v-size').setAttribute('aria-pressed',String(wide));
+  });
+  $('#v-new').addEventListener('click', () => {
+    if (activeFlow() || evalDraft()) { say('her','Finish or cancel the task in progress first, then start a new conversation.');return; }
+    if (document.documentElement.dataset.vanessa === 'thinking') return;
+    resetConversation();resetMemory(appState.me.id);resetActions();resetLlmHistory();plans.clear();pendingSelect=null;
+    $('#v-log').replaceChildren();welcomeWorkspace();
+  });
   $('#v-form').addEventListener('submit', e => { e.preventDefault(); send($('#v-input').value); });
   panel.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); launch.focus(); } });
   closePanel = () => { if (open) close(); };
   panel.addEventListener('input', e=>{
+    if(e.target.matches('[data-draft]')) {
+      const plan = plans.get(Number(e.target.closest('[data-plan]').dataset.plan));
+      if(plan) { plan.draft = e.target.value; plan.onEdit?.(e.target.value); }
+      return;
+    }
     if(e.target.id==='v-transcript'){setVoiceText(e.target.value);$('#v-voice-use').disabled=!e.target.value.trim();return;}
     const node=e.target.closest('[data-eval-field]');
     if(node){
@@ -999,10 +1064,19 @@ export function initVanessa() {
     if (plan) {
       const b = e.target.closest('button');
       if (!b || b.disabled) return;
+      if (b.hasAttribute('data-copy-draft')) {
+        const text = card.querySelector('[data-draft]').value;
+        (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('Clipboard unavailable'))).then(()=>{card.querySelector('.v-draft-status').textContent='Copied. Ready to paste wherever you send your messages.';}).catch(()=>{card.querySelector('[data-draft]').select();card.querySelector('.v-draft-status').textContent='Select and copy the draft with your keyboard.';});
+        return;
+      }
+      if (b.hasAttribute('data-download-draft')) {
+        const url = URL.createObjectURL(new Blob([card.querySelector('[data-draft]').value],{type:'text/plain;charset=utf-8'}));
+        const a=document.createElement('a');a.href=url;a.download=plan.filename||'vanessa-draft.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return;
+      }
       if (b.dataset.opt !== undefined) { pendingSelect = null; b.classList.add('is-chosen'); runStep(card, plan.options[Number(b.dataset.opt)].run); return; }
       if (b.dataset.item !== undefined) { b.classList.add('is-chosen'); runLoose(plan.items[Number(b.dataset.item)].run); return; }
       if (b.dataset.extra !== undefined) { pendingSelect = null; runStep(card, plan.extra[Number(b.dataset.extra)].run); return; }
-      if (b.dataset.pact !== undefined) { const a = plan.actions.filter(Boolean)[Number(b.dataset.pact)]; if (a.go && narrow()) close(); runLoose(a.run); return; }
+      if (b.dataset.pact !== undefined) { const a = plan.actions.filter(Boolean)[Number(b.dataset.pact)]; if (a.go && narrow()) close(); b.disabled=true; runLoose(a.run).finally(()=>{if(b.isConnected)b.disabled=false;}); return; }
       if (b.dataset.rate !== undefined) { runStep(card, () => plan.rate.run(Number(b.dataset.rate))); return; }
       if (b.hasAttribute('data-confirm')) { runStep(card, plan.confirm?.run); return; }
       if (b.dataset.sec !== undefined) { runStep(card, plan.secondary[Number(b.dataset.sec)].run); return; }

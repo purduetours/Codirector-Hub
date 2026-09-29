@@ -162,6 +162,9 @@ const ACTIONS = [
   { id: 'score-how', kind: 'ask', q: 'How is the final score worked out?', needs: 'recruitment', context: ['interviews'], title: 'How is the score worked out?', category: 'help', priority: 40 },
 
   /* --- training -------------------------------------------------------- */
+  { id: 'makeup-chat', kind: 'ask', q: 'Someone completed makeup training', needs: 'admin', context: ['training'], title: 'Record a completed makeup', description: 'Tell Vanessa who finished; she will handle the record', category: 'task', priority: 85 },
+  { id: 'makeup-reminders', kind: 'ask', q: 'Draft makeup reminders for everyone', needs: 'admin', context: ['training'], title: 'Draft makeup reminders', description: 'Personalized drafts for your review', category: 'task', priority: 80 },
+  { id: 'meeting-prep', kind: 'ask', q: 'Prepare a meeting agenda', needs: 'training', context: ['evals'], title: 'Prepare a meeting brief', category: 'task', priority: 65 },
   { id: 'owes', kind: 'ask', q: 'Who owes a makeup?', needs: 'admin', context: ['training'], title: 'Who owes a makeup?', category: 'question', priority: 72 },
   { id: 'filed', kind: 'ask', q: 'Who filed an absence?', needs: 'admin', context: ['training'], title: 'Who filed an absence?', category: 'question', priority: 68 },
   { id: 'last-session', kind: 'ask', q: 'How did the last training go?', needs: 'admin', context: ['training'], title: 'How did the last session go?', category: 'question', priority: 60 },

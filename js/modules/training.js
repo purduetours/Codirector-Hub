@@ -813,29 +813,66 @@ export function outstandingMakeups(person) {
     (/absent/i.test(a.actual || '') || inferredAbsent(a)));
 }
 
-export async function markMakeupDone(person, { sessionIds = null } = {}) {
+// Optimistic filters stop Vanessa from overwriting a record changed since review.
+function versionFilter(row) {
+  const field = key => row[key] == null ? `${key}=is.null` : `${key}=eq.${encodeURIComponent(row[key])}`;
+  return `id=eq.${encodeURIComponent(row.id)}&${['actual','makeup_on','makeup_note'].map(field).join('&')}` +
+    (row.updated_at ? `&updated_at=eq.${encodeURIComponent(row.updated_at)}` : '');
+}
+const snapshot = row => ({ id: row.id, person_name: row.person_name, session_id: row.session_id,
+  actual: row.actual ?? null, makeup_on: row.makeup_on ?? null, makeup_note: row.makeup_note ?? null, updated_at: row.updated_at });
+function publishTraining() { indexFiled(); shareWithVanessa(); if ($('#tr-body')) paint(); }
+
+export async function markMakeupDone(person, { sessionIds = null, completedOn = null, note = null, receipt = false } = {}) {
   if (!isAdmin()) throw new Error('Only codirectors can update training attendance.');
   if (!attendance) await loadAll();
   if (loadError) throw new Error(loadError);
+  if (completedOn) {
+    const d = new Date(`${completedOn}T12:00:00`);
+    const valid = /^\d{4}-\d{2}-\d{2}$/.test(completedOn) && !Number.isNaN(d.getTime()) &&
+      d.getFullYear() === +completedOn.slice(0,4) && d.getMonth()+1 === +completedOn.slice(5,7) && d.getDate() === +completedOn.slice(8,10);
+    if (!valid || completedOn > todayISO()) throw new Error('Use a valid completion date, today or earlier.');
+  }
   const rows = outstandingMakeups(person).filter(row => !sessionIds || sessionIds.includes(row.session_id));
-  let saved = 0;
+  const actor = state.me?.id, version = state.sessionVersion, changes = [];
   try {
     for (const r of rows) {
-      const changed = await update('training_attendance', `id=eq.${r.id}`, { actual: 'Makeup Completed' });
-      if (!changed?.some(row => row.id === r.id)) throw new Error('The server did not update this attendance record.');
-      r.actual = 'Makeup Completed';
-      saved++;
+      if (!isAdmin() || actor !== state.me?.id || version !== state.sessionVersion) throw new Error('Your signed-in account changed.');
+      const before = snapshot(r);
+      const patch = { actual: 'Makeup Completed', ...(completedOn ? { makeup_on: completedOn } : {}), ...(note ? { makeup_note: note.slice(0,2000) } : {}) };
+      const changed = await update('training_attendance', versionFilter(r), patch);
+      const saved = changed?.find(row => row.id === r.id);
+      if (!saved) throw new Error('This record changed or is no longer editable. Refresh Training and try again.');
+      Object.assign(r, saved, patch);
+      changes.push({ before, after: snapshot(r), session: sessions.find(s => s.id === r.session_id)?.label || 'Training' });
     }
   } catch (err) {
-    const failure = new Error(`I saved ${saved} of ${rows.length} sessions, but couldn’t save the rest. Try again to finish the remaining makeups.`);
-    failure.code = 'MAKEUP_SAVE_FAILED';
-    failure.cause = err;
+    const failure = new Error(`I saved ${changes.length} of ${rows.length} sessions, but couldn’t save the rest. Refresh Training before retrying.`);
+    failure.code = 'MAKEUP_SAVE_FAILED'; failure.cause = err; failure.changes = changes;
     throw failure;
-  } finally {
-    indexFiled(); shareWithVanessa();
-    if ($('#tr-body')) paint();
-  }
-  return saved;
+  } finally { publishTraining(); }
+  return receipt ? { count: changes.length, changes } : changes.length;
+}
+
+/** Undo only the rows which still match the values Vanessa actually saved. */
+export async function undoMakeupChanges(changes) {
+  if (!isAdmin()) throw new Error('Only codirectors can update training attendance.');
+  const actor = state.me?.id, version = state.sessionVersion;
+  let restored = 0, conflicts = 0;
+  try {
+    for (const change of changes) {
+      if (change.undone) continue;
+      if (!isAdmin() || actor !== state.me?.id || version !== state.sessionVersion) throw new Error('Your signed-in account changed.');
+      const { actual, makeup_on, makeup_note } = change.before;
+      const saved = await update('training_attendance', versionFilter(change.after), { actual, makeup_on, makeup_note });
+      const row = saved?.find(r => r.id === change.after.id);
+      if (!row) { conflicts++; continue; }
+      const local = attendance?.find(r => r.id === row.id);
+      if (local) Object.assign(local, row);
+      change.undone = true; restored++;
+    }
+  } finally { publishTraining(); }
+  return { restored, conflicts };
 }
 
 /** One guide's training term at a glance, for the Directory profile. */

@@ -275,48 +275,4 @@ export function resolveRef(u) {
 }
 
 
-/** Natural language completion, including a follow-up containing only a name. */
-export async function completeMakeup(u, followup = false) {
-  if (!trainingAllowed()) return denied();
-  const request = followup ? { name: u.text, session: null } : makeupRequest(u.raw);
-  if (!request) return null;
-  const t = await facts.training();
-  if (!t.ok) return missing(t, () => completeMakeup(u, followup));
-  if (!request.name || /^(someone|somebody|he|she|they|them)$/.test(request.name)) {
-    startFlow('makeup', 'person');
-    return { type: 'reply', text: 'Absolutely — who completed the makeup? You can give me their name.' };
-  }
-  // Require every supplied name part; never pick somebody from a partial overlap.
-  const words = request.name.split(/\s+/);
-  const names = [...t.perPerson.keys()];
-  const exact = names.find(name => name.toLowerCase() === request.name);
-  const hits = exact ? [exact] : names.filter(name => words.every(w => name.toLowerCase().split(/\s+/).includes(w)));
-  if (!hits.length) {
-    startFlow('makeup', 'person');
-    return { type: 'reply', text: `I couldn’t find “${request.name}” in the training records. What’s their name on the roster?` };
-  }
-  endFlow('completed');
-  const finish = async (name, ids) => {
-    if (!trainingAllowed()) return denied();
-    try {
-      const count = await markMakeupDone(name, { sessionIds: ids });
-      return { type: 'reply', kind: 'confirm', text: count ? `All set — I marked ${name}’s makeup training complete for ${n(count, 'session')}.` : `${name} is already marked complete for that makeup.`, actions: [go('training', 'View training')].filter(Boolean) };
-    } catch (err) { return { type: 'reply', kind: 'error', text: explainError(err, 'saving the makeup completion') }; }
-  };
-  const chooseSession = name => {
-    let rows = outstandingMakeups(name);
-    if (request.session) {
-      const query = request.session.replace(/(\d+)(st|nd|rd|th)\b/g, '$1').replace(/[^a-z0-9]/g, '');
-      rows = rows.filter(row => t.sessions.some(s => s.id === row.session_id && [s.label, s.held_on].some(value => String(value || '').toLowerCase().replace(/(\d+)(st|nd|rd|th)\b/g, '$1').replace(/[^a-z0-9]/g, '') === query)));
-      if (!rows.length) return { type: 'reply', text: `I don’t see an outstanding makeup for ${name} for “${request.session}”. Check the session in Training.`, actions: [go('training', 'View training')].filter(Boolean) };
-    }
-    if (!rows.length) return { type: 'reply', text: `${name} has no outstanding makeups — they’re already caught up.` };
-    if (rows.length === 1) return finish(name, [rows[0].session_id]);
-    return { type: 'select', title: `Which makeup did ${name} complete?`, text: 'They have more than one outstanding session. Pick one, or mark all of them complete.', options: [
-      ...rows.map(row => ({ label: t.sessions.find(s => s.id === row.session_id)?.label || 'Training session', run: () => finish(name, [row.session_id]) })),
-      { label: 'All outstanding makeups', run: () => finish(name, rows.map(row => row.session_id)) }
-    ] };
-  };
-  if (hits.length > 1) return { type: 'select', title: 'Which person do you mean?', options: hits.map(name => ({ label: name, run: () => chooseSession(name) })) };
-  return chooseSession(hits[0]);
-}
+export { completeMakeup } from './vanessa-training-flow.js';
