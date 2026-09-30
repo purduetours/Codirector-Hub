@@ -1,3 +1,7 @@
+import { resetAgent, dailyBriefing } from '../agent/planner.js';
+import { onAgentProgress } from '../agent/context.js';
+let agentStatus = null;
+onAgentProgress(label => { if (label && agentStatus?.isConnected) agentStatus.textContent = label; });
 /* Vanessa panel, model controls, and session-scoped data loading. */
 import { proposeWorkflow } from './vanessa-understanding.js';
 import { runWorkflow } from './vanessa-operations.js';
@@ -30,6 +34,10 @@ export const shareData = (kind, rows) => shareOther(kind, rows);
 injectStyle('vanessa-css', `
 /* Vanessa's conversation is the primary working surface. */
 .v-panel.v-workspace { width:min(760px, calc(100vw - 32px)); }
+.v-agent-card { border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;background:var(--bg-sunken); }
+.v-agent-card h4 { margin:0 0 8px; }
+.v-agent-card .v-inline-acts { flex-wrap:wrap; }
+@media(min-width:1100px) { body.v-open .main { padding-right:480px; } .v-panel:not(.v-workspace) { top:16px;bottom:16px;right:16px;width:448px;max-height:none; } body.v-open:has(.v-workspace) .main { padding-right:0; } }
 .v-workbar { display:flex; flex-wrap:wrap; gap:6px; padding:10px 16px; border-bottom:1px solid var(--line); }
 .v-workbar button { font:inherit; font-size:.75rem; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg-sunken); color:var(--text-soft); cursor:pointer; }
 .v-workbar button:hover { border-color:var(--gold); color:var(--text); }
@@ -179,7 +187,7 @@ injectStyle('vanessa-css', `
 /* On a wide screen she docks beside the workspace instead of covering it. */
 @media (min-width:1280px){
   .v-panel { top:10px; bottom:10px; right:10px; width:420px; }
-  body.v-open .main { padding-right:432px; }
+  body.v-open .main { padding-right:480px; }
   body.v-open .topbar .sync, body.v-open .au-lbl, body.v-open .v-top-lbl, body.v-open .qs-wrap::after { display:none; }
   body.v-open .qs-input { width:150px !important; }
   body.v-open .v-float { opacity:0; pointer-events:none; transform:translateY(12px) scale(.9); }
@@ -443,6 +451,7 @@ function renderPlan(plan) {
     if (plan.more) html += `<p class="v-tail">${esc(plan.more)}</p>`;
     if (plan.steps?.length) html += `<ol class="v-steps">${plan.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>`;
   }
+  if (plan.cards?.length) html += plan.cards.map((c,i) => `<section class="v-agent-card"><h4>${esc(c.title)}</h4><dl class="v-rows v-rows-wide">${(c.fields||[]).map(([k,v])=>`<div><dt>${esc(k)}</dt><dd>${esc(String(v??''))}</dd></div>`).join('')}</dl><div class="v-inline-acts">${(c.actions||[]).map((a,j)=>`<button type="button" class="v-chip" data-agent-card="${i}" data-agent-action="${j}">${esc(a.label)}</button>`).join('')}</div></section>`).join('');
   if (plan.type === 'draft') {
     html += `<label class="v-draft-label" for="v-draft-${id}">Edit your draft</label><textarea id="v-draft-${id}" class="v-document" data-draft rows="10">${esc(plan.draft)}</textarea>
       <div class="v-inline-acts"><button type="button" class="v-chip" data-copy-draft>Copy draft</button><button type="button" class="v-chip" data-download-draft>Download text</button></div><p class="v-draft-status" role="status">Draft only · ready for your review</p>`;
@@ -811,7 +820,7 @@ function send(question) {
   // Keep follow-up memory and displayed answers in submission order.
   sendQueue = sendQueue.then(async () => {
     if (ticket !== epoch || user !== appState.me?.id) return;
-    const note = say('her', 'Checking…');
+    const note = say('her', 'Checking…'); agentStatus = note;
     note?.classList.add('is-typing');
     note?.setAttribute('aria-label', 'Vanessa is thinking');
     setMood('thinking');
@@ -923,6 +932,7 @@ export function onVanessaToggle(fn) { vanessaListeners.add(fn); return () => van
 const tellToggle = () => vanessaListeners.forEach(fn => { try { fn(open); } catch {} });
 
 export function resetVanessa() {
+  resetAgent(); agentStatus = null;
   resetConversation();
   resetLlmHistory();
   resetActions();
@@ -934,7 +944,7 @@ export function resetVanessa() {
 function welcomeWorkspace() {
   renderPlan({type:'summary',title:`Hi ${myName().split(' ')[0] || 'there'} — let’s get things done.`,
     text:'Tell me what you need, even if it’s a rough thought. I can pull the records together, help you decide what’s next, and take care of supported updates.',
-    actions:[{label:'Give me a briefing',run:()=>runWorkflow('briefing')},
+    actions:[{label:'Give me a briefing',run:dailyBriefing},{label:'My action history',run:()=>interpretIntent('Vanessa action history')},
       ...(appState.role?.is_admin ? [{label:'Work through makeup training',run:()=>runWorkflow('makeups')},{label:'Prepare for a meeting',run:()=>runWorkflow('meeting')}] : []),
       ...(inTraining() ? [{label:'Plan evaluations',run:()=>runWorkflow('eval_plan',{question:'this week'})}] : [])]});
 }
@@ -945,14 +955,14 @@ export function initVanessa() {
   launch.setAttribute('aria-label', 'Ask Vanessa'); launch.setAttribute('aria-expanded', 'false'); launch.textContent = '💬';
   document.body.appendChild(launch);
   const panel = document.createElement('div');
-  panel.id = 'v-panel'; panel.className = 'v-panel v-workspace'; panel.hidden = true;
+  panel.id = 'v-panel'; panel.className = 'v-panel'; panel.hidden = true;
   panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Vanessa');
   panel.innerHTML = `<div class="v-head"><span class="v-head-id"><span class="orb orb-sm" id="v-orb"><i></i></span>
       <span><strong>Vanessa<span class="v-live" id="v-live" hidden></span></strong><span class="sub" id="v-sub">Here with you</span></span></span>
     <span class="v-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-    <button type="button" class="v-chip v-size-toggle" id="v-size" aria-pressed="true" title="Toggle compact conversation">Compact</button>
+    <button type="button" class="v-chip v-size-toggle" id="v-size" aria-pressed="false" title="Toggle expanded conversation">Expand</button>
     <button type="button" class="icon-btn" id="v-close" aria-label="Close">✕</button></div>
-    <div class="v-workbar"><button type="button" data-question="Brief me">My briefing</button><button type="button" data-question="Prepare a meeting agenda">Meeting prep</button><button type="button" data-question="Who owes makeup?">Makeups</button><button type="button" id="v-new">New conversation</button></div>
+    <div class="v-workbar"><button type="button" data-question="My daily briefing">My briefing</button><button type="button" data-question="Prepare a meeting agenda">Meeting prep</button><button type="button" data-question="Who owes makeup?">Makeups</button><button type="button" id="v-new">New conversation</button></div>
     <div id="v-context" class="v-context" hidden></div>
     <div id="v-saved" class="v-saved" hidden></div>
     <div class="v-log" id="v-log" role="log" aria-live="polite"></div>
@@ -1000,7 +1010,7 @@ export function initVanessa() {
       await warmUp();
       if (ticket !== epoch || !open) return;
       paintSavedDraft();
-      if (!$('#v-log').children.length) welcomeWorkspace();
+      if (!$('#v-log').children.length) { welcomeWorkspace(); const briefing=await dailyBriefing(); if(ticket===epoch&&open&&briefing.cards?.length)renderPlan(briefing); }
     }
   });
   $('#v-close').addEventListener('click', close);
@@ -1011,7 +1021,7 @@ export function initVanessa() {
   $('#v-new').addEventListener('click', () => {
     if (activeFlow() || evalDraft()) { say('her','Finish or cancel the task in progress first, then start a new conversation.');return; }
     if (document.documentElement.dataset.vanessa === 'thinking') return;
-    resetConversation();resetMemory(appState.me.id);resetActions();resetLlmHistory();plans.clear();pendingSelect=null;
+    resetAgent();resetConversation();resetMemory(appState.me.id);resetActions();resetLlmHistory();plans.clear();pendingSelect=null;
     $('#v-log').replaceChildren();welcomeWorkspace();
   });
   $('#v-form').addEventListener('submit', e => { e.preventDefault(); send($('#v-input').value); });
@@ -1064,6 +1074,7 @@ export function initVanessa() {
     if (plan) {
       const b = e.target.closest('button');
       if (!b || b.disabled) return;
+      if (b.dataset.agentCard !== undefined) { const action=plan.cards?.[Number(b.dataset.agentCard)]?.actions?.[Number(b.dataset.agentAction)]; if(action){b.disabled=true;runLoose(action.run).finally(()=>{if(b.isConnected)b.disabled=false;});} return; }
       if (b.hasAttribute('data-copy-draft')) {
         const text = card.querySelector('[data-draft]').value;
         (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('Clipboard unavailable'))).then(()=>{card.querySelector('.v-draft-status').textContent='Copied. Ready to paste wherever you send your messages.';}).catch(()=>{card.querySelector('[data-draft]').select();card.querySelector('.v-draft-status').textContent='Select and copy the draft with your keyboard.';});

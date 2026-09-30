@@ -1,3 +1,5 @@
+import { handleAgent } from '../agent/planner.js';
+import { clearActionReview } from '../actions/registry.js';
 import { handleWorkspace } from '../actions/workspace-actions.js';
 /* ============================================================ Vanessa OS
    The coordinator. Every typed request goes through one pipeline:
@@ -45,7 +47,7 @@ import { workContext } from './vanessa-work.js';
 import { presenceSnapshot } from './presence.js';
 import { prettyTime, todayISO } from './ui.js';
 import { evalDraft } from './vanessa-eval.js';
-import { pendingConfirmation } from './vanessa-actions.js';
+import { pendingConfirmation, resetActions } from './vanessa-actions.js';
 import { NO, first, context, openAction, actionById, performAction, denied, toolTitle } from './vanessa-exec.js';
 import * as evalFlow from './vanessa-flow-eval.js';
 import * as info from './vanessa-flow-info.js';
@@ -150,6 +152,8 @@ export async function interpret(question) {
   let q = String(question || '').trim();
   if (conversationContext()?.topic === 'training' && /^.+? (?:has )?(?:finished|completed|did) (?:hers|his|theirs|it)[.!]*$/i.test(q)) q = q.replace(/(?:hers|his|theirs|it)[.!]*$/i, 'makeup training');
   if (!q || !state.me) return null;
+  const agent = !activeFlow('evaluate') && !evalDraft() ? await handleAgent(q) : null;
+  if (agent) { clearActionReview(); clearReview(); resetActions(); return {...agent, intent:'agent'}; }
   const workspace = await handleWorkspace(q);
   if (workspace) return {...workspace, intent: 'workspace'};
   const u = understand(q);
