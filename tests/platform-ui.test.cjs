@@ -32,13 +32,17 @@ await page.evaluate(async()=>{
   else if(opts.method==='DELETE'){const i=records.findIndex(r=>r.id===u.searchParams.get('id')?.slice(3));if(i>=0)records.splice(i,1);result=null;}
   else result=records;
  }
+ if(table==='hub_agent_actions')result=[];
+ if(table==='hub_agent_analytics')result={workload:[],sampleSize:2,truncated:false};
+ if(table==='guides')result=state.guides.map(g=>({id:g.guideId,full_name:g.name,first_name:g.first,last_name:g.last}));
+ if(table==='hub_agent_action')result={id:'receipt-one',action:payload.p_action,result:{id:payload.p_params.eval_id||'reminder-one'},summary:'Released the evaluation for Avery Fictional',created_at:new Date().toISOString()};
  if(table==='hub_notifications')result=notices;
  if(table==='hub_sync_notifications')result=0;
  if(table==='hub_read_notifications'){result=0;notices.forEach(n=>{if(!n.read_at&&(!payload.p_ids||payload.p_ids.includes(n.id))){n.read_at=new Date().toISOString();result++;}});}
  if(table==='training_sessions')result=[{id:'session-fixture',term_id:'fixture',label:'September 21st',held_on:'2026-09-21'}];
  if(table==='training_attendance')result=[{id:'attendance-fixture',session_id:'session-fixture',person_name:'Avery Fictional',actual:'Attended',expectation:'',makeup_on:null,makeup_note:null}];
  if(table==='hub_activity')result=[{id:1,summary:'Morgan Example claimed an evaluation for Avery Fictional',category:'evaluation',created_at:new Date().toISOString()}];
- if(table==='eval_roster')result=state.guides.map(g=>({id:g.id,guide_id:g.guideId,full_name:g.name,first_name:g.first,last_name:g.last,needs_eval:true,priority:g.priority,evaluator_id:g.evaluatorId,tour_date:g.date,tour_time:g.time,status:g.status}));
+ if(table==='eval_roster')result=state.guides.filter(g=>(!u.searchParams.get('id')||u.searchParams.get('id').includes(g.id))&&(!u.searchParams.get('full_name')||g.name.toLowerCase().includes(u.searchParams.get('full_name').slice(7,-1).toLowerCase()))).map(g=>({id:g.id,guide_id:g.guideId,full_name:g.name,first_name:g.first,last_name:g.last,needs_eval:true,priority:g.priority,evaluator_id:g.evaluatorId,tour_date:g.date,tour_time:g.time,status:g.status}));
  if(table==='evals'&&opts.method==='PATCH')result=[{id:'eval-one',...payload}];
  return new Response(JSON.stringify(result),{status:200,headers:{'Content-Type':'application/json'}});
  };
@@ -79,10 +83,23 @@ await page.keyboard.press('Control+k');await page.getByRole('combobox',{name:'Se
 await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');await page.waitForURL(/#\/notifications$/);await page.getByText('Stay in the loop.').waitFor();checks++;
 await page.keyboard.press('Control+k');await page.keyboard.press('Escape');assert(!await page.locator('dialog').evaluate(el=>el.open));checks++;
 await page.evaluate(()=>window.__mount('command-center'));await page.getByRole('textbox',{name:'Ask Vanessa',exact:true}).fill('Release Avery Fictional’s eval');await page.locator('#view form button').click();
-console.log('Waiting for Vanessa review');await page.getByRole('button',{name:'Confirm',exact:true}).last().waitFor();const before=await page.evaluate(()=>window.__requests.filter(r=>r.table==='evals'&&r.method==='PATCH').length);assert.equal(before,0);checks++;
-await page.getByRole('button',{name:'Confirm',exact:true}).last().click();await page.getByText('Done. I released Avery Fictional’s evaluation.',{exact:true}).waitFor();checks++;
+console.log('Waiting for Vanessa review');await page.getByRole('button',{name:'Confirm',exact:true}).last().waitFor();const before=await page.evaluate(()=>window.__requests.filter(r=>r.table==='hub_agent_action').length);assert.equal(before,0);checks++;
+await page.getByRole('button',{name:'Confirm',exact:true}).last().click();await page.getByText('Released the evaluation for Avery Fictional',{exact:true}).waitFor();checks++;
 if(process.env.UI_SCREENSHOT_DIR)await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,'vanessa-platform-mobile.png'),fullPage:true,timeout:10000,animations:'disabled'});
+// Keep the conversation while navigating and render actual inline cards.
+await page.setViewportSize({width:1440,height:1000});
+await page.locator('#v-input').fill('Who needs evaluated?');await page.locator('#v-form button').click();
+await page.locator('.v-agent-card').filter({has:page.getByRole('heading',{name:'Avery Fictional',exact:true})}).last().waitFor();checks++;
+if(process.env.UI_SCREENSHOT_DIR)await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,'vanessa-agent-desktop.png'),fullPage:true,animations:'disabled'});
+const cardCount=await page.locator('.v-agent-card').count();await page.evaluate(()=>window.__mount('training'));
+assert(await page.locator('#v-panel').isVisible());assert.equal(await page.locator('.v-agent-card').count(),cardCount);checks+=2;
+const desktop=await page.locator('#v-panel').boundingBox();assert(desktop.width<500);checks++;
+await page.locator('#v-size').click();await page.waitForFunction(()=>document.querySelector('#v-panel').getBoundingClientRect().width>600);assert((await page.locator('#v-panel').boundingBox()).width>600);checks++;
+await page.locator('#v-size').click();
+await page.locator('#v-close').click();await page.locator('#v-panel').waitFor({state:'hidden'});await page.locator('#v-launch').dispatchEvent('click');assert.equal(await page.locator('.v-agent-card').count(),cardCount);checks++;
+await page.setViewportSize({width:390,height:900});
 const bounds=await page.locator('#v-panel').boundingBox();assert(bounds.x>=0&&bounds.x+bounds.width<=391);checks++;
+if(process.env.UI_SCREENSHOT_DIR)await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,'vanessa-agent-mobile.png'),fullPage:true,animations:'disabled'});
 assert.deepEqual(errors,[]);checks++;
 console.log(`${checks} platform UI checks passed (desktop, mobile, reminders, notifications, keyboard palette, reviewed Vanessa release).`);
 await browser.close();
