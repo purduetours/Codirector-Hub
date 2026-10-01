@@ -15,7 +15,7 @@
 import { state, myName, isAdmin, inTraining, inRecruitment } from './state.js';
 import { visibleModules, currentModule, morphTo } from './router.js';
 import { resolveActions, canRun } from './vanessa-context.js';
-import { workContext, structuredContext } from './vanessa-work.js';
+import { workContext } from './vanessa-work.js';
 import { activeFlow } from './vanessa-memory.js';
 import { setVanessaState } from './vanessa-state.js';
 import { todayISO } from './ui.js';
@@ -36,7 +36,6 @@ export function context() {
     can: { admin: isAdmin(), training: inTraining(), recruitment: inRecruitment() },
     route: m?.id || 'today',
     module: m?.title || 'Home',
-    pageContext: structuredContext(),
     record: workContext(),           // an open form or selected record, if a module published one
     flow: activeFlow(),              // the task under way, if any
     today: todayISO()

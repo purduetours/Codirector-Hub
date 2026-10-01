@@ -19,6 +19,12 @@ export const ICONS = {
   people:        svg('<circle cx="8" cy="15" r="4"/><path d="m10.9 12.1 8.1-8.1"/><path d="m16 7 2.5 2.5"/><path d="m18.5 4.5 2 2"/>'),
   health:        svg('<path d="M3 12h4l2.2-5.5L13 18l2.3-6H21"/>'),
 
+  tours:   svg('<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z"/><circle cx="12" cy="10" r="2.4"/>'),
+  team:    svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.7-3.2 3.2-5 6-5s5.3 1.8 6 5"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 6.2"/><path d="M17.5 14.7c1.9.5 3.1 2 3.5 4.8"/>'),
+  admin:   svg('<path d="M12 3 5 6v5.5c0 4.2 2.8 7.6 7 9.5 4.2-1.9 7-5.3 7-9.5V6l-7-3Z"/><path d="m9.2 12 2.1 2.1 3.6-4"/>'),
+  more:    svg('<rect x="4" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.8"/>'),
+  plus:    svg('<path d="M12 5v14"/><path d="M5 12h14"/>'),
+  user:    svg('<circle cx="12" cy="8.5" r="3.6"/><path d="M4.5 20c.9-3.6 3.8-5.6 7.5-5.6s6.6 2 7.5 5.6"/>'),
   search:  svg('<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>'),
   refresh: svg('<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/>'),
   menu:    svg('<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/>'),
@@ -37,5 +43,5 @@ export const ICONS = {
 
 /** A module's icon: the line icon if there is one, else its own emoji. */
 export function iconFor(mod) {
-  return ICONS[mod?.id] || ICONS[mod?.icon] || `<span class="ico-emoji" aria-hidden="true">${mod?.icon || '•'}</span>`;
+  return ICONS[mod?.id] || `<span class="ico-emoji" aria-hidden="true">${mod?.icon || '•'}</span>`;
 }

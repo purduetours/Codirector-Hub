@@ -34,6 +34,7 @@ import { performAction, actionById, openAction } from '../core/vanessa-os.js';
 import { setVanessaState } from '../core/vanessa-state.js';
 import { loadRoster } from './evals.js';
 import interviews, { interviewData } from './interviews.js';
+import { latestAnnouncements } from './announcements.js';
 
 /* The change feed keeps its original look; the rest of home lives in
    css/home.css because it is the one screen big enough to deserve a file. */
@@ -367,7 +368,10 @@ function actButton(a, size, i = 0) {
 }
 
 function paintActions(ctx) {
-  const acts = resolveActions('today', ctx);
+  /* The notices themselves are on the page below; a card that only says "go
+     to Announcements" would be the same thing twice. */
+  const acts = resolveActions('today', ctx)
+    .filter(a => !(newsRows.length && a.kind === 'open' && a.to === 'announcements'));
   let primary = acts.filter(a => a.tier === 'primary').slice(0, 3);
   // Always something to hand you, even on a quiet day.
   if (!primary.length) primary = acts.slice(0, 2);
@@ -390,6 +394,21 @@ function paintActions(ctx) {
     $('#hm-more-body').innerHTML = more.map((a, i) => actButton(a, 'mini', i)).join('');
   }
   return primary;
+}
+
+/* ---------------------------------------------------------- announcements
+   The newest two, so a notice is seen on arrival rather than found by going
+   looking. Read-only here; posting stays on the Announcements page. */
+let newsRows = [];
+function paintNews(rows) {
+  try {
+    const box = $('#hm-news');
+    if (!box || !rows.length) return;
+    box.hidden = false;
+    $('#hm-news-list').innerHTML = rows.map(a => `<a class="hm-note ${a.unread ? 'is-new' : ''}" href="#/announcements">
+        <span class="hm-note-t">${a.pinned ? 'Pinned · ' : ''}${esc(a.title)}${a.unread ? '<span class="hm-new">New</span>' : ''}</span>
+        <span class="hm-note-b">${esc(a.body)}</span></a>`).join('');
+  } catch { /* announcements are not essential to Home */ }
 }
 
 /* ---------------------------------------------------------------- tours */
@@ -480,6 +499,11 @@ function shell() {
         <div id="hm-tours">${sk(40)}</div>
       </section>
     </div>
+
+    <section class="hm-block hm-news" id="hm-news" data-reveal hidden>
+      <header class="hm-col-head"><span class="hm-card-ico">${ICONS.announcements}</span><h3>Announcements</h3><a class="hm-all" href="#/announcements">All ${ICONS.arrow}</a></header>
+      <div id="hm-news-list"></div>
+    </section>
   </div>`;
 }
 
@@ -528,10 +552,6 @@ export default {
     homeEvents?.abort();homeEvents=new AbortController();
     if (!view.querySelector('.hm-stage')) view.innerHTML = shell();
     setVanessaState('ready');
-    const commandLink=document.createElement('div');
-    commandLink.className='op-mini op-card';
-    commandLink.innerHTML='<b>Your Vanessa Command Center</b><p>See your day, reminders, notifications and recent changes in one place.</p><a href="#/command-center">Open your command center →</a>';
-    view.prepend(commandLink);
 
     const ask = q => document.dispatchEvent(new CustomEvent('hub:ask', { detail: { question: q } }));
     $('#hm-ask').addEventListener('submit', e => {
@@ -561,7 +581,8 @@ export default {
     await Promise.allSettled([
       inTraining() && !state.guides.length ? loadRoster() : null,
       inRecruitment() ? interviews.prefetch?.() : null,
-      loadToursToday()
+      loadToursToday(),
+      latestAnnouncements(2).then(r => { newsRows = r; }, () => { newsRows = []; })
     ]);
     if (!view.isConnected || document.body.dataset.route !== 'today') return;
 
@@ -578,6 +599,7 @@ export default {
     const handed = new Set(primary.filter(a => a.kind === 'open').map(a => a.to));
     paintAgenda(plan.filter(p => !(p.go && handed.has(p.go) && !p.today) && !(p.go === 'schedule' && handed.has('schedule'))));
     paintTours();
+    paintNews(newsRows);
     $('#hm-attn-n').textContent = items.length ? String(items.length) : '';
 
     const row = (i, k) => `

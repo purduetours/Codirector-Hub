@@ -39,11 +39,10 @@ export async function ensure(kind) {
   const load = loaders[kind];
   if (!load) return !!have();
   if (!inflight.has(kind)) {
-    const promise = Promise.resolve().then(load).then(() => true, err => {
+    inflight.set(kind, Promise.resolve().then(load).then(() => true, err => {
       console.warn(`[Vanessa] could not load ${kind}`, err);
       return false;
-    }).finally(() => { if(inflight.get(kind)===promise)inflight.delete(kind); });
-    inflight.set(kind,promise);
+    }).finally(() => inflight.delete(kind)));
   }
   const ok = await inflight.get(kind);
   return kind === 'roster' ? ok : ok && !!have();
@@ -51,5 +50,5 @@ export async function ensure(kind) {
 
 export function resetData() {
   inflight.clear();
-  Object.keys(shared).forEach(key => { shared[key] = null; delete at[key]; });
+  shared.tours = shared.desks = null;
 }

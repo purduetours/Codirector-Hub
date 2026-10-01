@@ -43,6 +43,15 @@ export const isAdmin   = () => !!state.role?.is_admin;
 export const inTraining    = () => !!state.role?.in_training;
 export const inRecruitment = () => !!state.role?.in_recruitment;
 
+/** Does this person meet a `needs` requirement ('admin' | 'training' | 'recruitment' | none)?
+    The one place that rule lives: the router, the hubs and the command palette all ask here. */
+export function has(needs) {
+  if (needs === 'admin')       return isAdmin();
+  if (needs === 'training')    return inTraining();
+  if (needs === 'recruitment') return inRecruitment();
+  return true;
+}
+
 export function saveSession(s) {
   state.token        = s.access_token || '';
   state.refreshToken = s.refresh_token || '';

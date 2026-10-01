@@ -92,8 +92,8 @@ export function insert(table, rows) {
   });
 }
 
-export function remove(table, filter, {returning = false} = {}) {
-  return rest(`${table}?${filter}`, { method: 'DELETE', ...(returning ? {headers:{Prefer:'return=representation'}} : {}) });
+export function remove(table, filter) {
+  return rest(`${table}?${filter}`, { method: 'DELETE' });
 }
 
 /** Call one of the database functions (submit_eval, run_rollover, ...). */
@@ -125,8 +125,6 @@ export function toGuide(r) {
     submitted: !!r.submitted_at,
     reviewed:  !!r.reviewed_at,
     claimedAt: r.claimed_at || '',
-    submittedAt: r.submitted_at || '',
-    reviewedAt: r.reviewed_at || '',
     notes:     r.scheduling_notes || '',
     status:    r.status,
     tours:     []                  // filled from the tour schedule workbook later

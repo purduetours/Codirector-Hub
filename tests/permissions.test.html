@@ -25,7 +25,9 @@
 <script>window.CONFIG = { SUPABASE_URL: 'https://example.invalid', SUPABASE_KEY: 'test', TERM_LABEL: 'Fall 2026' };</script>
 <script type="module">
   import { state } from '../js/core/state.js';
-  import { register, visibleModules } from '../js/core/router.js';
+  import { register, registerHub, visibleModules, visibleHubs } from '../js/core/router.js';
+  import { primaryNav, hubChildren, HUBS, visibleActions } from '../js/core/nav.js';
+  import { has } from '../js/core/state.js';
   import { hintsFor } from '../js/core/vanessa-hints.js';
   import { actionsFor, resolveActions, explainTool } from '../js/core/vanessa-context.js';
   import { interpret } from '../js/core/vanessa-os.js';
@@ -41,8 +43,11 @@
   import people from '../js/modules/people.js';
   import training from '../js/modules/training.js';
   import health from '../js/modules/health.js';
+  import more from '../js/modules/more.js';
+  import { hubModules } from '../js/modules/hubs.js';
 
   [today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
+  [...hubModules, more].forEach(registerHub);
 
   const ROLES = {
     guide:     { name: 'Tour Guide',            is_admin: false, in_training: false, in_recruitment: false },
@@ -57,6 +62,13 @@
     recruit:   ['today', 'announcements', 'interviews', 'schedule'],
     developer: ['today', 'announcements', 'evals', 'interviews', 'schedule', 'directory', 'desks'],
     admin:     ['today', 'announcements', 'evals', 'interviews', 'training', 'schedule', 'directory', 'desks', 'people', 'health']
+  };
+  const NAV = {      // the primary navigation each role should be shown
+    guide:     ['today', 'schedule', 'announcements', 'more'],
+    training:  ['today', 'tours', 'team', 'more'],
+    recruit:   ['today', 'schedule', 'team', 'more'],
+    developer: ['today', 'tours', 'team', 'more'],
+    admin:     ['today', 'tours', 'team', 'admin', 'more']
   };
   const ADMIN_ONLY = ['training', 'people', 'health'];
 
@@ -76,6 +88,25 @@
 
     const ids = visibleModules().map(m => m.id);
     check(`${key}: sidebar and home launcher show exactly the right tools`, same(ids, EXPECT[key]), ids.join(', '));
+
+    const nav = primaryNav(visibleModules()).map(e => e.id);
+    check(`${key}: primary navigation is exactly the right few entries`, same(nav, NAV[key]), nav.join(', '));
+    check(`${key}: navigation stays shallow (5 entries or fewer)`, nav.length <= 5, String(nav.length));
+
+    // Every tool the role can open is reachable from Home, a hub or More — nothing is orphaned.
+    const hubIds = visibleHubs().map(h => h.id);
+    const reachable = new Set(['today', ...HUBS.flatMap(h => hubChildren(h, visibleModules()).map(m => m.id))]);
+    const lost = ids.filter(id => !reachable.has(id));
+    check(`${key}: every tool the role can open sits in a hub`, !lost.length, lost.join(', '));
+
+    // A hub lists only tools this role may open, and Admin never shows to a non-admin.
+    const hubLeak = HUBS.flatMap(h => hubChildren(h, visibleModules()).map(m => m.id)).filter(id => !ids.includes(id));
+    check(`${key}: hubs list only tools the role can open`, !hubLeak.length, hubLeak.join(', '));
+    if (!role.is_admin) {
+      check(`${key}: Admin hub and admin actions are not offered`, !hubIds.includes('admin') && !nav.includes('admin') &&
+        !visibleActions().some(a => a.needs === 'admin'));
+    }
+    check(`${key}: action list respects role flags`, visibleActions().every(a => has(a.needs)));
 
     if (!role.is_admin) {
       check(`${key}: no codirector-only tool is reachable`, !ids.some(id => ADMIN_ONLY.includes(id)));

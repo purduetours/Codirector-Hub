@@ -2,7 +2,7 @@
 import { initPresence, resetPresence } from './core/presence.js';
 import { state, myName, isAdmin, inTraining, onSessionReset } from './core/state.js';
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
-import { register, buildNav, render, paintNav, go, list, visibleModules, onRoute } from './core/router.js';
+import { register, registerHub, buildNav, render, paintNav, go, list, onRoute } from './core/router.js';
 import { $, $$, esc, initials, toast } from './core/ui.js';
 import { ICONS } from './core/icons.js';
 import { hintsFor } from './core/vanessa-hints.js';
@@ -11,9 +11,7 @@ import { bustSheets, loadAbsences, formStamp } from './core/sheets.js';
 import { registerEvalActions } from './core/vanessa-eval.js';
 import { submitReviewedEval } from './core/vanessa-eval-submit.js';
 import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup, openVanessa, toggleVanessa, onVanessaToggle } from './core/vanessa-ui.js';
-import { initCommandPalette } from './core/command-palette.js';
-import workspaceModules from './modules/workspace.js';
-import { beginVisit } from './services/memory.js';
+import { initPalette } from './core/palette.js';
 import { registerLoaders } from './core/vanessa-data.js';
 
 import evals, { loadRoster } from './modules/evals.js';
@@ -26,8 +24,12 @@ import today         from './modules/today.js';
 import people        from './modules/people.js';
 import training      from './modules/training.js';
 import health        from './modules/health.js';
+import more          from './modules/more.js';
+import { hubModules } from './modules/hubs.js';
 
-[...workspaceModules, today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
+[today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
+/* Hubs group the tools above into a few areas; the sidebar shows those, not every tool. */
+[...hubModules, more].forEach(registerHub);
 
 /* The modules already know how to fetch their own data; Vanessa just asks them
    to, rather than reaching past them into the database herself. */
@@ -51,7 +53,6 @@ registerEvalActions({ load: loadRoster, submit: submitReviewedEval });
 registerLoaders({
   roster:     () => (state.guides.length ? null : loadRoster()),
   tours:      () => schedule.prefetch?.(),
-  desks:      () => (inTraining() ? desks.prefetch?.() : null),
   training:   () => (isAdmin() ? training.prefetch?.() : null),
   interviews: () => interviews.prefetch?.()
 });
@@ -61,7 +62,6 @@ function paintShell() {
   $('#who-role').textContent = state.role?.name || '';
   $('#who-avatar').textContent = initials(myName());
   $('#hub-term').textContent = window.CONFIG?.TERM_LABEL || '';
-  $('#btn-rollover').hidden = !isAdmin();
   $('#sync').textContent = state.loadedAt
     ? 'Synced ' + state.loadedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : '';
@@ -71,8 +71,7 @@ async function start() {
   paintShell();
   buildNav();
   initVanessa();
-  initCommandPalette();
-  beginVisit();
+  initPalette();
   initPresence();
   await render();
   paintShell();
@@ -165,53 +164,38 @@ setInterval(paintVersion, 10 * 60 * 1000);
 /* ------------------------------------------------------------- dark mode
    Follows the laptop until somebody says otherwise, then remembers.
 
-   The button says what it will DO, not what is currently on — "Dark mode" when
-   you are in daylight. A toggle labelled with its own current state is the
-   classic way to make people click it twice to find out which way round it is.
+   The toggle lives on the More page (and in the command palette) rather than
+   in the sidebar, so it is not competing with navigation.
 -------------------------------------------------------------------------- */
 const THEME_KEY = 'hub2.theme';
 // Noir is the identity, so dark is the default; light is an explicit choice.
 const isDark = () => document.documentElement.dataset.theme !== 'light';
 
-function paintTheme() {
-  const dark = isDark();
-  const btn = $('#btn-theme');
-  if (!btn) return;
-  $('#theme-ico').innerHTML = dark ? ICONS.sun : ICONS.moon;
-  $('#theme-lbl').textContent = dark ? 'Light mode' : 'Dark mode';
-  btn.setAttribute('aria-pressed', String(dark));
-  btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
-}
-
-$('#btn-theme').addEventListener('click', () => {
+function toggleTheme() {
   const next = isDark() ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem(THEME_KEY, next); } catch { /* private window */ }
-  paintTheme();
-});
+  document.dispatchEvent(new CustomEvent('hub:theme-changed'));
+}
+document.addEventListener('hub:toggle-theme', toggleTheme);
 
 /* Somebody who has never touched the toggle should still follow their laptop
    when it flips at sunset. */
 window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
-  if (!document.documentElement.dataset.theme) paintTheme();
+  if (!document.documentElement.dataset.theme) document.dispatchEvent(new CustomEvent('hub:theme-changed'));
 });
-
-paintTheme();
 
 const app = $('#app');
 
 /* --- shell chrome ------------------------------------------------------ */
-$('#burger').innerHTML = ICONS.menu;
+$('#view-back').innerHTML = ICONS.arrow;
 $('#refresh-ico').innerHTML = ICONS.refresh;
-$('#rollover-ico').innerHTML = ICONS.rollover;
-$('#who-out').innerHTML = ICONS.signout;
-$('#dock-home-ico').innerHTML = ICONS.today;
-$('#dock-menu-ico').innerHTML = ICONS.menu;
 
 /* Vanessa is opened from the rail, the top bar and the phone dock. All three
    go through the one launcher, so her open/closed state has one owner. */
-['#rail-ask', '#v-top', '#dock-vanessa', '#v-float'].forEach(sel =>
-  $(sel).addEventListener('click', () => { app.classList.remove('nav-open'); toggleVanessa(); }));
+['#rail-ask', '#v-top', '#v-float'].forEach(sel => $(sel).addEventListener('click', () => toggleVanessa()));
+// The dock is rebuilt with the navigation, so its Vanessa button is found by delegation.
+$('#dock').addEventListener('click', e => { if (e.target.closest('#dock-vanessa')) toggleVanessa(); });
 onVanessaToggle(isOpen => $('#v-top').setAttribute('aria-expanded', String(isOpen)));
 
 /* The top bar turns to glass once content passes under it, and the corner
@@ -263,7 +247,7 @@ paintHidden();
    Tracker" — then settles into the corner. */
 let lastRoute = null, peekTimer = null;
 onRoute(mod => {
-  const [first] = hintsFor(mod.id);
+  const [first] = mod.quiet ? [] : hintsFor(mod.id);
   const float = $('#v-float');
   $('#v-float-title').textContent = `Ask Vanessa about ${mod.title}`;
   $('#v-float-sub').textContent = first ? `Try “${first}”` : 'Questions, tours, the handbook';
@@ -283,9 +267,9 @@ onRoute(mod => {
 /* Her one contextual question for the page you are on. */
 onRoute(mod => {
   const box = $('#v-hint');
-  const qs = hintsFor(mod.id);
+  const qs = mod.quiet ? [] : hintsFor(mod.id);
   const helps = TOOL_INFO[mod.id]?.helps;
-  box.hidden = mod.id === 'today' || (!qs.length && !helps);
+  box.hidden = mod.id === 'today' || mod.quiet || (!qs.length && !helps);
   box.innerHTML = box.hidden ? '' :
     `<span class="v-hint-lead"><span class="orb orb-xs"><i></i></span>` +
     `<span class="v-hint-say">You're in ${esc(mod.title)}.${helps ? ` ${esc(helps)}` : ''}</span></span>` +
@@ -299,8 +283,9 @@ $('#v-hint').addEventListener('click', e => {
 /* The home screen asks her things too; it raises this rather than importing
    her panel, so the module stays a plain page. */
 document.addEventListener('hub:ask', e => openVanessa(e.detail?.question || ''));
-$('#btn-refresh').addEventListener('click', async function () {
-  this.classList.add('is-busy');
+async function refreshAll() {
+  const btn = $('#btn-refresh');
+  btn.classList.add('is-busy');
   try {
     list().forEach(m => m.bust?.());
     bustSheets(); resetWarmup();
@@ -311,19 +296,16 @@ $('#btn-refresh').addEventListener('click', async function () {
   } catch (err) {
     toast(err.message, 'err');
   }
-  this.classList.remove('is-busy');
-});
+  btn.classList.remove('is-busy');
+}
+$('#btn-refresh').addEventListener('click', refreshAll);
+document.addEventListener('hub:refresh', refreshAll);
 
-$('#btn-rollover').addEventListener('click', async () => {
+document.addEventListener('hub:rollover', async () => {
+  if (!isAdmin()) return;
   if (location.hash.slice(2) !== 'evals') { go('evals'); await new Promise(r => setTimeout(r, 220)); }
   evals.openRollover();
 });
-
-// mobile nav
-$('#burger').addEventListener('click', () => app.classList.toggle('nav-open'));
-$('#dock-menu').addEventListener('click', () => app.classList.toggle('nav-open'));
-$('#nav-scrim').addEventListener('click', () => app.classList.remove('nav-open'));
-$('#nav').addEventListener('click', e => { if (e.target.closest('.navlink')) app.classList.remove('nav-open'); });
 
 /* Sessions last about an hour. Renew quietly in the background so nobody is
    thrown back to the sign-in screen in the middle of writing an eval. */

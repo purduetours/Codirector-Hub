@@ -75,6 +75,14 @@ async function prime() {
   }));
 }
 
+/** The newest notices, for Home: loads once, then reuses what the page already holds. */
+export async function latestAnnouncements(n = 2) {
+  if (items === null) await prime();
+  const seen = lastSeen();
+  return [...items].sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, n)
+    .map(a => ({ ...a, unread: (a.at || '') > seen }));
+}
+
 async function load() {
   await prime();
   paint();

@@ -139,7 +139,7 @@ export default {
   title: 'Data health',
   crumb: 'Where the hub and the spreadsheets disagree',
   icon: '🩺',
-  section: 'Leadership',
+  section: 'Tools',
 
   async mount(view) {
     view.innerHTML = `<div class="loading"><div class="spinner"></div><p>Checking the hub against its sources…</p></div>`;

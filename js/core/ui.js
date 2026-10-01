@@ -173,8 +173,6 @@ export function closeAllModals() {
 const REVEAL = '[data-reveal], .card, .panel, .stats > .stat, .tr-wrap, .gr-wrap, .sch-day, .tr-owe, .tr-abs, .ev-day, .ev-cal';
 let io = null;
 
-export function clearViewObservers() { io?.disconnect(); tabObservers.forEach(o=>o.disconnect()); tabObservers=[]; }
-
 export function reveal(root) {
   if (calm() || !('IntersectionObserver' in window)) return;
   io ||= new IntersectionObserver(entries => {

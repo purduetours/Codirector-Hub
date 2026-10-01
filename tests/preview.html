@@ -2,6 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<base href="../">
+<script>
+/* Test fixture, not shipped: boots the real app against a stubbed Supabase so
+   the shell can be driven as any role.  tests/preview.html?role=guide|training|recruit|developer|admin */
+(function(){
+  var ROLES={guide:['Tour Guide',0,0,0],training:['Training Committee',0,1,0],recruit:['Recruitment Committee',0,0,1],developer:['Developer',0,1,1],admin:['Codirector',1,1,1]};
+  var key=new URLSearchParams(location.search).get('role')||'admin', r=ROLES[key]||ROLES.admin;
+  window.CONFIG={SUPABASE_URL:'https://stub.invalid',SUPABASE_KEY:'stub',TERM_LABEL:'Fall 2026'};
+  localStorage.setItem('hub2.session',JSON.stringify({access_token:'t',refresh_token:'r',expiresAt:Date.now()+36e5}));
+  var json=function(o,st){return Promise.resolve(new Response(JSON.stringify(o),{status:st||200,headers:{'content-type':'application/json'}}));};
+  var real=window.fetch;
+  window.fetch=function(u,o){u=String(u);
+    if(u.indexOf('stub.invalid/auth/v1/user')>-1) return json({id:'u1'});
+    if(u.indexOf('/rest/v1/members?select=id,full_name,email')>-1) return json([{id:'u1',full_name:'Test Person',email:'test@purdue.edu',role:r[0],active:true}]);
+    if(u.indexOf('/rest/v1/terms')>-1) return json([{id:'fall-2026',label:'Fall 2026'}]);
+    if(u.indexOf('/rest/v1/roles')>-1) return json([{name:r[0],is_admin:!!r[1],in_training:!!r[2],in_recruitment:!!r[3]}]);
+    if(u.indexOf('/rest/v1/announcements')>-1) return json([{id:1,title:'Welcome back, committee',body:'Fall training starts Tuesday. Bring your handbook.',pinned:true,created_at:'2026-09-30T12:00:00Z',author:{full_name:'Logan'}}]);
+    if(u.indexOf('stub.invalid')>-1) return json([]);
+    if(u.indexOf('.invalid')>-1||/docs.google|googleapis.com\/(?!css)/.test(u)) return Promise.reject(new Error('offline'));
+    return real.apply(this,arguments);};
+})();
+</script>
+
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#09090b">
@@ -136,7 +159,6 @@ try { var t = localStorage.getItem('hub2.theme');
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="config.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

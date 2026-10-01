@@ -1,14 +1,17 @@
-import { setContextPage, clearWorkContext } from './vanessa-work.js';
 /* ============================================================ hash router
    Modules register themselves; the router owns which one is mounted. Hash-based
    so it works on GitHub Pages with no server rewrites.
 ============================================================================ */
-import { $, $$, closeAllModals, settle, clearViewObservers } from './ui.js';
-import { isAdmin, inTraining, inRecruitment } from './state.js';
+import { $, $$, closeAllModals, settle } from './ui.js';
+import { has } from './state.js';
 import { iconFor } from './icons.js';
+import { parentHubOf, hubById, hubVisible, primaryNav } from './nav.js';
 import { setVanessaState } from './vanessa-state.js';
 
 const modules = new Map();
+/* Hubs are pages too, but they are not tools: Vanessa, the permission tests and
+   the Home launcher keep asking visibleModules() about tools only. */
+const hubs = new Map();
 let current = null;
 
 /* Things outside the router that care which screen is showing — the Vanessa
@@ -25,6 +28,10 @@ export function register(mod) {
   modules.set(mod.id, mod);
 }
 
+export function registerHub(mod) {
+  hubs.set(mod.id, { ...mod, hub: true });
+}
+
 export function list() {
   return [...modules.values()];
 }
@@ -38,12 +45,13 @@ export function list() {
  * by hand gets an empty screen rather than somebody else's evals.
  */
 export function visibleModules() {
-  return list().filter(m => {
-    if (m.needs === 'admin')       return isAdmin();
-    if (m.needs === 'training')    return inTraining();
-    if (m.needs === 'recruitment') return inRecruitment();
-    return true;
-  });
+  return list().filter(m => has(m.needs));
+}
+
+/** The hub pages this role can open (a hub with nothing in it for them is not offered). */
+export function visibleHubs() {
+  const mods = visibleModules();
+  return [...hubs.values()].filter(h => hubVisible(hubById(h.id) || h, mods));
 }
 
 export function go(id) {
@@ -55,6 +63,7 @@ function currentId() {
   const id = location.hash.replace(/^#\/?/, '').split('?')[0];
   const mods = visibleModules().filter(m => !m.soon);
   if (modules.has(id) && mods.some(m => m.id === id)) return id;
+  if (hubs.has(id) && visibleHubs().some(h => h.id === id)) return id;
 
   /* Bounced somewhere else, so say so.
 
@@ -122,7 +131,7 @@ function tint(id) {
 async function renderOnce() {
   const id = currentId();
   if (!id) return;
-  const mod = modules.get(id);
+  const mod = modules.get(id) || hubs.get(id);
   const changing = !current || current.id !== id;
   const firstPaint = !current;
   const fromId = current?.id || null;
@@ -134,7 +143,6 @@ async function renderOnce() {
   // Anything still open belongs to the outgoing view and is about to be wiped with
   // it. Close it properly first, or its scroll lock outlives it.
   closeAllModals();
-  clearViewObservers();
 
   const view = $('#view');
   const from = pendingMorph?.isConnected ? pendingMorph : null;
@@ -142,11 +150,17 @@ async function renderOnce() {
 
   const swap = () => {
     current = mod;
-    clearWorkContext();
-    setContextPage(mod.id);
     paintNav();
     $('#view-title').textContent = mod.title;
     $('#view-crumb').textContent = mod.crumb || '';
+    /* A tool that lives inside a hub says so, and offers the way back. */
+    const parent = mod.hub ? null : parentHubOf(mod.id);
+    const back = $('#view-back');
+    if (back) {
+      back.hidden = !parent;
+      if (parent) { back.href = `#/${parent.id}`; back.setAttribute('aria-label', `Back to ${parent.title}`); back.title = `Back to ${parent.title}`; }
+    }
+    document.title = mod.id === 'today' ? 'Codirector Hub' : `${mod.title} · Codirector Hub`;
     document.body.dataset.route = mod.id;
     document.documentElement.style.setProperty('--tool', `var(--t-${mod.id}, var(--gold-deep))`);
     tint(mod.id);
@@ -220,38 +234,38 @@ async function renderOnce() {
 
 export function paintNav() {
   const id = currentId();
-  $$('.navlink').forEach(a => {
-    a.classList.toggle('is-active', a.dataset.mod === id);
-    const mod = modules.get(a.dataset.mod);
-    const badge = mod?.badge?.();
+  $$('[data-owns]').forEach(a => {
+    const owns = a.dataset.owns.split(' ');
+    a.classList.toggle('is-active', owns.includes(id));
+    if (owns.includes(id)) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    /* A count on a hub is the sum of what its tools are asking for. */
+    const badge = owns.reduce((n, mid) => n + (Number(modules.get(mid)?.badge?.()) || 0), 0);
     const slot = a.querySelector('.count');
-    if (slot) {
-      slot.textContent = badge ?? '';
-      slot.hidden = !badge;
-    }
+    if (slot) { slot.textContent = badge || ''; slot.hidden = !badge; }
     if (badge) a.dataset.badge = badge; else delete a.dataset.badge;
   });
-  $$('[data-dock]').forEach(a => a.classList.toggle('is-active', a.dataset.dock === id));
 }
 
+/* Primary navigation: the same few entries in the sidebar and in the phone
+   dock. Vanessa sits in the middle of the dock; Admin stays out of it (a phone
+   has room for four) and is one tap away inside More. */
 export function buildNav() {
-  const rail = $('#nav');
-  const sections = {};
-  /* Codirector-only tools get their own group, so a codirector can see at a
-     glance which screens are theirs alone — and nobody else ever sees the
-     heading, because visibleModules() has already removed those tools. */
-  visibleModules().forEach(m => (sections[m.section || 'Hub'] ||= []).push(m));
+  const entries = primaryNav(visibleModules());
+  $('#nav').innerHTML = entries.map(e => `
+    <a class="navlink" href="#/${e.id}" data-owns="${e.owns.join(' ')}"
+       style="--tool:var(--t-${e.owns[e.owns.length - 1]}, var(--gold-deep))" title="${e.title}">
+      <span class="ico">${e.icon}</span>
+      <span class="lbl">${e.title}</span>
+      <span class="count" hidden></span>
+    </a>`).join('');
 
-  rail.innerHTML = Object.entries(sections).map(([name, mods]) => `
-    <div class="rail-section">${name}</div>
-    ${mods.map(m => `
-      <a class="navlink ${m.soon ? 'is-soon' : ''}" ${m.soon ? '' : `href="#/${m.id}"`} data-mod="${m.id}"
-         style="--tool:var(--t-${m.id}, var(--gold-deep))" title="${m.title}">
-        <span class="ico">${iconFor(m)}</span>
-        <span class="lbl">${m.title}</span>
-        ${m.soon ? '<span class="pill tone-mute">soon</span>' : '<span class="count" hidden></span>'}
-      </a>`).join('')}
-  `).join('');
+  const dock = entries.filter(e => e.id !== 'admin');
+  const link = e => `<a class="dock-btn" href="#/${e.id}" data-owns="${e.owns.join(' ')}"><span class="ico">${e.icon}</span><span class="dock-lbl">${e.short || e.title}</span><span class="count" hidden></span></a>`;
+  const mid = Math.ceil(dock.length / 2);
+  $('#dock').innerHTML = dock.slice(0, mid).map(link).join('') +
+    `<button class="dock-btn dock-v" type="button" id="dock-vanessa"><span class="orb orb-sm"><i></i></span><span>Vanessa</span></button>` +
+    dock.slice(mid).map(link).join('');
+  $('#dock').style.setProperty('--cols', dock.length + 1);
 
   paintNav();
 }

@@ -104,7 +104,7 @@ export default {
   title: 'Tour Schedule',
   crumb: 'Who is leading which tour, and when',
   icon: '📅',
-  section: 'Operations',
+  section: 'Tools',
 
   async mount(view) {
     view.innerHTML = `

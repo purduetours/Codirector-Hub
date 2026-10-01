@@ -628,7 +628,7 @@ export default {
   title: 'Training',
   crumb: 'Attendance, makeups and who has said they will miss one',
   icon: '🎓',
-  section: 'Operations',
+  section: 'Tools',
   prefetch: async () => {
     if (!sessions || loadError) await loadAll();
     if (loadError) throw new Error(loadError);

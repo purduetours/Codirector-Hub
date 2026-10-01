@@ -1,6 +1,3 @@
-import { buildNameIndex, resolveGuide } from '../services/tour-matching.js';
-import { rememberEntity } from '../services/memory.js';
-import { changeEvaluation } from '../services/evaluations.js';
 /* ============================================================ Evals module
    The tour-guide eval tracker, ported into the hub. Same backend, same rules:
    claim -> schedule -> submit, with completed evals visible only to admins
@@ -588,20 +585,19 @@ function paint() {
  * gets nothing back rather than quietly overwriting.
  */
 export async function claimGuide(g, { date = null, time = null } = {}) {
-  const saved = await changeEvaluation('claim', g, {date, time});
+  const rows = await update('evals', `id=eq.${g.id}&evaluator_id=is.null`, {
+    evaluator_id: state.me.id,
+    claimed_at:   new Date().toISOString(),
+    tour_date:    date,
+    tour_time:    time
+  });
+  if (!rows || !rows.length) throw new Error(`${g.name} was just claimed by somebody else.`);
   await loadRoster();
   paintNav();
-  return saved;
+  return rows[0];
 }
 
-let rosterFlight = null;
-export function loadRoster() {
-  const version=state.sessionVersion;
-  if(rosterFlight?.version===version)return rosterFlight.promise;
-  const entry={version};entry.promise=fetchRoster().finally(()=>{if(rosterFlight===entry)rosterFlight=null;});
-  rosterFlight=entry;return entry.promise;
-}
-async function fetchRoster() {
+export async function loadRoster() {
   const version = state.sessionVersion;
   const rows = await select('eval_roster',
     `select=*&term_id=eq.${termId()}&order=priority_rank.asc,last_name.asc`);
@@ -643,7 +639,60 @@ async function fetchRoster() {
 
    "Nick Str." deliberately has no entry -- the surname prefix match resolves it
    to Stromberg on its own, and an alias here would hijack it to Steingraeber. */
+const ALIASES = {
+  'nick s.':   'Nicholas (Nick) Steingraeber',
+  'myelei c.': 'Myelei Whitaker'
+};
+
 let tourCache = null;
+
+function buildNameIndex(guides) {
+  const index = new Map();
+  const add = (key, g) => {
+    key = String(key || '').trim().toLowerCase();
+    if (!key) return;
+    if (!index.has(key)) index.set(key, []);
+    const arr = index.get(key);
+    if (!arr.includes(g)) arr.push(g);
+  };
+  guides.forEach(g => {
+    const first = String(g.first || '').trim();
+    const paren = /^(.*?)\s*\((.*?)\)\s*$/.exec(first);
+    if (paren) { add(paren[1], g); add(paren[2], g); } else { add(first, g); }
+    add(first.split(/\s+/)[0], g);
+  });
+  return index;
+}
+
+function resolveGuide(label, index, byName) {
+  const clean = String(label || '').replace(/[*+`\u00b4']+/g, '').trim();
+  if (!clean) return null;
+
+  const alias = ALIASES[clean.toLowerCase()];
+  if (alias) return byName.get(alias.toLowerCase()) || null;
+
+  const m = /^(.+?)\s+([A-Za-z]+)\.?$/.exec(clean);
+  if (!m) return null;
+  const first = m[1].trim().toLowerCase();
+  const surname = m[2].trim().toLowerCase();
+  const surnameFits = g => String(g.last || '').trim().toLowerCase().startsWith(surname);
+
+  const exact = index.get(first);
+  if (exact && exact.length) {
+    const hits = exact.filter(surnameFits);
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return null;          // genuinely ambiguous
+  }
+
+  // The schedule sometimes shortens a first name the roster spells out. Accept
+  // that only when the surname agrees and exactly one guide fits.
+  const loose = [];
+  for (const [key, group] of index) {
+    if (!key.startsWith(first)) continue;
+    group.forEach(g => { if (surnameFits(g) && !loose.includes(g)) loose.push(g); });
+  }
+  return loose.length === 1 ? loose[0] : null;
+}
 
 async function attachTours() {
   const version = state.sessionVersion;
@@ -661,7 +710,7 @@ async function attachTours() {
   for (const t of tourCache) {
     const g = resolveGuide(t.guide, index, byName);
     if (!g) { unmatched.add(t.guide); continue; }
-    g.tours.push({ date: t.date, start: t.start, slot: t.slot, guide: t.guide });
+    g.tours.push({ date: t.date, start: t.start, slot: t.slot });
   }
   state.guides.forEach(g => g.tours.sort((a, b) =>
     a.date === b.date ? a.start.localeCompare(b.start) : a.date.localeCompare(b.date)));
@@ -815,7 +864,6 @@ function openEval(g) {
      makes lands through the form — never around it. */
   const FIELD = { wentWell: '#ev-well', improve: '#ev-improve', notes: '#ev-notes', date: '#ev-eval-date', time: '#ev-eval-time' };
   const isOpen = () => !!$('#ev-modal-eval') && !$('#ev-modal-eval').hidden && local.target?.id === g.id;
-  rememberEntity('evaluation',g.id);
   setWorkContext({
     kind: 'eval-form', label: `${g.name}'s evaluation`,
     data: { evalId: g.id, name: g.name, date: g.date, time: g.time, priority: g.priority },
@@ -945,7 +993,7 @@ export default {
   title: 'Eval Tracker',
   crumb: 'Claim and submit tour guide evaluations',
   icon: '📋',
-  section: 'Operations',
+  section: 'Tools',
   badge: () => state.guides.filter(g => isMine(g) && g.status === 'claimed').length || null,
 
   async mount(view) {
@@ -1022,7 +1070,8 @@ export default {
         if (!confirm(`Release ${g.name} back to the open list?`)) return;
         b.disabled = true;
         try {
-          await changeEvaluation('release', g);
+          await update('evals', `id=eq.${g.id}`,
+            { evaluator_id: null, claimed_at: null, tour_date: null, tour_time: null });
           toast(`Released ${g.name}.`);
           await reload();
         } catch (err) { toast(err.message, 'err'); b.disabled = false; }
@@ -1064,7 +1113,19 @@ export default {
           tour_time: $('#ev-claim-time').value || null,
           scheduling_notes: $('#ev-claim-notes').value || null
         };
-        await changeEvaluation(mode, local.target, {date:patch.tour_date, time:patch.tour_time, notes:patch.scheduling_notes});
+        // Claiming filters on "nobody has it yet", so if two people press the
+        // button at the same instant one gets the row back and the other gets
+        // none. No lock, no queue -- Postgres settles it.
+        let filter = `id=eq.${local.target.id}`;
+        if (mode === 'claim') {
+          patch.evaluator_id = state.me.id;
+          patch.claimed_at = new Date().toISOString();
+          filter += '&evaluator_id=is.null';
+        }
+        const rows = await update('evals', filter, patch);
+        if (mode === 'claim' && (!rows || !rows.length)) {
+          throw new Error(`${local.target.name} was just claimed by somebody else.`);
+        }
         closeModal($('#ev-modal-claim'));
         toast(mode === 'claim' ? `You claimed ${local.target.name}.` : 'Schedule updated.');
         await reload();
