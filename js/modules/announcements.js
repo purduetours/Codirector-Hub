@@ -170,6 +170,18 @@ export default {
       finally { go.disabled = false; go.textContent = 'Post'; }
     });
 
+    /* Another screen (a training session's "Announce" button) can hand over a
+       draft; it opens the same New announcement form, pre-filled, to be read and posted. */
+    try {
+      const draft = JSON.parse(sessionStorage.getItem('hub2.ann.draft') || 'null');
+      if (draft) {
+        sessionStorage.removeItem('hub2.ann.draft');
+        $('#ann-title').value = draft.title || ''; $('#ann-body').value = draft.body || '';
+        $('#ann-pin').checked = false; $('#ann-error').hidden = true;
+        openModal($('#ann-modal'));
+      }
+    } catch { /* no draft */ }
+
     $('#ann-list').addEventListener('click', async e => {
       const b = e.target.closest('[data-del]');
       if (!b || !confirm('Delete this announcement?')) return;

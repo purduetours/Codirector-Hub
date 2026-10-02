@@ -23,6 +23,7 @@ export const ICONS = {
   settings:      svg('<path d="M5 7h9M18 7h1M5 17h1M10 17h9"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>'),
   health:        svg('<path d="M3 12h4l2.2-5.5L13 18l2.3-6H21"/>'),
 
+  trainhub: svg('<path d="m2.5 9 9.5-5 9.5 5-9.5 5-9.5-5Z"/><path d="M6.5 11.2V16c0 1.4 2.5 3 5.5 3s5.5-1.6 5.5-3v-4.8"/><path d="M21.5 9v5"/>'),
   tours:   svg('<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z"/><circle cx="12" cy="10" r="2.4"/>'),
   team:    svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.7-3.2 3.2-5 6-5s5.3 1.8 6 5"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 6.2"/><path d="M17.5 14.7c1.9.5 3.1 2 3.5 4.8"/>'),
   admin:   svg('<path d="M12 3 5 6v5.5c0 4.2 2.8 7.6 7 9.5 4.2-1.9 7-5.3 7-9.5V6l-7-3Z"/><path d="m9.2 12 2.1 2.1 3.6-4"/>'),

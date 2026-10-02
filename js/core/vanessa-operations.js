@@ -11,6 +11,7 @@ import { go, denied } from './vanessa-exec.js';
 import { startEvaluation } from './vanessa-flow-eval.js';
 import { completeMakeup, undoTraining } from './vanessa-training-flow.js';
 import { adminIntent, runAdmin } from './vanessa-admin.js';
+import { trainingIntent, runTraining } from './vanessa-training.js';
 import { getActions, LEVELS } from './actioncenter.js';
 import { conversationContext, rememberConversation, recentReceipts, currentDraft, rememberDraft, pendingReview, clearReview } from './vanessa-conversation.js';
 
@@ -213,6 +214,8 @@ export async function handleOperations(raw) {
   if(pending)clearReview();
   const intent=operationIntent(raw);
   if(!intent) {
+    const tr=trainingIntent(raw);
+    if(tr){const out=await runTraining(tr);return out?.run==='makeups'?makeups():out;}
     const adm=adminIntent(raw);
     if(!adm)return null;
     const out=await runAdmin(adm);

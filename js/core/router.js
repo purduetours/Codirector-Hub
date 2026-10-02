@@ -154,7 +154,7 @@ async function renderOnce() {
     $('#view-title').textContent = mod.title;
     $('#view-crumb').textContent = mod.crumb || '';
     /* A tool that lives inside a hub says so, and offers the way back. */
-    const parent = mod.hub ? null : parentHubOf(mod.id);
+    const parent = mod.hub ? null : (p => (p?.virtual ? null : p))(parentHubOf(mod.id));
     const back = $('#view-back');
     if (back) {
       back.hidden = !parent;

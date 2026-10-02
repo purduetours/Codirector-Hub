@@ -134,11 +134,66 @@ async function announcementItems(out) {
   } catch { /* not essential */ }
 }
 
+/* ---------------------------------------------------------------- training
+   From the training tables, not from a second set of rules: administrators see
+   what needs running (attendance not in, missing room or speaker, makeups,
+   deadlines); a Tour Guide linked to an account sees only their own (a makeup
+   they owe, a deadline, a session tomorrow). Timing is deliberately sparing:
+   a session shows from two days out, a deadline from two weeks. */
+const dayDiff = iso => Math.round((new Date(iso + 'T12:00:00') - new Date(todayISO() + 'T12:00:00')) / 864e5);
+
+async function trainingItems(out) {
+  let usedNew = false;
+  if (isAdmin()) {
+    try {
+      const ov = await rpc('training_overview');
+      if (ov?.requirements?.length || ov?.upcoming?.length) usedNew = true;
+      for (const a of ov?.attention || []) {
+        if (a.kind === 'attendance_missing') out.push({ id: `tr-att:${a.session_id}`, level: 'action', source: 'Training', url: `#/trainhub?tab=attendance&session=${a.session_id}`, due: a.date, dismissible: true,
+          title: `Attendance has not been entered for ${a.title}`, detail: `It was ${prettyDate(a.date)}. Mark who came so completion updates.` });
+        if (a.kind === 'no_location') out.push({ id: `tr-loc:${a.session_id}`, level: dayDiff(a.date) <= 0 ? 'urgent' : 'action', source: 'Training', url: `#/trainhub?tab=sessions&open=${a.session_id}`, due: a.date,
+          title: dayDiff(a.date) <= 0 ? `${a.title} is today and has no room assigned` : `${a.title} has no room or link yet`, detail: prettyDate(a.date) });
+        if (a.kind === 'no_speaker') out.push({ id: `tr-spk:${a.session_id}`, level: 'action', source: 'Training', url: `#/trainhub?tab=sessions&open=${a.session_id}`, due: a.date, dismissible: true,
+          title: `${a.title} has no speaker assigned`, detail: prettyDate(a.date) });
+        if (a.kind === 'no_sessions') out.push({ id: `tr-nosess:${a.requirement_id}`, level: 'action', source: 'Training', url: '#/trainhub?tab=requirements', dismissible: true,
+          title: `${a.title} has no sessions scheduled`, detail: 'People cannot complete it until a session is approved.' });
+      }
+      const makeup = (ov?.requirements || []).reduce((n, r) => n + (r.makeup_needed || 0), 0);
+      if (makeup) out.push({ id: `tr-makeup:${makeup}`, level: 'action', source: 'Training', url: '#/trainhub?tab=people&filter=makeup', dismissible: true,
+        title: `${plural(makeup, 'person', 'people')} need${makeup === 1 ? 's' : ''} a makeup`, detail: 'Assign them to a session or mark them excused.' });
+      for (const r of ov?.requirements || []) {
+        const left = r.total - r.complete - r.waived - r.excused;
+        if (r.deadline && left > 0 && dayDiff(r.deadline) <= 14) out.push({ id: `tr-due:${r.id}:${left}`, level: dayDiff(r.deadline) < 0 ? 'urgent' : 'upcoming', source: 'Training', url: `#/trainhub?tab=people&req=${r.id}`, due: r.deadline, dismissible: dayDiff(r.deadline) >= 0,
+          title: `${r.name}: ${plural(left, 'person', 'people')} not done`, detail: dayDiff(r.deadline) < 0 ? `Was due ${prettyDate(r.deadline)}.` : `Due ${prettyDate(r.deadline)}.` });
+      }
+    } catch { /* the training tools are not installed yet; the older makeups item below covers it */ }
+  }
+  /* A Tour Guide's own, whoever else they are. */
+  try {
+    const my = await rpc('my_training');
+    if (my?.linked) {
+      for (const r of my.requirements || []) {
+        if (r.state === 'makeup_needed') out.push({ id: `my-makeup:${r.requirement_id}`, level: 'action', source: 'Training', url: '#/trainhub?tab=my',
+          title: `You missed ${r.name} and need a makeup`, detail: r.upcoming?.[0] ? `Next chance: ${prettyDate(r.upcoming[0].held_on)}.` : 'Ask a codirector when the next makeup is.' });
+        else if (!['complete', 'waived', 'excused'].includes(r.state) && r.deadline && dayDiff(r.deadline) <= 14)
+          out.push({ id: `my-due:${r.requirement_id}`, level: dayDiff(r.deadline) < 0 ? 'urgent' : 'action', source: 'Training', url: '#/trainhub?tab=my', due: r.deadline, dismissible: dayDiff(r.deadline) >= 0,
+            title: `${r.name} must be completed by ${prettyDate(r.deadline)}`, detail: r.state === 'scheduled' ? `You are signed up for ${prettyDate(r.next_on)}.` : 'Check the sessions below it on your Training page.' });
+        const next = (r.upcoming || [])[0];
+        if (next && r.state === 'scheduled' && dayDiff(next.held_on) >= 0 && dayDiff(next.held_on) <= 2)
+          out.push({ id: `my-soon:${next.id}`, level: 'upcoming', source: 'Training', url: '#/trainhub?tab=my', due: next.held_on, dismissible: true,
+            title: `${next.title} is ${dayDiff(next.held_on) === 0 ? 'today' : dayDiff(next.held_on) === 1 ? 'tomorrow' : 'in 2 days'}${next.start_time ? ' at ' + prettyTime(next.start_time.slice(0, 5)) : ''}`, detail: next.location || '' });
+      }
+    }
+  } catch { /* not linked, or not installed */ }
+  return usedNew;
+}
+
 async function adminItems(out) {
   if (!isAdmin()) return;
 
-  try { await training.prefetch?.(); } catch { /* training may not be set up */ }
-  const owed = owedBy();
+  const newTraining = out._trainingNew;
+  try { if (!newTraining) await training.prefetch?.(); } catch { /* training may not be set up */ }
+  const owed = newTraining ? null : owedBy();
   if (owed?.size) out.push({ id: `makeups:${owed.size}`, level: 'action', source: 'Training', url: '#/training', dismissible: true,
     title: `${plural(owed.size, 'person', 'people')} owe${owed.size === 1 ? 's' : ''} a makeup`, detail: 'Open Training to record or remind.' });
 
@@ -187,7 +242,9 @@ async function compute() {
   if (inTraining() && !state.guides?.length) { try { await loadRoster(); } catch { /* shown on its own page */ } }
   evalItems(out);
   interviewItems(out);
+  out._trainingNew = await trainingItems(out);
   await Promise.all([deskItems(out), announcementItems(out), adminItems(out)]);
+  delete out._trainingNew;
 
   try {
     const rows = await select('action_states', 'select=key,state,until');

@@ -625,7 +625,7 @@ export default {
   // Codirectors only: this is a record about a hundred named students,
   // and the database policies match (16-training-codirectors-only.sql).
   needs: 'admin',
-  title: 'Training',
+  title: 'Training grid',
   crumb: 'Attendance, makeups and who has said they will miss one',
   icon: '🎓',
   section: 'Tools',

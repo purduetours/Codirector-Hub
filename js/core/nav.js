@@ -26,6 +26,7 @@ export const HUBS = [
   { id: 'team', title: 'Team', icon: 'team', crumb: 'News, evaluations and the people behind them',
     lede: 'Notices, evaluations, the guide directory and recruitment.',
     children: ['announcements', 'evals', 'directory', 'interviews', 'training'] },
+  { id: 'trainnav', title: 'Training', icon: 'training', crumb: 'Sessions, requirements and your status', virtual: true, children: ['trainhub'] },
   { id: 'admin', title: 'Admin', icon: 'admin', needs: 'admin', crumb: 'People, guides, semesters and settings',
     lede: 'Everything needed to run the program, with no database work. Nobody else sees this area.',
     children: ['people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health'],

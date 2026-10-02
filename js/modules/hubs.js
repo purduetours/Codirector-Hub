@@ -57,4 +57,4 @@ function makeHub(def) {
   };
 }
 
-export const hubModules = HUBS.filter(h => !['more', 'actions'].includes(h.id)).map(makeHub);
+export const hubModules = HUBS.filter(h => !h.virtual && !['more', 'actions'].includes(h.id)).map(makeHub);

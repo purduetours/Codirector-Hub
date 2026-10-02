@@ -60,7 +60,9 @@ export function formDialog({ title, intro = '', fields, submitLabel = 'Save' }) 
     const root = document.createElement('div');
     root.className = 'modal-root';
     root.hidden = true;
-    const control = f => f.options
+    const control = f => f.multiline
+      ? `<textarea name="${esc(f.name)}" rows="${f.rows || 4}" ${f.required ? 'required' : ''}>${esc(f.value ?? '')}</textarea>`
+      : f.options
       ? `<select class="select" name="${esc(f.name)}">${f.options.map(o => `<option${o === f.value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`
       : `<input name="${esc(f.name)}" type="${esc(f.type || 'text')}" value="${esc(f.value ?? '')}" ${f.required ? 'required' : ''} autocomplete="off">`;
     root.innerHTML = `<div class="modal-scrim" data-close></div>

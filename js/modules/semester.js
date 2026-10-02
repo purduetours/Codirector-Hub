@@ -86,7 +86,7 @@ const academicYear = d => d.season === 'Fall' ? `${d.year}–${String(d.year + 1
 function freshWizard() {
   const s = suggest();
   return { step: 0, season: s.season, year: s.year, starts: '', ends: '', leavingGuides: new Set(), newGuides: '',
-    leavingPeople: new Set(), roleChanges: {}, newPeople: [], sessions: [], promote: true, preview: null, gSearch: '', typed: '' };
+    leavingPeople: new Set(), roleChanges: {}, newPeople: [], sessions: [], copyTraining: true, shiftDays: 182, copySessions: true, promote: true, preview: null, gSearch: '', typed: '' };
 }
 
 /* ------------------------------------------------------------- the page */
@@ -169,7 +169,11 @@ const labelFor = iso => { const d = new Date(iso + 'T12:00:00'); return `${MONTH
 function stepTraining() {
   const w = wiz;
   return `<h3>Training sessions</h3>
-    <p class="muted" style="font-size:.86rem">Optional. Each session is created with a blank attendance row for every guide, ready for the Training screen.</p>
+    <label class="toggle-row" style="margin:6px 0"><input type="checkbox" data-f="copyTraining" ${w.copyTraining ? 'checked' : ''}> Copy ${esc(termLabel())}’s training setup into the new semester</label>
+    <p class="muted" style="font-size:.84rem;margin:0 0 6px 26px">Requirements, who they apply to, and their materials. Attendance, completion and missed-training history are never copied — they stay with ${esc(termLabel())}.</p>
+    ${w.copyTraining ? `<div class="sm-grid" style="margin:0 0 12px 26px"><label class="field"><span>Move deadlines and dates by (days)</span><input type="number" data-f="shiftDays" value="${w.shiftDays}"></label>
+      <label class="toggle-row" style="align-self:end"><input type="checkbox" data-f="copySessions" ${w.copySessions ? 'checked' : ''}> Also copy sessions as drafts</label></div>` : ''}
+    <p class="muted" style="font-size:.86rem">Optional extra sessions. Each is created with a blank attendance row for every guide.</p>
     ${w.sessions.length ? w.sessions.map((s, i) => `<div class="sm-row" style="grid-template-columns:1.4fr 1fr auto"><label class="field"><span>Name</span><input data-ss="${i}" data-k="label" value="${esc(s.label)}"></label>
       <label class="field"><span>Date</span><input type="date" data-ss="${i}" data-k="held_on" value="${esc(s.held_on)}"></label>
       <button class="btn btn-quiet btn-sm" data-ss-del="${i}" aria-label="Remove this session">✕</button></div>`).join('')
@@ -316,9 +320,11 @@ export default {
         const btn = e.target.closest('button'); btn.disabled = true; btn.textContent = 'Starting…';
         try {
           const r = await admin('admin_start_semester', payload(true));
+          let copied = null;
+          if (wiz.copyTraining && r.from_term) { try { copied = await admin('admin_copy_training_setup', { p_from: r.from_term, p_to: termIdOf(wiz), p_opts: { shift_days: Number(wiz.shiftDays) || 0, sessions: !!wiz.copySessions, materials: true }, p_apply: true }); } catch (e) { copied = { error: e.message }; } }
           view.innerHTML = `<section class="sm-card">${emptyState({ title: `${wiz.season} ${wiz.year} has started`, icon: 'check',
-            text: `${r.guides_carried} guides carried over, ${r.guides_archived} archived, ${r.sessions} training sessions created.`,
-            action: `<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px"><a class="btn btn-primary" href="#/sources">Connect this semester’s sheets</a><a class="btn btn-ghost" href="#/reconcile">Reconcile people</a><a class="btn btn-ghost" href="#/evalroster">Evaluation roster</a><a class="btn btn-ghost" href="#/training">Training</a></div>` })}</section>`;
+            text: `${r.guides_carried} guides carried over, ${r.guides_archived} archived, ${r.sessions} training sessions created.${copied?.requirements != null ? ` Training setup copied: ${copied.requirements} requirement${copied.requirements === 1 ? '' : 's'}${copied.sessions ? `, ${copied.sessions} draft session${copied.sessions === 1 ? '' : 's'}` : ''} — review and update the dates.` : copied?.error ? ` The training setup could not be copied (${copied.error}); you can do it from Training → Requirements.` : ''}`,
+            action: `<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px"><a class="btn btn-primary" href="#/sources">Connect this semester’s sheets</a><a class="btn btn-ghost" href="#/reconcile">Reconcile people</a><a class="btn btn-ghost" href="#/evalroster">Evaluation roster</a><a class="btn btn-ghost" href="#/trainhub?tab=requirements">Review training setup</a></div>` })}</section>`;
           wiz = null;
           // the shell reads the term once at sign-in; reloading it is the honest way to show the new one
           setTimeout(() => location.reload(), 2500);
@@ -341,7 +347,7 @@ export default {
       if (t.dataset.leaveG) { t.checked ? wiz.leavingGuides.add(t.dataset.leaveG) : wiz.leavingGuides.delete(t.dataset.leaveG); paintWizard(view); }
       else if (t.dataset.leaveP) { t.checked ? wiz.leavingPeople.add(t.dataset.leaveP) : wiz.leavingPeople.delete(t.dataset.leaveP); paintWizard(view); }
       else if (t.dataset.roleFor) { const p = activePeople.find(x => x.email.toLowerCase() === t.dataset.roleFor); if (t.value === p.role) delete wiz.roleChanges[t.dataset.roleFor]; else wiz.roleChanges[t.dataset.roleFor] = t.value; }
-      else if (t.dataset.f === 'season' || t.dataset.f === 'year' || t.dataset.f === 'promote' || t.dataset.f === 'starts' || t.dataset.f === 'ends') paintWizard(view);
+      else if (['season', 'year', 'promote', 'starts', 'ends', 'copyTraining'].includes(t.dataset.f)) paintWizard(view);
       else if (t.dataset.np != null && t.dataset.k === 'role') wiz.newPeople[+t.dataset.np].role = t.value;
     }, { signal });
   }
