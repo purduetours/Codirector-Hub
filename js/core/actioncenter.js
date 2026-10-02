@@ -170,6 +170,12 @@ async function adminItems(out) {
     title: `${plural(h.guides_missing_eval, 'guide')} missing from this semester's tracker`, detail: 'Archive them, or they will not be evaluated.' });
   if (h.evals_for_archived_guides) out.push({ id: `arch-claim:${h.evals_for_archived_guides}`, level: 'action', source: 'Evaluations', url: '#/evals',
     title: `${plural(h.evals_for_archived_guides, 'evaluation')} claimed for an archived guide`, detail: 'Release or restore the guide.' });
+  if (h.sources_failing) out.push({ id: `sources-failing:${h.sources_failing}`, level: 'urgent', source: 'Data Sources', url: '#/sources',
+    title: `${plural(h.sources_failing, 'connected spreadsheet')} could not be read`, detail: 'Check the sheet is still shared, then sync again.' });
+  if (h.open_issues) out.push({ id: `recon:${h.open_issues}`, level: 'action', source: 'Reconciliation', url: '#/reconcile', dismissible: true,
+    title: `${plural(h.open_issues, 'roster item')} need${h.open_issues === 1 ? 's' : ''} a decision`, detail: 'People not matched, missing from a sheet, or conflicting. Nothing changes until you choose.' });
+  if (h.sources_connected === 0) out.push({ id: 'no-sources', level: 'info', source: 'Data Sources', url: '#/sources', dismissible: true,
+    title: 'No spreadsheets are connected', detail: 'Connect the tour schedule and the Tour Guides by Major sheet so the Hub keeps the roster and schedule in step.' });
   if (h.admins < 2) out.push({ id: 'one-admin', level: 'info', source: 'People', url: '#/people', dismissible: true,
     title: 'Only one administrator', detail: 'Give a second person the Codirector role so the hub is never locked out.' });
 }

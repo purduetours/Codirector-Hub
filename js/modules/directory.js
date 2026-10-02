@@ -8,6 +8,7 @@ import { loadRoster } from './evals.js';
 import { shareData } from '../core/vanessa-ui.js';
 import { takeJumpTarget } from '../core/quicksearch.js';
 import { loadMajors } from '../core/sheets.js';
+import { select } from '../core/db.js';
 import { matchPerson } from '../core/people-match.js';
 import { trainingFor } from './training.js';
 import { deskShiftsFor } from './desks.js';
@@ -95,8 +96,21 @@ export async function warmMajors() {
       const hit = matchPerson(rec.name, names);
       if (hit) majorIndex.set(hit, rec);
     }
-    shareData('majors', majorIndex);      // so Vanessa can say it too
   } catch { majors = []; majorIndex = new Map(); }
+  /* The Master Tour Guide List is the source of truth for a guide's major
+     (kept current from the Tour Guides by Major sheet, or set by hand). Where it
+     has one, it replaces what the older multi-tab workbook said; the workbook
+     still supplies minors, certificates and learning communities. */
+  try {
+    const canon = await select('guides', 'select=first_name,last_name,full_name,major&major=not.is.null&active=eq.true');
+    for (const c of canon) {
+      const name = c.full_name || `${c.first_name} ${c.last_name}`;
+      const rec = majorIndex.get(name) || { name, colleges: [], majors: [], minors: [], certificates: [], learningCommunities: [], email: '', year: '' };
+      rec.majors = String(c.major).split(';').map(x => x.trim()).filter(Boolean);
+      majorIndex.set(name, rec);
+    }
+  } catch { /* the master list has no majors yet; the workbook alone is used */ }
+  shareData('majors', majorIndex);        // so Vanessa can say it too
 }
 
 const studiesFor = name => majorIndex?.get(name) || null;

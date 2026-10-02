@@ -48,10 +48,14 @@
   import settings from '../js/modules/settings.js';
   import audit from '../js/modules/audit.js';
   import actionpage from '../js/modules/actionpage.js';
+  import evalroster from '../js/modules/evalroster.js';
+  import sources from '../js/modules/sources.js';
+  import reconcile from '../js/modules/reconcile.js';
+  import datarules from '../js/modules/datarules.js';
   import more from '../js/modules/more.js';
   import { hubModules } from '../js/modules/hubs.js';
 
-  [today, announcements, evals, interviews, training, schedule, directory, desks, people, guides, semester, audit, settings, health].forEach(register);
+  [today, announcements, evals, interviews, training, schedule, directory, desks, people, guides, evalroster, semester, sources, reconcile, datarules, audit, settings, health].forEach(register);
   [...hubModules, more, actionpage].forEach(registerHub);
 
   const ROLES = {
@@ -66,7 +70,7 @@
     training:  ['today', 'announcements', 'evals', 'schedule', 'directory', 'desks'],
     recruit:   ['today', 'announcements', 'interviews', 'schedule'],
     developer: ['today', 'announcements', 'evals', 'interviews', 'schedule', 'directory', 'desks'],
-    admin:     ['today', 'announcements', 'evals', 'interviews', 'training', 'schedule', 'directory', 'desks', 'people', 'guides', 'semester', 'audit', 'settings', 'health']
+    admin:     ['today', 'announcements', 'evals', 'interviews', 'training', 'schedule', 'directory', 'desks', 'people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health']
   };
   const NAV = {      // the primary navigation each role should be shown
     guide:     ['today', 'schedule', 'announcements', 'more'],
@@ -75,7 +79,7 @@
     developer: ['today', 'tours', 'team', 'more'],
     admin:     ['today', 'tours', 'team', 'admin', 'more']
   };
-  const ADMIN_ONLY = ['training', 'people', 'guides', 'semester', 'audit', 'settings', 'health'];
+  const ADMIN_ONLY = ['training', 'people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health'];
 
   let pass = 0, fail = 0;
   const out = document.getElementById('out');

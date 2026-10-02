@@ -34,6 +34,9 @@
   import { sheetId } from '../js/modules/settings.js';
   import { adminIntent, runAdmin } from '../js/core/vanessa-admin.js';
   import { getActions, refreshActions, resetActions, LEVELS } from '../js/core/actioncenter.js';
+  import { matchIdentity, indexMappings, nameKey, normName } from '../js/core/identity.js';
+  import { suggestMatches, priorityBand } from '../js/core/evalmatch.js';
+  import { suggestMapping, headerRowIndex, headerSignature, parseDate, parseTime, tableToRecords, gridToRecords, parseSheetLink, matchRecords } from '../js/core/sources.js';
 
   let pass = 0, fail = 0;
   const out = document.getElementById('out');
@@ -112,6 +115,86 @@
   check('actions (guide): no evaluation or admin items at all', getActions().every(a => !/^eval|^iv-|^desk|^makeups|^setup|^no-term/.test(a.id)), levels(getActions()));
 
   check('actions: only Urgent and Needs action count toward the badge', LEVELS.urgent.badge && LEVELS.action.badge && !LEVELS.upcoming.badge && !LEVELS.info.badge);
+
+
+  /* ------------------------------------------------------------ identity */
+  const G = [
+    { id: 'g1', first_name: 'Logann', last_name: 'Tuttle', email: 'logann@purdue.edu' },
+    { id: 'g2', first_name: 'Nicholas (Nick)', last_name: 'Steingraeber' },
+    { id: 'g3', first_name: 'Nicholas', last_name: 'Stromberg' },
+    { id: 'g4', first_name: 'Ben', last_name: 'Smith' }, { id: 'g5', first_name: 'Ben', last_name: 'Smyth' },
+    { id: 'g6', first_name: 'María', last_name: 'García' }
+  ];
+  const mi = (rec, kind = 'majors', maps = []) => matchIdentity(rec, { kind, guides: G, mappings: indexMappings(maps) });
+  check('identity: email beats everything', mi({ name: 'Someone Else', email: 'LOGANN@purdue.edu' }).guideId === 'g1' && mi({ name: 'x', email: 'logann@purdue.edu' }).basis === 'email');
+  check('identity: exact normalised name (accents, case, marks)', mi({ name: 'maria garcia' }).guideId === 'g6' && mi({ name: 'LOGANN  TUTTLE*' }).guideId === 'g1' && mi({ name: 'Nick Steingraeber' }).guideId === 'g2');
+  check('identity: "Logan Tuttle" is only a suggestion, never a link', (r => r.basis === 'fuzzy' && !r.guideId && r.candidates[0].id === 'g1')(mi({ name: 'Logan Tuttle' })));
+  check('identity: "L. Tuttle" suggests, never links', (r => !r.guideId && r.candidates[0]?.id === 'g1')(mi({ name: 'L. Tuttle' })));
+  check('identity: "Nick Str." goes to Stromberg, not Steingraeber', (r => !r.guideId && r.candidates.length === 1 && r.candidates[0].id === 'g3')(mi({ name: 'Nick Str.' })));
+  check('identity: two possible people are both offered', mi({ name: 'Ben S.' }).candidates.length === 2);
+  check('identity: strangers match nobody', mi({ name: 'Zed Nobody' }).basis === 'none');
+  const saved = [{ external_key: nameKey('Logan Tuttle'), source_kind: 'majors', guide_id: 'g1', confirmed: true }];
+  check('identity: a saved answer links, and is not asked again', mi({ name: 'Logan Tuttle' }, 'majors', saved).basis === 'saved' && mi({ name: 'Logan Tuttle' }, 'majors', saved).guideId === 'g1');
+  check('identity: an answer given for one source helps the others (alias)', mi({ name: 'Logan Tuttle' }, 'tour_schedule', saved).basis === 'alias');
+  check('identity: an unconfirmed guess is not treated as an answer', mi({ name: 'Logan Tuttle' }, 'majors', [{ ...saved[0], confirmed: false }]).basis === 'fuzzy');
+  check('identity: "not one of ours" is remembered', mi({ name: 'Logan Tuttle' }, 'majors', [{ external_key: nameKey('Logan Tuttle'), source_kind: 'majors', ignored: true, confirmed: true }]).basis === 'ignored');
+  check('identity: a saved link to a guide that no longer exists is not trusted', mi({ name: 'Zed' }, 'majors', [{ external_key: nameKey('Zed'), source_kind: 'majors', guide_id: 'gone', confirmed: true }]).basis === 'none');
+  check('identity: a stable external id comes first', mi({ name: 'Whoever', extId: 'P123' }, 'majors', [{ external_key: 'id:p123', source_kind: 'majors', guide_id: 'g4', confirmed: true }]).guideId === 'g4');
+
+  /* -------------------------------------------------------------- sources */
+  check('sources: link -> id and tab', (r => r.id === ID && r.gid === '12')(parseSheetLink(`https://docs.google.com/spreadsheets/d/${ID}/edit?gid=12#gid=12`)));
+  const hdr = ['First Name', 'Last Name', 'Major(s)', 'Email'];
+  check('sources: columns recognised from the real Tour Guides by Major headers', (m => m.first === 'First Name' && m.last === 'Last Name' && m.major === 'Major(s)' && m.email === 'Email' && !m.name)(suggestMapping('majors', hdr)));
+  check('sources: different headings still recognised', (m => m.name === 'Student Name' && m.date === 'Tour Date' && m.start === 'Start' && m.evaluator === 'Evaluator')(suggestMapping('tour_schedule', ['Student Name', 'Tour Date', 'Start', 'Evaluator'])));
+  check('sources: the header row is found below a title', headerRowIndex([['Fall 2026 majors', '', ''], ['', '', ''], ['First Name', 'Last Name', 'Email'], ['A', 'B', 'a@b.edu']]) === 2);
+  check('sources: header signature ignores order and case', headerSignature(['Email', 'First Name']) === headerSignature(['first name', 'EMAIL']));
+  check('sources: dates as people write them', parseDate('2026-10-08') === '2026-10-08' && parseDate('10/8/2026') === '2026-10-08' && parseDate('10/8/26') === '2026-10-08' && parseDate('Oct 8', 2026) === '2026-10-08' && parseDate('Thursday 10/8', 2026) === '2026-10-08' && parseDate('September 8th, 2026') === '2026-09-08' && parseDate('soon') === '');
+  check('sources: times', parseTime('10:00 AM') === '10:00' && parseTime('2pm') === '14:00' && parseTime('14:30') === '14:30' && parseTime('1:45-2:45') === '13:45' && parseTime('') === '');
+  const rows = [['First Name', 'Last Name', 'Major(s)', 'Email'], ['Hunter', 'Lipinski', 'Aerospace', 'hlipinsk@purdue.edu'], ['Hunter', 'Lipinski', 'Aerospace', 'hlipinsk@purdue.edu'], ['', '', '', ''], ['Joey', 'Pelletier', 'Engineering', '']];
+  const tr = tableToRecords({ kind: 'majors', rows, map: suggestMapping('majors', hdr), year: 2026 });
+  check('sources: a repeated row is read once; keys are stable', tr.records.length === 2 && tr.records[0].key === 'hlipinsk@purdue.edu' && tr.records[1].key === 'name:joey pelletier' && tr.warnings.some(w => /duplicate/.test(w)), JSON.stringify(tr.records.map(r => r.key)));
+  const sr = tableToRecords({ kind: 'tour_schedule', rows: [['Guide', 'Date', 'Start'], ['Alli S.', '10/8', '10:00 AM'], ['Alli S.', '10/8', '10:00 AM'], ['Bob', 'soon', '1pm']], map: { name: 'Guide', date: 'Date', start: 'Start' }, year: 2026 });
+  check('sources: schedule rows keyed by date, slot and person; unreadable dates reported', sr.records.length === 1 && sr.records[0].key === '2026-10-08|10:00 AM|name:alli s' && sr.records[0].start_time === '10:00' && sr.warnings.some(w => /skipped/.test(w)), JSON.stringify(sr.records[0]));
+  check('sources: grid schedule becomes the same record shape', gridToRecords([{ date: '2026-10-08', start: '10:00', slot: '10:00-11:00', guide: 'Alli S.' }]).records[0].identity === 'name:alli s');
+  const recs = tr.records.slice(); const counts = matchRecords(recs, 'majors', { guides: G, mappings: indexMappings([]) });
+  check('sources: matching summary counts each outcome', counts.review === 2 && counts.auto === 0, JSON.stringify(counts));
+
+  /* -------------------------------------------------- evaluation matching */
+  const TODAY = '2026-10-01';
+  const eg = (id, name, rank, tours, extra = {}) => ({ id, guideId: 'G' + id, name, status: 'open', rank, priority: rank <= 2 ? 'First Priority to Eval' : 'Third Priority', tours, ...extra });
+  const T = (date, start) => ({ date, start, slot: start });
+  const evs = [{ id: 'E1', name: 'Taylor', workload: 0 }, { id: 'E2', name: 'Sam', workload: 3 }];
+  const m1 = suggestMatches({ today: TODAY, evaluators: evs, guides: [
+    eg(1, 'Low Pri', 5, [T('2026-10-08', '10:00')]), eg(2, 'High Pri', 1, [T('2026-10-08', '10:00')]),
+    eg(3, 'No Tours', 1, []), eg(4, 'Past Only', 1, [T('2026-09-01', '10:00')]), eg(5, 'Not Eligible', 1, [T('2026-10-09', '10:00')], { tourEligible: false }),
+    { ...eg(6, 'Already Claimed', 1, [T('2026-10-08', '10:00')]), status: 'claimed' }] });
+  check('evalmatch: only guides who still need an evaluator are considered', m1.needing === 5, String(m1.needing));
+  check('evalmatch: High priority is served first (and gets the evaluator with the lightest load)', m1.matches[0].guideName === 'High Pri' && m1.matches[0].evaluatorName === 'Taylor');
+  check('evalmatch: nobody is double-booked at the same tour time', m1.matches.length === 2 && new Set(m1.matches.map(m => m.evaluatorId)).size === 2);
+  check('evalmatch: no tour / past tour / not eligible are reported, not forced', ['No Tours', 'Past Only', 'Not Eligible'].every(n => m1.unable.some(u => u.guide.name === n)), m1.unable.map(u => u.guide.name).join());
+  check('evalmatch: every suggestion carries its reasoning (and states what is not tracked)', m1.matches.every(m => m.reasons.length >= 4 && m.reasons.some(r => /not tracked/.test(r)) && m.reasons.some(r => /scheduled to give a tour/.test(r))));
+  const m2 = suggestMatches({ today: TODAY, evaluators: [{ id: 'E1', name: 'Taylor', workload: 0 }], guides: [eg(1, 'A', 1, [T('2026-10-08', '10:00'), T('2026-10-09', '10:00')]), eg(2, 'B', 2, [T('2026-10-08', '10:00'), T('2026-10-10', '10:00')])] });
+  check('evalmatch: when the first tour has no free evaluator, a later one is used and flagged', m2.matches.length === 2 && m2.matches[1].conflict && m2.conflicts.length === 1 && m2.matches[1].date === '2026-10-10');
+  const m3 = suggestMatches({ today: TODAY, evaluators: [{ id: 'E1', name: 'Taylor', workload: 0 }], busy: new Map([['E1', new Set(['2026-10-08|10:00'])]]), guides: [eg(1, 'A', 1, [T('2026-10-08', '10:00')])] });
+  check('evalmatch: an evaluator already booked then is not offered', m3.matches.length === 0 && /booked/.test(m3.unable[0].reason));
+  const m4 = suggestMatches({ today: TODAY, evaluators: [{ id: 'E1', name: 'Self', workload: 0 }], guides: [eg(1, 'Self G', 1, [T('2026-10-08', '10:00')], { memberId: 'E1' })] });
+  check('evalmatch: nobody evaluates themselves', m4.matches.length === 0);
+  const m5 = suggestMatches({ today: TODAY, evaluators: [{ id: 'E1', name: 'Taylor', workload: 0 }, { id: 'E2', name: 'Sam', workload: 0 }], guides: [eg(1, 'A', 1, [T('2026-10-08', '10:00')]), eg(2, 'B', 1, [T('2026-10-09', '10:00')]), eg(3, 'C', 1, [T('2026-10-10', '10:00')]), eg(4, 'D', 1, [T('2026-10-11', '10:00')])] });
+  check('evalmatch: work is spread evenly', (c => Math.abs(c.E1 - c.E2) <= 0)(m5.matches.reduce((c, m) => ({ ...c, [m.evaluatorId]: (c[m.evaluatorId] || 0) + 1 }), { E1: 0, E2: 0 })));
+  check('evalmatch: priority bands', priorityBand(1) === 'High' && priorityBand(2) === 'High' && priorityBand(3) === 'Normal' && priorityBand(5) === 'Low' && priorityBand(3, false) === 'None');
+
+  /* ------------------------------------ Vanessa: the new canonical-data requests */
+  check('vanessa: top priority', adminIntent('Who are the highest-priority evaluations?')?.id === 'top_priority');
+  check('vanessa: unresolved problems', adminIntent('Show me unresolved roster problems')?.id === 'issues' && adminIntent('Which Tour Guides don’t match the schedule?')?.id === 'issues' && adminIntent('Who is missing from the master roster?')?.id === 'issues');
+  check('vanessa: next tour', adminIntent('When is Jordan’s next tour?')?.who === 'Jordan');
+  check('vanessa: mark priority', (i => i.id === 'priority' && i.who === 'Jordan' && i.band === 'high')(adminIntent('Mark Jordan as high priority')));
+  check('vanessa: match spellings', (i => i.id === 'match' && i.ext === 'Logan Tuttle' && i.who === 'Logann Tuttle')(adminIntent('Match Logan Tuttle to Logann Tuttle')));
+  setRole('training');
+  const NO2 = "That tool isn't available for your account.";
+  check('vanessa: a committee member cannot change priority, match people, or see roster problems',
+    (await Promise.all([{ id: 'priority', who: 'A', band: 'high' }, { id: 'match', ext: 'A', who: 'B' }, { id: 'issues' }].map(async i => (await runAdmin(i))?.text === NO2))).every(Boolean));
+  setRole('guide');
+  check('vanessa: a guide cannot see top priorities or next tours', (await Promise.all([{ id: 'top_priority' }, { id: 'next_tour', who: 'A' }].map(async i => (await runAdmin(i))?.text === NO2))).every(Boolean));
 
   document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;
   document.getElementById('sum').className = fail ? 'bad' : 'ok';

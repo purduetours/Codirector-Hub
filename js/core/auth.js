@@ -86,6 +86,11 @@ export async function loadMe() {
     const rows = await select('app_settings', 'select=key,value');
     state.settings = Object.fromEntries((rows || []).map(r => [r.key, r.value]));
   } catch { state.settings = {}; }
+  // Which spreadsheet is connected for what (Admin > Data Sources). Optional too.
+  try {
+    const rows = await select('external_sources', 'select=id,kind,sheet_id,adapter,tab,gid&active=eq.true');
+    state.sources = Object.fromEntries((rows || []).map(r => [r.kind, r]));
+  } catch { state.sources = {}; }
   const roles = await select('roles', `select=*&name=eq.${encodeURIComponent(me.role)}`);
   state.role = (roles && roles[0]) || { name: me.role, is_admin: false, in_recruitment: false, in_training: false };
 

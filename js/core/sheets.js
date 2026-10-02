@@ -8,11 +8,14 @@
    doing, which is what lets it go away entirely.
 ============================================================================ */
 
-import { setting, termLabel } from './state.js';
+import { state, setting, termLabel } from './state.js';
+import { select } from './db.js';
 
 /* These three links can be changed under Admin > Settings, so a new workbook
    never needs a code edit. The values below are only the defaults. */
-const SHEET_ID = () => setting('sheets.tours', '1XIfi_T4G1tkc_8D28cQWXUtCgk7Cb-BuyLrEvhfAzno');
+/* The connected tour-schedule source (Admin > Data Sources) wins; the older
+   Settings link and the built-in default remain as fallbacks. */
+const SHEET_ID = () => state.sources?.tour_schedule?.sheet_id || setting('sheets.tours', '1XIfi_T4G1tkc_8D28cQWXUtCgk7Cb-BuyLrEvhfAzno');
 
 /* The training absence form writes to its own workbook, so it needs its own id.
    Read live rather than copied into the database: it is a Google Form's
@@ -161,7 +164,7 @@ function parseCSV(text) {
 const tabCache = new Map();
 
 /** Forget everything read from the workbook; the next ask goes to Google. */
-export const bustSheets = () => tabCache.clear();
+export const bustSheets = () => { tabCache.clear(); hubToursPromise = null; };
 
 function fetchTab(tab, book = SHEET_ID(), extra = '') {
   const cacheKey = `${book}|${tab}|${extra}`;
@@ -178,7 +181,12 @@ function fetchTab(tab, book = SHEET_ID(), extra = '') {
       if (!res.ok) throw new Error('Could not load the schedule workbook. Check sharing and your connection.');
       return res.text();
     })
-    .then(text => (text === null ? null : parseCSV(text)))
+    .then(text => {
+      if (text === null) return null;
+      /* A sheet that is not shared answers with a sign-in web page, not a CSV. */
+      if (/^\s*<(!doctype|html)/i.test(text)) throw new Error('That Google Sheet is not shared. Set sharing to “Anyone with the link can view”.');
+      return parseCSV(text);
+    })
     .then(rows => {
       if (rows === null && tabCache.get(cacheKey) === pending) tabCache.delete(cacheKey);
       return rows;
@@ -200,13 +208,44 @@ function fetchTab(tab, book = SHEET_ID(), extra = '') {
  * some tours never appeared in the hub at all.
  */
 export async function loadTours() {
+  const fromHub = await hubTours();
+  if (fromHub) return fromHub;
+  return loadToursGrid(SHEET_ID());
+}
+
+/**
+ * The schedule as the Hub has already read, matched and stored it
+ * (Admin > Data Sources). One small query instead of re-downloading and
+ * re-parsing the workbook, and every row already knows which canonical Tour
+ * Guide it is. Null when no schedule source is connected or nothing has been
+ * synced yet, in which case the workbook is read directly as before.
+ */
+let hubToursPromise = null;
+async function hubTours() {
+  if (!state.sources?.tour_schedule) return null;
+  hubToursPromise ||= (async () => {
+    const rows = await select('source_records',
+      `select=occurred_on,slot,start_time,external_name,guide_id,guide:guides(first_name,last_name)` +
+      `&source_kind=eq.tour_schedule&active=eq.true&occurred_on=gte.${todayISO()}&order=occurred_on.asc,start_time.asc&limit=5000`);
+    if (!rows?.length) return null;
+    return rows.map(r => ({
+      date: r.occurred_on, start: r.start_time || '', slot: r.slot || '',
+      guide: r.guide ? `${r.guide.first_name} ${r.guide.last_name}` : r.external_name,
+      guideLabel: r.external_name, guideId: r.guide_id || null
+    }));
+  })().catch(() => { hubToursPromise = null; return null; });
+  return hubToursPromise;
+}
+
+/** The weekly-grid layout read straight from a workbook (also used to preview a new source). */
+export async function loadToursGrid(book = SHEET_ID()) {
   const today = todayISO();
   const out = [], seen = new Set();
   const { tabs: months, year } = termTabs();
   /* `map(fetchTab)` passes (value, index, array), so once fetchTab grew a
      second parameter the index started arriving as the workbook id and every
      month tab 404'd. Call it with one argument on purpose. */
-  const tabs = await Promise.all(months.map(m => fetchTab(m)));
+  const tabs = await Promise.all(months.map(m => fetchTab(m, book)));
   if (tabs.every(rows => !rows)) throw new Error('No semester tabs could be loaded from the schedule workbook.');
 
   tabs.forEach(rows => {
@@ -245,7 +284,7 @@ export async function loadTours() {
   });
 
   // Saturdays come from a separate tab in a different shape; same fields out.
-  (await loadSaturdays()).forEach(t => {
+  (await loadSaturdays(book)).forEach(t => {
     const key = `${t.date}|${t.slot}|${t.guide}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -286,8 +325,8 @@ function longDate(text, year) {
   return `${year}-${String(mi + 1).padStart(2, '0')}-${m[2].padStart(2, '0')}`;
 }
 
-async function loadSaturdays() {
-  const rows = await fetchTab(SAT_TAB);
+async function loadSaturdays(book = SHEET_ID()) {
+  const rows = await fetchTab(SAT_TAB, book);
   if (!rows || rows.length < 3) return [];
 
   const { year } = termTabs();
@@ -436,4 +475,18 @@ export async function loadMajors() {
     }
   });
   return [...people.values()];
+}
+
+
+/**
+ * Any tab of any shared Google Sheet, as rows of text. This is the one door
+ * every connected source goes through (see sources.js), so caching, timeouts
+ * and the "is it shared?" check live in one place. `gid` wins over `tab`.
+ */
+export async function readSheet({ sheetId, tab = '', gid = '' }) {
+  const rows = gid
+    ? await fetchTab('', sheetId, `&headers=0&gid=${encodeURIComponent(gid)}`)
+    : await fetchTab(tab || 'Sheet1', sheetId, '&headers=0');
+  if (!rows) throw new Error('That tab was not found in the sheet. Check its name, or paste the link while that tab is open.');
+  return rows;
 }

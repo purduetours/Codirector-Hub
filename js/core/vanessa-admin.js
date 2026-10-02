@@ -17,13 +17,16 @@
      kept (their records are never deleted), and waits for a yes.
    · Admin can switch her admin actions off in Settings (vanessa.adminActions).
 ============================================================================ */
-import { isAdmin, setting } from './state.js';
+import { state, isAdmin, inTraining, setting } from './state.js';
 import { select } from './db.js';
 import { admin } from '../modules/admin-kit.js';
 import { getActions, LEVELS, refreshActions } from './actioncenter.js';
 import { matchingNames } from './vanessa-makeup.js';
 import { go, denied } from './vanessa-exec.js';
 import { runAction } from './actions.js';
+import { nameKey } from './identity.js';
+import { priorityBand } from './evalmatch.js';
+import { prettyDate, prettyTime } from './ui.js';
 
 const reply = text => ({ type: 'reply', text });
 const allowed = () => isAdmin() && setting('vanessa.adminActions', true) !== false;
@@ -34,10 +37,21 @@ const ADD     = /^(?:please\s+)?add\s+(guide\s+)?(.+?)(?:\s*[,;]\s*|\s+)([^\s@,;
 const ADD_BARE = /^(?:please\s+)?add\s+(?:a\s+|the\s+)?(?:guide\s+|person\s+|someone\s+)?(.+?)\s+to\s+(?:the\s+)?(?:\w+\s+)?(?:roster|team|committee|hub)[.!?]*$/i;
 const NEEDS = /\b(?:what(?:'s| is| are)|show(?: me)?|list)\b.*\b(?:overdue|urgent|waiting on (?:me|you)|action center|needs? (?:my )?(?:attention|action))\b|\bwhat needs (?:my )?(?:attention|action)\b/i;
 const COVERAGE = /\b(?:uncovered|coverage|desk gaps?|unstaffed)\b/i;
+const TOP = /\b(?:highest|top|most urgent)[- ]priority\b.*\b(?:evaluations?|guides?)\b|\bwho (?:are|is) (?:the )?(?:highest|top)[- ]priority\b/i;
+const ISSUES = /\b(?:unresolved|roster problems?|(?:don['’]?t|do not|doesn['’]?t) match (?:the )?schedule|not matched|missing from the (?:master )?(?:roster|list)|reconciliation)\b/i;
+const PRIORITY = /^(?:please\s+)?(?:mark|set|make)\s+(.+?)\s+(?:as\s+|to\s+)?(high|normal|low)(?:[ -]priority)?[.!?]*$/i;
+const MATCHTO = /^(?:please\s+)?match\s+(.+?)\s+(?:to|with|as)\s+(.+?)[.!?]*$/i;
+const NEXTTOUR = /\bwhen(?:'s| is)\s+(.+?)(?:'s|’s)\s+next\s+tour\b|\bnext tour for\s+(.+?)[?.!]*$/i;
 const BEHIND = /\bwho (?:has(?:n'?t| not)|have(?:n'?t| not)|is behind on|are behind on|hasn'?t finished)\b.*\btraining\b/i;
 
 export function adminIntent(raw) {
   const q = String(raw || '').trim().replace(/^(?:hey[, ]+)?vanessa[, ]+/i, '');
+  let t;
+  if (TOP.test(q)) return { id: 'top_priority' };
+  if (ISSUES.test(q)) return { id: 'issues' };
+  if ((t = NEXTTOUR.exec(q))) return { id: 'next_tour', who: (t[1] || t[2]).trim() };
+  if ((t = PRIORITY.exec(q))) return { id: 'priority', who: t[1].trim(), band: t[2].toLowerCase() };
+  if ((t = MATCHTO.exec(q))) return { id: 'match', ext: t[1].trim(), who: t[2].trim() };
   if (BEHIND.test(q)) return { id: 'makeups' };
   if (NEEDS.test(q)) return { id: 'needs', overdue: /overdue/i.test(q) };
   if (COVERAGE.test(q) && /\b(?:desk|tour|week|friday|monday|tuesday|wednesday|thursday|schedule)\b/i.test(q)) return { id: 'coverage' };
@@ -156,8 +170,85 @@ async function coverage() {
     : reply('Every desk slot this week has someone down for it. The tour schedule itself is in Tours.');
 }
 
+
+/* ------------------------------------- canonical data: roster, priority, matches */
+const rosterNames = () => (state.guides || []).map(g => g.name);
+
+async function topPriority() {
+  if (!inTraining() && !isAdmin()) return denied();
+  const open = (state.guides || []).filter(g => g.status === 'open').sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99) || a.name.localeCompare(b.name));
+  const high = open.filter(g => (g.rank ?? 99) <= 2);
+  return { type: 'summary', title: 'Highest-priority evaluations', text: high.length ? `${high.length} guide${high.length === 1 ? '' : 's'} at High priority still need an evaluator.` : 'Nobody at High priority is waiting for an evaluator.',
+    items: (high.length ? high : open.slice(0, 6)).slice(0, 10).map(g => ({ label: g.name, sub: `${g.priority} · ${g.tours?.[0] ? `next tour ${prettyDate(g.tours[0].date)}` : 'no upcoming tour found'}` })),
+    actions: [go('evalroster', 'Open the Evaluation Roster')], source: 'Evaluation roster', at: new Date() };
+}
+
+async function issuesSummary() {
+  if (!isAdmin()) return denied();
+  let rows;
+  try { rows = await select('sync_issues', 'select=kind,external_name&status=eq.open&limit=200'); }
+  catch { return { type: 'reply', kind: 'alert', text: 'I couldn’t load the reconciliation list. The data tools may not be set up yet — see Health.' }; }
+  const by = {}; rows.forEach(r => { (by[r.kind] ||= []).push(r.external_name); });
+  const label = { unmatched_person: 'People in a sheet not on your list', schedule_unmatched: 'Schedule names not matched', roster_missing_in_source: 'On your list, missing from the sheet', conflicting_major: 'Conflicting majors', conflicting_email: 'Conflicting emails' };
+  return { type: 'summary', title: 'Unresolved roster problems', text: rows.length ? 'Nothing changes until you choose; each has options in Reconciliation.' : 'Nothing is waiting. The roster, schedule and sheets line up.',
+    rows: Object.entries(by).map(([k, v]) => [label[k] || k, `${v.length}: ${v.slice(0, 4).join(', ')}${v.length > 4 ? '…' : ''}`]), actions: [go('reconcile', 'Open Reconciliation')], source: 'Reconciliation', at: new Date() };
+}
+
+async function nextTour(who) {
+  if (!inTraining() && !isAdmin()) return denied();
+  const hits = matchingNames(who, rosterNames());
+  if (!hits.length) return reply(`I couldn’t find “${who}” on the roster.`);
+  const g = state.guides.find(x => x.name === hits[0]);
+  const t = (g.tours || [])[0];
+  return reply(t ? `${g.name}’s next tour is ${prettyDate(t.date)}${t.start ? ` at ${prettyTime(t.start)}` : ''}${hits.length > 1 ? ` (I picked ${g.name}; there were ${hits.length} close matches)` : ''}.` : `${g.name} has no upcoming tour in the connected schedule.`);
+}
+
+async function setPriority(who, band) {
+  if (!isAdmin()) return denied();
+  if (setting('vanessa.adminActions', true) === false) return reply('Administrative actions through me are switched off in Settings.');
+  const hits = matchingNames(who, rosterNames());
+  if (!hits.length) return reply(`I couldn’t find “${who}” on the evaluation roster.`);
+  const pick = async name => {
+    const g = state.guides.find(x => x.name === name);
+    const tiers = (await select('priorities', 'select=name,sort_order,needs_eval&order=sort_order.asc')).filter(p => p.needs_eval);
+    const tier = band === 'high' ? tiers[0] : band === 'low' ? tiers[tiers.length - 1] : tiers[Math.min(2, tiers.length - 1)];
+    return { type: 'confirm', title: `Mark ${g.name} as ${band} priority?`, text: `This sets their evaluation priority to “${tier.name}”. Priority is always set by hand, so no spreadsheet will change it.`,
+      rows: [['Tour Guide', g.name], ['Now', g.priority || '—'], ['New', `${tier.name} (${priorityBand(tier.sort_order)})`]],
+      confirm: { label: 'Set priority', run: async () => {
+        if (!allowed()) return denied();
+        try { await admin('admin_set_eval_priority', { p_guide_ids: [g.guideId], p_priority: tier.name }); refreshActions({ force: true });
+          return { type: 'reply', kind: 'confirm', text: `Done — ${g.name} is now ${band} priority.` };
+        } catch (e) { return { type: 'reply', kind: 'error', text: `I couldn’t do that: ${e.message}` }; } } }, cancel: { label: 'Cancel' } };
+  };
+  if (hits.length > 1) return { type: 'select', title: 'Which one do you mean?', options: hits.map(n => ({ label: n, run: () => pick(n) })) };
+  return pick(hits[0]);
+}
+
+async function matchTo(ext, who) {
+  if (!isAdmin()) return denied();
+  if (setting('vanessa.adminActions', true) === false) return reply('Administrative actions through me are switched off in Settings.');
+  const gs = await select('guides', 'select=id,full_name&active=eq.true');
+  const hits = matchingNames(who, gs.map(g => g.full_name));
+  if (!hits.length) return reply(`I couldn’t find a Tour Guide called “${who}”. Try their full name as it is on the master list.`);
+  const g = gs.find(x => x.full_name === hits[0]);
+  const go1 = g1 => ({ type: 'confirm', title: `Treat “${ext}” as ${g1.full_name}?`, text: 'Wherever “' + ext + '” appears in a connected spreadsheet it will be recognised as this person, and the Hub will remember it.',
+    rows: [['Spelling', ext], ['Is', g1.full_name]],
+    confirm: { label: 'Match and remember', run: async () => {
+      if (!allowed()) return denied();
+      try { await admin('admin_confirm_match', { p_kind: 'tour_schedule', p_key: nameKey(ext), p_guide: g1.id, p_name: ext, p_email: null }); refreshActions({ force: true });
+        return { type: 'reply', kind: 'confirm', text: `Done — “${ext}” is now ${g1.full_name}.` };
+      } catch (e) { return { type: 'reply', kind: 'error', text: `I couldn’t do that: ${e.message}` }; } } }, cancel: { label: 'Cancel' } });
+  if (hits.length > 1) return { type: 'select', title: 'Which one do you mean?', options: hits.map(n => ({ label: n, run: () => go1(gs.find(x => x.full_name === n)) })) };
+  return go1(g);
+}
+
 /* ------------------------------------------------------------------ router */
 export async function runAdmin(intent) {
+  if (intent.id === 'top_priority') return topPriority();
+  if (intent.id === 'next_tour') return nextTour(intent.who);
+  if (intent.id === 'issues') return issuesSummary();
+  if (intent.id === 'priority') return setPriority(intent.who, intent.band);
+  if (intent.id === 'match') return matchTo(intent.ext, intent.who);
   if (intent.id === 'makeups' || intent.id === 'needs' || intent.id === 'coverage') {
     if (intent.id === 'makeups' && !isAdmin()) return denied();
     return intent.id === 'needs' ? needs(intent) : intent.id === 'coverage' ? coverage() : { run: 'makeups' };

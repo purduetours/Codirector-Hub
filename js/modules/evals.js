@@ -709,9 +709,13 @@ async function attachTours() {
   const index = buildNameIndex(state.guides);
   const byName = new Map(state.guides.map(g => [String(g.name).toLowerCase(), g]));
 
+  const byId = new Map(state.guides.map(g => [g.guideId, g]));
   const unmatched = new Set();
   for (const t of tourCache) {
-    const g = resolveGuide(t.guide, index, byName);
+    /* A schedule that has been synced through Data Sources already knows which
+       canonical Tour Guide each row is; only rows it could not place fall back
+       to the older name matcher below. */
+    const g = (t.guideId && byId.get(t.guideId)) || resolveGuide(t.guide, index, byName);
     if (!g) { unmatched.add(t.guide); continue; }
     g.tours.push({ date: t.date, start: t.start, slot: t.slot });
   }

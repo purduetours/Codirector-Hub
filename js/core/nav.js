@@ -28,9 +28,10 @@ export const HUBS = [
     children: ['announcements', 'evals', 'directory', 'interviews', 'training'] },
   { id: 'admin', title: 'Admin', icon: 'admin', needs: 'admin', crumb: 'People, guides, semesters and settings',
     lede: 'Everything needed to run the program, with no database work. Nobody else sees this area.',
-    children: ['people', 'guides', 'semester', 'audit', 'settings', 'health'],
+    children: ['people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health'],
     groups: [
-      { title: 'Run the program', children: ['people', 'guides', 'semester'] },
+      { title: 'Run the program', children: ['people', 'guides', 'evalroster', 'semester'] },
+      { title: 'Data & spreadsheets', children: ['sources', 'reconcile', 'datarules'] },
       { title: 'Records and settings', children: ['audit', 'settings'] },
       { title: 'Check the setup', children: ['health'] }
     ],

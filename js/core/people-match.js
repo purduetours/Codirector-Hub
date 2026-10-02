@@ -14,7 +14,7 @@
    done — a second copy would have drifted from the first within a term.
 ========================================================================== */
 
-const nameParts = full => {
+export const nameParts = full => {
   const raw = String(full || '').toLowerCase();
   const nick = [...raw.matchAll(/\(([^)]*)\)/g)].map(m => m[1].trim()).filter(Boolean);
   const words = raw.replace(/\([^)]*\)/g, ' ').replace(/[^a-z\s'-]/g, ' ').split(/\s+/).filter(Boolean);
@@ -22,7 +22,7 @@ const nameParts = full => {
 };
 
 /** One substitution, insertion or deletion apart. */
-function within1(a, b) {
+export function within1(a, b) {
   if (a === b) return true;
   if (Math.abs(a.length - b.length) > 1) return false;
   let i = 0, j = 0, slips = 0;
@@ -42,7 +42,7 @@ function within1(a, b) {
    is only reached once the surname already agrees, so it cannot wander off to
    a different person. Two people who share a surname AND a stem come back
    ambiguous and are shown to you rather than guessed at. */
-const firstFits = (a, b) =>
+export const firstFits = (a, b) =>
   a === b || within1(a, b) ||
   (a.length >= 3 && b.startsWith(a)) || (b.length >= 3 && a.startsWith(b)) ||
   (a.length >= 3 && b.length >= 3 && a.slice(0, 3) === b.slice(0, 3));

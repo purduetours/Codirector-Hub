@@ -31,10 +31,14 @@ import guides        from './modules/guides.js';
 import semester      from './modules/semester.js';
 import settings      from './modules/settings.js';
 import audit         from './modules/audit.js';
+import evalroster    from './modules/evalroster.js';
+import sources       from './modules/sources.js';
+import reconcile     from './modules/reconcile.js';
+import datarules     from './modules/datarules.js';
 import actionpage    from './modules/actionpage.js';
 import { hubModules } from './modules/hubs.js';
 
-[today, announcements, evals, interviews, training, schedule, directory, desks, people, guides, semester, audit, settings, health].forEach(register);
+[today, announcements, evals, interviews, training, schedule, directory, desks, people, guides, evalroster, semester, sources, reconcile, datarules, audit, settings, health].forEach(register);
 /* Hubs group the tools above into a few areas; the sidebar shows those, not every tool. */
 [...hubModules, more, actionpage].forEach(registerHub);
 

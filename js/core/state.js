@@ -13,6 +13,7 @@ export const state = {
   role: null,        // { name, is_admin, in_recruitment, in_training }
 
   settings: {},      // operational settings from app_settings (never secrets)
+  sources: {},       // the connected spreadsheet source per kind: { tour_schedule, majors, roster }
   guides: [],
   counts: {},
   neededTotal: 0,
@@ -89,7 +90,7 @@ export function clearSession() {
   state.token = state.refreshToken = '';
   state.expiresAt = 0;
   state.me = state.role = null;
-  state.settings = {};
+  state.settings = {}; state.sources = {};
   state.guides = [];
   state.loadedAt = null;
   state.guideToursLoaded = false;

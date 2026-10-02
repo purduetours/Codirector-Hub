@@ -211,7 +211,7 @@ function stepReview() {
     ${(p.warnings || []).map(w => `<div class="sm-warn">${esc(w)}</div>`).join('')}
     <p class="sm-keep"><strong>Not touched:</strong></p>
     <ul class="sm-keep"><li>Evaluations, attendance, interview scores and announcements from ${esc(termLabel())} stay exactly where they are.</li>
-      <li>The tour schedule and desk rota are read from the shared workbooks. Check the links under Admin → Settings still point at this semester's files.</li></ul>${nav(true, 'Looks right — continue')}`;
+      <li>The tour schedule and Tour Guides by Major sheet are connected under Admin → Data Sources. After starting, connect this semester’s sheets there, review any unmatched people, and run Auto-match on the Evaluation Roster.</li></ul>${nav(true, 'Looks right — continue')}`;
 }
 
 function stepStart() {
@@ -318,7 +318,7 @@ export default {
           const r = await admin('admin_start_semester', payload(true));
           view.innerHTML = `<section class="sm-card">${emptyState({ title: `${wiz.season} ${wiz.year} has started`, icon: 'check',
             text: `${r.guides_carried} guides carried over, ${r.guides_archived} archived, ${r.sessions} training sessions created.`,
-            action: `<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px"><a class="btn btn-primary" href="#/training">Open Training</a><a class="btn btn-ghost" href="#/guides">Guide roster</a><a class="btn btn-ghost" href="#/settings">Check settings</a><a class="btn btn-ghost" href="#/today">Home</a></div>` })}</section>`;
+            action: `<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px"><a class="btn btn-primary" href="#/sources">Connect this semester’s sheets</a><a class="btn btn-ghost" href="#/reconcile">Reconcile people</a><a class="btn btn-ghost" href="#/evalroster">Evaluation roster</a><a class="btn btn-ghost" href="#/training">Training</a></div>` })}</section>`;
           wiz = null;
           // the shell reads the term once at sign-in; reloading it is the honest way to show the new one
           setTimeout(() => location.reload(), 2500);
