@@ -34,6 +34,8 @@
   import { sheetId } from '../js/modules/settings.js';
   import { adminIntent, runAdmin } from '../js/core/vanessa-admin.js';
   import { getActions, refreshActions, resetActions, LEVELS } from '../js/core/actioncenter.js';
+  import { trainingIntent, runTraining, pastDay } from '../js/core/vanessa-training.js';
+  import { attClass, audienceText, byPerson } from '../js/modules/train-data.js';
   import { matchIdentity, indexMappings, nameKey, normName } from '../js/core/identity.js';
   import { suggestMatches, priorityBand } from '../js/core/evalmatch.js';
   import { suggestMapping, headerRowIndex, headerSignature, parseDate, parseTime, tableToRecords, gridToRecords, parseSheetLink, matchRecords } from '../js/core/sources.js';
@@ -195,6 +197,31 @@
     (await Promise.all([{ id: 'priority', who: 'A', band: 'high' }, { id: 'match', ext: 'A', who: 'B' }, { id: 'issues' }].map(async i => (await runAdmin(i))?.text === NO2))).every(Boolean));
   setRole('guide');
   check('vanessa: a guide cannot see top priorities or next tours', (await Promise.all([{ id: 'top_priority' }, { id: 'next_tour', who: 'A' }].map(async i => (await runAdmin(i))?.text === NO2))).every(Boolean));
+
+
+  /* --------------------------------------------------------------- training */
+  check('training: statuses (old and new vocabulary) mean the same as in the database',
+    attClass('Attended') === 'present' && attClass('Late') === 'present' && attClass('Makeup Completed') === 'present' && attClass('Excused') === 'excused' && attClass('Absent') === 'absent' && attClass('Absent, Need Makeup') === 'absent' && attClass('') === 'pending' && attClass(null) === 'pending');
+  check('training: audience in words', audienceText({ new: true, leadership: true, guide_ids: ['a', 'b'] }, [], []) === 'New guides · Leadership · 2 chosen people' && audienceText({}) === 'Nobody yet');
+  const mxr = [{ requirement_id: 'R1', guide_id: 'g1', state: 'complete' }, { requirement_id: 'R2', guide_id: 'g1', state: 'makeup_needed', next_on: '2026-10-20' }, { requirement_id: 'R1', guide_id: 'g2', state: 'waived' }, { requirement_id: 'R2', guide_id: 'g2', state: 'incomplete' }, { requirement_id: 'RX', guide_id: 'g2', state: 'incomplete' }];
+  const bp = byPerson(mxr, [{ id: 'R1', name: 'Orientation' }, { id: 'R2', name: 'Safety' }]);
+  check('training: per-person summary (done, missing, makeups, next)', bp.get('g1').done === 1 && bp.get('g1').makeup === 1 && bp.get('g1').next === '2026-10-20' && bp.get('g2').missing.length === 1 && bp.get('g2').rows.length === 2);
+  const ti = q => trainingIntent(q)?.id || null;
+  check('training: Vanessa hears the questions', ti('Who still needs training?') === 'who' && ti('Who hasn’t completed training?') === 'who' && ti('What training does Jordan still need?') === 'person' && trainingIntent('What training does Jordan still need?').who === 'Jordan' &&
+    ti('Who missed training last night?') === 'missed' && ti('Who missed Tuesday?') === 'missed' && ti('When is the next makeup session?') === 'next_makeup' && ti('Who has training this week?') === 'week' && ti('How many new guides have completed orientation?') === 'new_orient' && ti('What training do I still need?') === 'me');
+  check('training: Vanessa hears the actions', trainingIntent('Mark Jordan excused')?.id === 'excuse' && trainingIntent('Create a makeup training next Thursday')?.id === 'make_makeup');
+  check('training: ordinary requests are not mistaken for training ones', ['brief me', 'claim noah', 'deactivate John', 'who is touring tomorrow?', 'mark Jordan as high priority', 'show me unresolved roster problems'].every(q => !trainingIntent(q)), ['brief me', 'claim noah', 'deactivate John'].map(ti).join());
+  const now = new Date(2026, 9, 7, 12);   // Wednesday 7 Oct 2026
+  check('training: "last night", "yesterday" and weekdays resolve to PAST dates', pastDay('last night', now) === '2026-10-06' && pastDay('yesterday', now) === '2026-10-06' && pastDay('Tuesday', now) === '2026-10-06' && pastDay('Wednesday', now) === '2026-09-30' && pastDay('Friday', now) === '2026-10-02' && pastDay('whenever', now) === null);
+  setRole('guide');
+  const NO3 = "That tool isn't available for your account.";
+  check('training: a Tour Guide cannot ask about other people’s training or take actions',
+    (await Promise.all([{ id: 'who' }, { id: 'person', who: 'A' }, { id: 'missed', when: 'yesterday' }, { id: 'excuse', who: 'A' }, { id: 'make_makeup', when: 'next thursday' }, { id: 'new_orient', what: 'x' }].map(async i => (await runTraining(i))?.text === NO3))).every(Boolean));
+  setRole('training');
+  check('training: a committee member cannot see names or take actions either', (await Promise.all([{ id: 'who' }, { id: 'missed', when: 'yesterday' }, { id: 'excuse', who: 'A' }].map(async i => (await runTraining(i))?.text === NO3))).every(Boolean));
+  setRole('admin'); state.settings = { 'vanessa.adminActions': false };
+  check('training: the Settings switch turns her training actions off too', /switched off/i.test((await runTraining({ id: 'excuse', who: 'Ella' }))?.text || '') && /switched off/i.test((await runTraining({ id: 'make_makeup', when: 'next thursday' }))?.text || ''));
+  state.settings = {};
 
   document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;
   document.getElementById('sum').className = fail ? 'bad' : 'ok';

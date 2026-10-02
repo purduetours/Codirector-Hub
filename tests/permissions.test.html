@@ -48,6 +48,7 @@
   import settings from '../js/modules/settings.js';
   import audit from '../js/modules/audit.js';
   import actionpage from '../js/modules/actionpage.js';
+  import trainhub from '../js/modules/trainhub.js';
   import evalroster from '../js/modules/evalroster.js';
   import sources from '../js/modules/sources.js';
   import reconcile from '../js/modules/reconcile.js';
@@ -55,7 +56,7 @@
   import more from '../js/modules/more.js';
   import { hubModules } from '../js/modules/hubs.js';
 
-  [today, announcements, evals, interviews, training, schedule, directory, desks, people, guides, evalroster, semester, sources, reconcile, datarules, audit, settings, health].forEach(register);
+  [today, announcements, trainhub, evals, interviews, training, schedule, directory, desks, people, guides, evalroster, semester, sources, reconcile, datarules, audit, settings, health].forEach(register);
   [...hubModules, more, actionpage].forEach(registerHub);
 
   const ROLES = {
@@ -66,18 +67,18 @@
     admin:     { name: 'Codirector',            is_admin: true,  in_training: true,  in_recruitment: true  }
   };
   const EXPECT = {
-    guide:     ['today', 'announcements', 'schedule'],
-    training:  ['today', 'announcements', 'evals', 'schedule', 'directory', 'desks'],
-    recruit:   ['today', 'announcements', 'interviews', 'schedule'],
-    developer: ['today', 'announcements', 'evals', 'interviews', 'schedule', 'directory', 'desks'],
-    admin:     ['today', 'announcements', 'evals', 'interviews', 'training', 'schedule', 'directory', 'desks', 'people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health']
+    guide:     ['today', 'announcements', 'trainhub', 'schedule'],
+    training:  ['today', 'announcements', 'trainhub', 'evals', 'schedule', 'directory', 'desks'],
+    recruit:   ['today', 'announcements', 'trainhub', 'interviews', 'schedule'],
+    developer: ['today', 'announcements', 'trainhub', 'evals', 'interviews', 'schedule', 'directory', 'desks'],
+    admin:     ['today', 'announcements', 'trainhub', 'evals', 'interviews', 'training', 'schedule', 'directory', 'desks', 'people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health']
   };
   const NAV = {      // the primary navigation each role should be shown
-    guide:     ['today', 'schedule', 'announcements', 'more'],
-    training:  ['today', 'tours', 'team', 'more'],
-    recruit:   ['today', 'schedule', 'team', 'more'],
-    developer: ['today', 'tours', 'team', 'more'],
-    admin:     ['today', 'tours', 'team', 'admin', 'more']
+    guide:     ['today', 'schedule', 'announcements', 'trainhub', 'more'],
+    training:  ['today', 'tours', 'team', 'trainhub', 'more'],
+    recruit:   ['today', 'schedule', 'team', 'trainhub', 'more'],
+    developer: ['today', 'tours', 'team', 'trainhub', 'more'],
+    admin:     ['today', 'tours', 'team', 'trainhub', 'admin', 'more']
   };
   const ADMIN_ONLY = ['training', 'people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health'];
 
@@ -100,7 +101,7 @@
 
     const nav = primaryNav(visibleModules()).map(e => e.id);
     check(`${key}: primary navigation is exactly the right few entries`, same(nav, NAV[key]), nav.join(', '));
-    check(`${key}: navigation stays shallow (5 entries or fewer)`, nav.length <= 5, String(nav.length));
+    check(`${key}: navigation stays shallow (6 entries or fewer; the phone dock drops Admin)`, nav.length <= 6, String(nav.length));
 
     // Every tool the role can open is reachable from Home, a hub or More — nothing is orphaned.
     const hubIds = visibleHubs().map(h => h.id);
