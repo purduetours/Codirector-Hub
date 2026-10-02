@@ -224,3 +224,27 @@ body.pal-open { overflow: hidden; }
   background: var(--surface-1); border: 1px solid var(--hairline); transition: border-color var(--dur-2); }
 .hm-chip:hover { border-color: var(--line-strong); } .hm-chip.is-warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); }
 a.td-row { text-decoration: none; color: inherit; }
+
+/* ------------------------------------------------------------ data tables */
+.dt-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); }
+.dt { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+.dt th { position: sticky; top: 0; text-align: left; padding: 10px 12px; font-size: var(--fs-xs); font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; background: var(--bg-sunken); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.dt td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.dt tr:last-child td { border-bottom: 0; }
+.dt tbody tr:hover { background: var(--pink-wash); }
+.dt tr.is-picked { background: color-mix(in srgb, var(--pink) 10%, transparent); }
+.dt-sel { width: 36px; } .dt input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+.dt-sort { font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.dt-sort:hover { color: var(--text); } .dt-sort:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+.dt .select { width: auto; min-width: 130px; padding: 5px 8px; font-size: var(--fs-sm); }
+.dt-name { font: inherit; font-weight: 650; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.dt-name:hover { color: var(--pink-soft); text-decoration: underline; }
+.dt-sub { display: block; font-size: var(--fs-xs); color: var(--text-faint); }
+.chip { display: inline-block; font-size: var(--fs-2xs); font-weight: 750; padding: 1px 8px; border-radius: 999px; background: var(--bg-sunken); color: var(--text-soft); margin-left: 6px; vertical-align: middle; white-space: nowrap; }
+.chip.is-hi { background: var(--pink-wash); color: var(--pink-soft); } .chip.is-warn { background: var(--warn-bg); color: var(--warn); } .chip.is-good { background: var(--good-bg); color: var(--good); } .chip.is-mute { color: var(--text-faint); }
+.src-badge { font-size: var(--fs-2xs); color: var(--text-faint); font-weight: 600; }
+.drawer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.drawer-sec { font-size: var(--fs-2xs); font-weight: 750; text-transform: uppercase; letter-spacing: .09em; color: var(--text-faint); margin: 8px 0 -4px; }
+.toggle-row { display: flex; gap: 8px; align-items: center; font-size: var(--fs-md); } .toggle-row input { width: 17px; height: 17px; accent-color: var(--accent); }
+.alias-list { display: grid; gap: 6px; } .alias-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+.modal.modal-xl { width: min(760px, 100%); }
