@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Admin operations tests</title>
+<!--
+  Front-end checks for the administration features, using the real modules with
+  nothing talking to a database: CSV reading, settings parsing, Vanessa's
+  administrative requests and who may make them, and what the Action Center
+  produces for each role.
+
+  The database half (guards, audit, semester start and its preview) is tested
+  against a real Postgres in supabase/tests/admin-operations.test.mjs.
+
+  Serve the project folder and open this page, e.g.
+    python3 -m http.server 8000   then   http://localhost:8000/tests/admin-ops.test.html
+-->
+<style>
+  body { font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 32px; color: #17150f; background: #f5f2eb; }
+  .ok { color: #2e7d4f; } .bad { color: #a3222a; font-weight: 700; } li { margin: 3px 0; } #sum { font-weight: 700; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Admin operations tests</h1>
+<ul id="out"></ul><p id="sum"></p>
+<script>window.CONFIG = { SUPABASE_URL: 'https://example.invalid', SUPABASE_KEY: 'test', TERM_LABEL: 'Fall 2026' };
+  // A database that has not had the admin setup run answers its functions with 404, like Supabase does.
+  window.fetch = async url => String(url).includes('/rpc/')
+    ? new Response(JSON.stringify({ message: 'Could not find the function public.admin_health in the schema cache' }), { status: 404, headers: { 'content-type': 'application/json' } })
+    : new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });</script>
+<script type="module">
+  import { state } from '../js/core/state.js';
+  import { parseCsv, readTable, pick } from '../js/core/csv.js';
+  import { sheetId } from '../js/modules/settings.js';
+  import { adminIntent, runAdmin } from '../js/core/vanessa-admin.js';
+  import { getActions, refreshActions, resetActions, LEVELS } from '../js/core/actioncenter.js';
+
+  let pass = 0, fail = 0;
+  const out = document.getElementById('out');
+  const check = (label, ok, detail = '') => { ok ? pass++ : fail++;
+    out.insertAdjacentHTML('beforeend', `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}</li>`); };
+
+  /* ------------------------------------------------------------------ CSV */
+  check('csv: quoted commas, doubled quotes, BOM and CRLF', JSON.stringify(parseCsv('﻿a,b\r\n"x, y","say ""hi"""\r\n\r\nlast,row')) === JSON.stringify([['a', 'b'], ['x, y', 'say "hi"'], ['last', 'row']]));
+  const t = readTable('Full Name,E-mail,ROLE\nJane Doe,jane@purdue.edu,Training Committee\n');
+  check('csv: headers are matched forgivingly', pick(t.records[0], 'fullname', 'name') === 'Jane Doe' && pick(t.records[0], 'email') === 'jane@purdue.edu', JSON.stringify(t.headers));
+  check('csv: header-only file has no records', readTable('Name,Email\n').records.length === 0);
+
+  /* -------------------------------------------------------------- settings */
+  const ID = '1XIfi_T4G1tkc_8D28cQWXUtCgk7Cb-BuyLrEvhfAzno';
+  check('settings: a sheet id is pulled out of a full link', sheetId(`https://docs.google.com/spreadsheets/d/${ID}/edit#gid=0`) === ID);
+  check('settings: a bare id is accepted', sheetId(ID) === ID);
+  check('settings: nonsense is refused', sheetId('hello') === '' && sheetId('https://example.com') === '');
+
+  /* ------------------------------------------------- Vanessa: what she hears */
+  const heard = q => adminIntent(q)?.id || null;
+  check('vanessa: "Deactivate John" is an archive request', heard('Deactivate John') === 'archive' && adminIntent('Deactivate John').who === 'John');
+  check('vanessa: restore / bring back', heard('bring back Ella') === 'restore' && heard('restore Noah Kim') === 'restore');
+  check('vanessa: add with an email', adminIntent('add Alex Kim, alex@purdue.edu as Training Committee')?.email === 'alex@purdue.edu' && adminIntent('add Alex Kim, alex@purdue.edu as Training Committee').role === 'Training Committee');
+  check('vanessa: add guide', adminIntent('add guide Alex Kim, alex@purdue.edu')?.guide === true);
+  check('vanessa: add without an email asks for one', heard('Add Alex to the Fall roster') === 'add_help');
+  check('vanessa: needs attention / overdue', heard('what is overdue?') === 'needs' && heard('what needs my attention') === 'needs' && adminIntent('what is overdue?').overdue);
+  check('vanessa: ordinary requests are not mistaken for admin ones',
+    ['remove my claim on Ella', 'archive the eval for Noah', 'who is touring tomorrow?', 'brief me', 'claim noah', 'draft makeup reminders'].every(q => !adminIntent(q)), ['remove my claim on Ella', 'archive the eval for Noah'].map(heard).join());
+
+  /* --------------------------------------- Vanessa: who may ask (permissions) */
+  const roles = {
+    guide:    { is_admin: false, in_training: false, in_recruitment: false },
+    training: { is_admin: false, in_training: true,  in_recruitment: false },
+    recruit:  { is_admin: false, in_training: false, in_recruitment: true  },
+    admin:    { is_admin: true,  in_training: true,  in_recruitment: true  }
+  };
+  const setRole = k => { state.role = { name: k, ...roles[k] }; state.me = { id: 'me', full_name: 'Me', email: 'me@purdue.edu', role: k }; state.guides = []; state.settings = {}; resetActions(); };
+
+  for (const k of ['guide', 'training', 'recruit']) {
+    setRole(k);
+    const NO = "That tool isn't available for your account.";
+    const refused = await Promise.all(['archive', 'restore', 'add', 'add_help'].map(async id =>
+      (await runAdmin({ id, who: 'Ella', name: 'Ella Fox', email: 'e@purdue.edu', role: 'x' }))?.text === NO));
+    check(`${k}: Vanessa refuses every administrative write`, refused.every(Boolean), refused.join());
+  }
+  setRole('admin'); state.settings = { 'vanessa.adminActions': false };
+  const off = await runAdmin({ id: 'archive', who: 'Ella' });
+  check('admin: the Settings switch turns her admin actions off', /switched off/i.test(off?.text || ''), off?.text);
+  state.settings = {};
+
+  /* --------------------------------------------------------- Action Center */
+  const today = new Date(); const iso = d => { const x = new Date(today); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10); };
+  const guides = [
+    { id: 'e1', name: 'Ann One',  status: 'claimed', evaluatorId: 'me', date: iso(-2), time: '14:00', rank: 3, evaluator: 'Me' },
+    { id: 'e2', name: 'Ben Two',  status: 'claimed', evaluatorId: 'me', date: iso(2),  time: '10:00', rank: 3, evaluator: 'Me' },
+    { id: 'e3', name: 'Cy Three', status: 'claimed', evaluatorId: 'me', date: '',       time: '',      rank: 3, evaluator: 'Me' },
+    { id: 'e4', name: 'Dee Four', status: 'open',    evaluatorId: null, date: '',       time: '',      rank: 1 },
+    { id: 'e5', name: 'Eve Five', status: 'submitted', evaluatorId: 'x', date: iso(-5), time: '', rank: 3, evaluator: 'Zed' },
+    { id: 'e6', name: 'Fay Six',  status: 'claimed', evaluatorId: 'x', date: iso(-3), time: '', rank: 3, evaluator: 'Zed' }
+  ];
+  const levels = list => list.map(a => `${a.level}:${a.id.split(':')[0]}`).join(' ');
+
+  setRole('training'); state.guides = guides; await refreshActions({ force: true });
+  let l = getActions();
+  check('actions (training): an overdue evaluation is urgent and listed first', l[0]?.level === 'urgent' && /Overdue/.test(l[0].title), levels(l));
+  check('actions (training): upcoming and undated evaluations appear', l.some(a => a.level === 'upcoming') && l.some(a => a.id.startsWith('eval-undated')), levels(l));
+  check('actions (training): unclaimed top-priority guides are flagged', l.some(a => a.id.startsWith('eval-unclaimed')));
+  check('actions (training): admin-only items are absent', !l.some(a => /eval-review|eval-late|makeups|setup-missing|no-term|signups/.test(a.id)), levels(l));
+
+  setRole('admin'); state.guides = guides; await refreshActions({ force: true });
+  l = getActions();
+  check('actions (admin): review queue and committee-wide overdue appear', l.some(a => a.id.startsWith('eval-review')) && l.some(a => a.id.startsWith('eval-late')), levels(l));
+  check('actions (admin): a missing admin setup is reported plainly, never as a stack trace', l.some(a => a.id === 'setup-missing' && !/Error|at /.test(a.detail)), levels(l));
+
+  setRole('guide'); state.guides = guides; await refreshActions({ force: true });
+  check('actions (guide): no evaluation or admin items at all', getActions().every(a => !/^eval|^iv-|^desk|^makeups|^setup|^no-term/.test(a.id)), levels(getActions()));
+
+  check('actions: only Urgent and Needs action count toward the badge', LEVELS.urgent.badge && LEVELS.action.badge && !LEVELS.upcoming.badge && !LEVELS.info.badge);
+
+  document.getElementById('sum').textContent = `${pass} passed, ${fail} failed`;
+  document.getElementById('sum').className = fail ? 'bad' : 'ok';
+  document.title = fail ? `✗ ${fail} failed` : `✓ ${pass} passed`;
+</script>
+</body>
+</html>

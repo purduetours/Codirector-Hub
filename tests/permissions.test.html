@@ -43,11 +43,16 @@
   import people from '../js/modules/people.js';
   import training from '../js/modules/training.js';
   import health from '../js/modules/health.js';
+  import guides from '../js/modules/guides.js';
+  import semester from '../js/modules/semester.js';
+  import settings from '../js/modules/settings.js';
+  import audit from '../js/modules/audit.js';
+  import actionpage from '../js/modules/actionpage.js';
   import more from '../js/modules/more.js';
   import { hubModules } from '../js/modules/hubs.js';
 
-  [today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
-  [...hubModules, more].forEach(registerHub);
+  [today, announcements, evals, interviews, training, schedule, directory, desks, people, guides, semester, audit, settings, health].forEach(register);
+  [...hubModules, more, actionpage].forEach(registerHub);
 
   const ROLES = {
     guide:     { name: 'Tour Guide',            is_admin: false, in_training: false, in_recruitment: false },
@@ -61,7 +66,7 @@
     training:  ['today', 'announcements', 'evals', 'schedule', 'directory', 'desks'],
     recruit:   ['today', 'announcements', 'interviews', 'schedule'],
     developer: ['today', 'announcements', 'evals', 'interviews', 'schedule', 'directory', 'desks'],
-    admin:     ['today', 'announcements', 'evals', 'interviews', 'training', 'schedule', 'directory', 'desks', 'people', 'health']
+    admin:     ['today', 'announcements', 'evals', 'interviews', 'training', 'schedule', 'directory', 'desks', 'people', 'guides', 'semester', 'audit', 'settings', 'health']
   };
   const NAV = {      // the primary navigation each role should be shown
     guide:     ['today', 'schedule', 'announcements', 'more'],
@@ -70,7 +75,7 @@
     developer: ['today', 'tours', 'team', 'more'],
     admin:     ['today', 'tours', 'team', 'admin', 'more']
   };
-  const ADMIN_ONLY = ['training', 'people', 'health'];
+  const ADMIN_ONLY = ['training', 'people', 'guides', 'semester', 'audit', 'settings', 'health'];
 
   let pass = 0, fail = 0;
   const out = document.getElementById('out');
