@@ -22,10 +22,10 @@
    The id stays 'today' so every bookmark, Vanessa's "take me to today" and
    the router's default all keep landing here.
 ============================================================================ */
-import { state, myName, isAdmin, inTraining, inRecruitment, termLabel } from '../core/state.js';
+import { state, myName, isAdmin, inTraining, inRecruitment, termLabel, setting } from '../core/state.js';
 import { select, update } from '../core/db.js';
 import { loadDesks, loadTours } from '../core/sheets.js';
-import { $, esc, injectStyle, initials, prettyTime, todayISO } from '../core/ui.js';
+import { $, esc, injectStyle, initials, prettyTime, prettyDate, todayISO } from '../core/ui.js';
 import { visibleModules } from '../core/router.js';
 import { ICONS } from '../core/icons.js';
 import { presenceSnapshot } from '../core/presence.js';
@@ -35,6 +35,8 @@ import { setVanessaState } from '../core/vanessa-state.js';
 import { loadRoster } from './evals.js';
 import interviews, { interviewData } from './interviews.js';
 import { latestAnnouncements } from './announcements.js';
+import { getActions, refreshActions, LEVELS } from '../core/actioncenter.js';
+import { owedBy, trainingSources } from './training.js';
 
 /* The change feed keeps its original look; the rest of home lives in
    css/home.css because it is the one screen big enough to deserve a file. */
@@ -53,71 +55,7 @@ injectStyle('today-css', `
 @media (max-width:620px){ .td-change { flex-wrap:wrap; gap:4px 10px; } .td-change .w { min-width:0; } .td-change .t { flex-basis:100%; order:3; } }
 `);
 
-/** Everything that might want attention, with how to act on it. */
-function gather() {
-  const items = [];
-  const guides = state.guides || [];
-  const me = state.me?.id;
-
-  if (inTraining() && guides.length) {
-    const mine = guides.filter(g => g.evaluatorId === me && g.status === 'claimed');
-    const undated = mine.filter(g => !g.date);
-    if (undated.length) items.push({ n: undated.length, tone: 'warn',
-      what: `Your eval${undated.length === 1 ? ' has' : 's have'} no tour date`,
-      why: undated.slice(0, 3).map(g => g.name).join(', ') + (undated.length > 3 ? '…' : ''),
-      go: 'evals' });
-
-    const todo = mine.filter(g => g.date);
-    if (todo.length) items.push({ n: todo.length,
-      what: `Eval${todo.length === 1 ? '' : 's'} you have claimed and not submitted`,
-      why: todo.slice(0, 3).map(g => g.name).join(', ') + (todo.length > 3 ? '…' : ''),
-      go: 'evals' });
-
-    const urgent = guides.filter(g => g.status === 'open' && g.rank <= 2);
-    if (urgent.length) items.push({ n: urgent.length,
-      what: 'Unclaimed guides at first or second priority',
-      why: 'Nobody has picked these up yet',
-      go: 'evals' });
-
-    if (isAdmin()) {
-      const unreviewed = guides.filter(g => g.status === 'submitted');
-      if (unreviewed.length) items.push({ n: unreviewed.length,
-        what: 'Submitted evals waiting to be reviewed',
-        why: 'Only codirectors see these',
-        go: 'evals' });
-    }
-  }
-
-  const iv = interviewData();
-  if (inRecruitment() && iv?.candidates?.length) {
-    const cands = iv.candidates;
-    const inRoom = cands.filter(c => c.checkin === 'Yes');
-    const notByMe = inRoom.filter(c => !c.scores?.[myName()]);
-    if (notByMe.length) items.push({ n: notByMe.length, tone: 'warn',
-      what: 'Checked-in candidates you have not scored',
-      why: 'They are here and waiting on you',
-      go: 'interviews' });
-
-    const nobody = cands.filter(c => c.raters === 0);
-    if (nobody.length) items.push({ n: nobody.length,
-      what: 'Candidates nobody has scored',
-      why: 'No ratings at all yet',
-      go: 'interviews' });
-
-    const split = cands.filter(c => (c.spread ?? 0) >= 1.5);
-    if (split.length) items.push({ n: split.length,
-      what: 'Candidates worth discussing',
-      why: 'The panel disagreed by more than a point and a half',
-      go: 'interviews' });
-
-    const undecided = cands.filter(c => c.raters > 0 && !c.decision);
-    if (undecided.length) items.push({ n: undecided.length,
-      what: 'Scored candidates with no decision',
-      why: 'Yes, maybe or no still to record',
-      go: 'interviews' });
-  }
-  return items;
-}
+/* What needs attention is no longer decided here: see core/actioncenter.js. */
 
 async function deskGaps() {
   try {
@@ -209,6 +147,16 @@ async function loadChanges() {
       else if (e.claimed_at) out.push({ at: e.claimed_at, who: m, what: `claimed ${g}` });
     });
   } catch { /* the join name may differ; the training half still works */ }
+
+  /* Administrative changes (people, guides, semesters, settings) from the audit
+     log: meaningful operational history rather than system noise. */
+  try {
+    const rows = await select('admin_audit', 'select=at,actor_name,action,target_label&order=at.desc&limit=10');
+    const verbs = { 'person.added': 'invited', 'person.archived': 'archived', 'person.restored': 'restored', 'person.role_changed': 'changed the role of',
+      'guide.added': 'added guide', 'guide.archived': 'archived guide', 'guide.restored': 'restored guide', 'semester.started': 'started the semester',
+      'term.saved': 'edited the semester', 'role.updated': 'changed the role', 'setting.changed': 'changed the setting', 'import.people': 'imported', 'import.guides': 'imported' };
+    (rows || []).filter(r => verbs[r.action]).forEach(r => out.push({ at: r.at, who: r.actor_name || 'someone', what: `${verbs[r.action]} ${r.target_label || ''}`.trim() }));
+  } catch { /* the audit log is not installed yet */ }
 
   return out
     .filter(x => x.at)
@@ -411,6 +359,80 @@ function paintNews(rows) {
   } catch { /* announcements are not essential to Home */ }
 }
 
+/* ------------------------------------------------------- up next / attention
+   "What do I need to know or do next?" Three small painters over the Action
+   Center's list; none of them decides anything itself. */
+const goRow = a => `<a class="td-row hm-row ${a.level === 'urgent' ? 'is-warn' : ''}" href="${esc(a.url || '#/actions')}">
+    <span class="td-what"><b>${esc(a.title)}</b><em>${esc(a.detail || a.source)}</em></span><span class="td-go">${ICONS.arrow}</span></a>`;
+
+function paintNext(acts) {
+  const box = $('#hm-next-body');
+  if (!box) return;
+  const dated = acts.filter(a => a.due && a.level !== 'info').sort((a, b) => String(a.due).localeCompare(String(b.due)));
+  const next = dated.find(a => a.due >= todayISO()) || dated[0];
+  const slot = nextSlot();
+  if (next) {
+    box.innerHTML = `<a class="hm-next" href="${esc(next.url)}"><span class="hm-next-k">${esc(next.level === 'urgent' ? 'Overdue' : prettyDay(next.due))}</span>
+      <b>${esc(next.title)}</b><em>${esc(next.detail || '')}</em></a>
+      <div class="hm-next-acts"><a class="btn btn-primary btn-sm" href="${esc(next.url)}">Open</a>
+      <button type="button" class="btn btn-ghost btn-sm" data-vanessa-ask="Brief me">Ask Vanessa</button></div>`;
+  } else if (slot) {
+    box.innerHTML = `<a class="hm-next" href="#/schedule"><span class="hm-next-k">Today</span><b>Next tour at ${esc(prettyTime(slot.start))}</b>
+      <em>${esc(slot.guides.slice().sort().join(', '))}</em></a>`;
+  } else {
+    box.innerHTML = `<p class="hm-quiet">Nothing is scheduled for you.${visibleModules().some(m => m.id === 'schedule') ? ' <a href="#/schedule">See the tour schedule</a>.' : ''}</p>`;
+  }
+}
+
+function paintAttention(needs) {
+  const col = $('#hm-attn');
+  if (!col) return;
+  col.hidden = !needs.length;                       // only prominent when something actually needs attention
+  $('#hm-flow-a')?.classList.toggle('is-solo', !needs.length);
+  $('#hm-attn-n').textContent = needs.length ? String(needs.length) : '';
+  $('#td-list').innerHTML = needs.slice(0, 5).map(goRow).join('') +
+    (needs.length > 5 ? `<a class="hm-more-btn" href="#/actions">${needs.length - 5} more ${ICONS.arrow}</a>` : '');
+}
+
+function paintUpcoming(acts) {
+  const box = $('#hm-up-body');
+  if (!box) return;
+  const horizon = isoPlus(Number(setting('actions.horizonDays', 7)));
+  const rows = acts.filter(a => a.level === 'upcoming').map(a => ({ k: prettyDay(a.due), t: a.title, d: a.detail, url: a.url, due: a.due }));
+  if (isAdmin()) {
+    const src = trainingSources();
+    (src?.sessions || []).filter(x => x.held_on && x.held_on >= todayISO() && x.held_on <= horizon)
+      .forEach(x => rows.push({ k: prettyDay(x.held_on), t: `Training: ${x.label}`, d: '', url: '#/training', due: x.held_on }));
+  }
+  rows.sort((a, b) => String(a.due || '9').localeCompare(String(b.due || '9')));
+  box.innerHTML = rows.length
+    ? rows.slice(0, 5).map(r => `<a class="hm-up" href="${esc(r.url)}"><span class="hm-up-k">${esc(r.k)}</span><span><b>${esc(r.t)}</b>${r.d ? `<em>${esc(r.d)}</em>` : ''}</span></a>`).join('')
+    : `<p class="hm-quiet">Nothing coming up in the next ${Number(setting('actions.horizonDays', 7))} days.</p>`;
+}
+
+const prettyDay = iso => {
+  if (!iso) return '';
+  const t = todayISO();
+  return iso === t ? 'Today' : iso === isoPlus(1) ? 'Tomorrow' : prettyDate(iso);
+};
+
+/* Admin only: the day in one line of chips, each a doorway to the place to act. */
+function paintToday(gaps) {
+  const box = $('#hm-today');
+  if (!box) return;
+  const c = state.counts || {};
+  const owed = owedBy()?.size || 0;
+  const chips = [
+    toursToday ? { t: `${toursToday.slots.length} ${toursToday.slots.length === 1 ? 'tour' : 'tours'} today`, url: '#/schedule' } : null,
+    gaps ? { t: `${gaps} desk ${gaps === 1 ? 'slot' : 'slots'} uncovered`, url: '#/desks', warn: true } : null,
+    c.open ? { t: `${c.open} guides need an evaluator`, url: '#/evals', warn: c.open > 0 } : null,
+    c.submitted ? { t: `${c.submitted} evaluations to review`, url: '#/evals' } : null,
+    owed ? { t: `${owed} ${owed === 1 ? 'person owes' : 'people owe'} makeups`, url: '#/training', warn: true } : null
+  ].filter(Boolean);
+  box.hidden = !chips.length;
+  box.innerHTML = `<h2 class="hm-today-h">Today</h2><div class="hm-chips">${chips.map(x => `<a class="hm-chip ${x.warn ? 'is-warn' : ''}" href="${esc(x.url)}">${esc(x.t)}</a>`).join('')}</div>`;
+}
+
 /* ---------------------------------------------------------------- tours */
 function paintTours() {
   const box = $('#hm-tours');
@@ -481,7 +503,7 @@ function shell() {
       <path d="M0 60 L0 34 C 180 6, 360 2, 560 18 S 940 54, 1200 20 L1200 60 Z"/>
     </svg>
     <section class="hm-block" data-reveal>
-      <header class="hm-head"><h2>Your usual</h2><p>The tools you reach for most.</p></header>
+      <header class="hm-head"><h2>Quick actions</h2><p>Start something from here.</p></header>
       <div id="hm-deck" class="hm-deck">${sk(64)}${sk(64)}${sk(64)}</div>
       <details class="hm-more" id="hm-more" hidden>
         <summary><span>More</span><span class="hm-card-n" id="hm-more-n"></span>${ICONS.arrow}</summary>
@@ -489,13 +511,26 @@ function shell() {
       </details>
     </section>
 
-    <div class="hm-flow">
-      <section class="hm-col" id="hm-attn" data-reveal>
-        <header class="hm-col-head"><span class="hm-card-ico">${ICONS.spark}</span><h3>Waiting on you</h3><span class="hm-card-n" id="hm-attn-n"></span></header>
-        <div id="td-list">${sk(58)}${sk(58)}</div>
+    ${isAdmin() ? `<section class="hm-today" id="hm-today" aria-label="Today" hidden></section>` : ''}
+
+    <div class="hm-flow" id="hm-flow-a">
+      <section class="hm-col" id="hm-next" data-reveal>
+        <header class="hm-col-head"><span class="hm-card-ico">${ICONS.clock}</span><h3>Up next</h3></header>
+        <div id="hm-next-body">${sk(86)}</div>
+      </section>
+      <section class="hm-col" id="hm-attn" data-reveal hidden>
+        <header class="hm-col-head"><span class="hm-card-ico">${ICONS.spark}</span><h3>Needs attention</h3><span class="hm-card-n" id="hm-attn-n"></span></header>
+        <div id="td-list"></div>
+      </section>
+    </div>
+
+    <div class="hm-flow" id="hm-flow-b">
+      <section class="hm-col" id="hm-up" data-reveal>
+        <header class="hm-col-head"><span class="hm-card-ico">${ICONS.schedule}</span><h3>Upcoming</h3><a class="hm-all" href="#/actions">All ${ICONS.arrow}</a></header>
+        <div id="hm-up-body">${sk(40)}</div>
       </section>
       <section class="hm-col" data-reveal>
-        <header class="hm-col-head"><span class="hm-card-ico">${ICONS.clock}</span><h3>On tour today</h3></header>
+        <header class="hm-col-head"><span class="hm-card-ico">${ICONS.tours}</span><h3>On tour today</h3></header>
         <div id="hm-tours">${sk(40)}</div>
       </section>
     </div>
@@ -586,43 +621,33 @@ export default {
     ]);
     if (!view.isConnected || document.body.dataset.route !== 'today') return;
 
-    const items = gather();
     const gaps = inTraining() ? await deskGaps() : null;
-    if (gaps) items.push({ n: gaps, what: 'Uncovered desk slots this week',
-                           why: 'Nobody is down for these', go: 'desks' });
+    await refreshActions();
     if (!view.isConnected || document.body.dataset.route !== 'today') return;
+
+    /* Everything that wants this person comes from the Action Center, the same
+       list the bell and Vanessa read — Home does not keep a second set of rules. */
+    const acts = getActions();
+    const needs = acts.filter(a => LEVELS[a.level].badge);
+    const items = needs.map(a => ({ n: 1, what: a.title, why: a.detail || '', go: (a.url || '').replace(/^#\//, '').split('?')[0] }));
 
     const plan = agenda(items);
     $('#hm-says').textContent = vanessaLine(items, plan);
     const primary = paintActions(homeContext(gaps));
-    // A chip that only repeats a primary action would be saying it twice.
     const handed = new Set(primary.filter(a => a.kind === 'open').map(a => a.to));
     paintAgenda(plan.filter(p => !(p.go && handed.has(p.go) && !p.today) && !(p.go === 'schedule' && handed.has('schedule'))));
     paintTours();
     paintNews(newsRows);
-    $('#hm-attn-n').textContent = items.length ? String(items.length) : '';
-
-    const row = (i, k) => `
-          <button class="td-row hm-row ${i.tone === 'warn' ? 'is-warn' : ''}" data-go="${esc(i.go)}" style="--i:${k}">
-            <span class="td-n" data-morph-ico>${i.n}</span>
-            <span class="td-what"><b>${esc(i.what)}</b><em>${esc(i.why)}</em></span>
-            <span class="td-go">${ICONS.arrow}</span>
-          </button>`;
-    const SHOWN = 5;
-    $('#td-list').innerHTML = items.length
-      ? items.slice(0, SHOWN).map(row).join('') +
-        (items.length > SHOWN
-          ? `<div class="hm-more-list" id="hm-more-list"><div>${items.slice(SHOWN).map(row).join('')}</div></div>
-             <button type="button" class="hm-more-btn" aria-expanded="false" aria-controls="hm-more-list">${items.length - SHOWN} more ${ICONS.arrow}</button>`
-          : '')
-      : `<div class="hm-clear"><span class="hm-clear-mark">${ICONS.check}</span>
-         <p><b>All clear.</b> Nothing is waiting on you right now.</p></div>`;
-    $('.hm-more-btn')?.addEventListener('click', e => {
-      const b = e.currentTarget, openNow = b.getAttribute('aria-expanded') !== 'true';
-      b.setAttribute('aria-expanded', String(openNow));
-      $('#hm-more-list').classList.toggle('is-open', openNow);
-      b.firstChild.textContent = openNow ? 'Show fewer ' : `${items.length - SHOWN} more `;
-    });
+    paintNext(acts);
+    paintAttention(needs);
+    paintUpcoming(acts);
+    if (isAdmin()) paintToday(gaps);
+    const rerender = () => {
+      if (document.body.dataset.route !== 'today') return;
+      const a2 = getActions();
+      paintNext(a2); paintAttention(a2.filter(a => LEVELS[a.level].badge)); paintUpcoming(a2);
+    };
+    document.addEventListener('hub:actions', rerender, { signal: homeEvents.signal });
 
     /* Admin only: this names who changed what, which is oversight rather than
        something a committee member needs on their landing screen. */
@@ -630,7 +655,7 @@ export default {
       const box = document.createElement('div');
       box.id = 'td-changes';
       box.hidden = true;
-      view.querySelector('.hm-flow').after(box);
+      view.querySelector('#hm-flow-b').after(box);
       recentChanges().then(list => {
         paintChanges(list);
         $('#td-changes')?.addEventListener('click', async e => {

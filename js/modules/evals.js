@@ -599,8 +599,11 @@ export async function claimGuide(g, { date = null, time = null } = {}) {
 
 export async function loadRoster() {
   const version = state.sessionVersion;
-  const rows = await select('eval_roster',
-    `select=*&term_id=eq.${termId()}&order=priority_rank.asc,last_name.asc`);
+  /* Archived guides stay in the database but leave the tracker. `guide_active`
+     comes from supabase/18-admin-operations.sql; until that has been run the
+     column does not exist, so fall back to the unfiltered list. */
+  const base = `select=*&term_id=eq.${termId()}&order=priority_rank.asc,last_name.asc`;
+  const rows = await select('eval_roster', `${base}&guide_active=eq.true`).catch(() => select('eval_roster', base));
   state.guides = (rows || []).map(toGuide);
 
   // Counts cover the WHOLE roster so the progress bar stays truthful even for
@@ -1205,17 +1208,10 @@ export default {
     flushPendingOpen();
   },
 
-  /** Called by the shell's "End of semester" action. */
-  openRollover() {
-    const root = $('#ev-modal-roll');
-    if (!root) return;
-    $('#ev-roll-preview').hidden = true;
-    $('#ev-roll-error').hidden = true;
-    $('#ev-roll-clear').checked = true;
-    const go = $('#ev-roll-go');
-    go.disabled = true; go.textContent = 'Preview first';
-    openModal(root);
-  }
+  /** The end-of-semester rollover moved to Admin > Semester, a guided wizard that
+      also archives leavers and previews exactly what will change. The old dialog
+      below is kept for reference but is no longer opened from anywhere. */
+  openRollover() { location.hash = '#/semester'; }
 };
 
 function wireRollover() {

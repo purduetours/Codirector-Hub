@@ -8,13 +8,17 @@
    doing, which is what lets it go away entirely.
 ============================================================================ */
 
-const SHEET_ID = '1XIfi_T4G1tkc_8D28cQWXUtCgk7Cb-BuyLrEvhfAzno';
+import { setting, termLabel } from './state.js';
+
+/* These three links can be changed under Admin > Settings, so a new workbook
+   never needs a code edit. The values below are only the defaults. */
+const SHEET_ID = () => setting('sheets.tours', '1XIfi_T4G1tkc_8D28cQWXUtCgk7Cb-BuyLrEvhfAzno');
 
 /* The training absence form writes to its own workbook, so it needs its own id.
    Read live rather than copied into the database: it is a Google Form's
    responses, it only ever grows, and nobody edits it here — showing a stale
    copy of who will be missing on Monday would be worse than useless. */
-const ABSENCE_SHEET_ID = '1zlbSaty-ZCSY9wvoa8p_yPbWVm604hCl-hw1IRYpQ4s';
+const ABSENCE_SHEET_ID = () => setting('sheets.absences', '1zlbSaty-ZCSY9wvoa8p_yPbWVm604hCl-hw1IRYpQ4s');
 
 /* What each guide studies. Someone else maintains this workbook, one tab per
    college plus tabs for minors, certificates and learning communities, so it
@@ -24,7 +28,7 @@ const ABSENCE_SHEET_ID = '1zlbSaty-ZCSY9wvoa8p_yPbWVm604hCl-hw1IRYpQ4s';
    It is INCOMPLETE and that is expected: 40 of 103 guides were not on it when
    this was written. Anything built on it has to say "not listed" rather than
    imply the person has no major. */
-const MAJORS_SHEET_ID = '1MAvO2LuBeH-tLZrreZJtMWS20FCQst1XQF_YDhuz7R4';
+const MAJORS_SHEET_ID = () => setting('sheets.majors', '1MAvO2LuBeH-tLZrreZJtMWS20FCQst1XQF_YDhuz7R4');
 
 /* Tabs are addressed by gid, not name: gviz silently returns the FIRST sheet
    for a name it does not recognise, so a renamed tab would look like it worked
@@ -56,10 +60,10 @@ const MAJOR_TABS = [
  * to the term instead. That also fixes the year: "9/7" is unambiguous once you
  * know the term, where guessing the nearest year turned last January into next.
  *
- * Rolling over to spring is a one-word change in config.js.
+ * The label comes from the current semester (Admin > Semester).
  */
 function termTabs() {
-  const label = String(window.CONFIG?.TERM_LABEL || '');
+  const label = String(termLabel() || '');
   const m = /(spring|summer|fall|autumn)\s*(\d{4})/i.exec(label);
   const year = m ? Number(m[2]) : new Date().getFullYear();
   const isFall = !m || /fall|autumn/i.test(m[1]);
@@ -159,7 +163,7 @@ const tabCache = new Map();
 /** Forget everything read from the workbook; the next ask goes to Google. */
 export const bustSheets = () => tabCache.clear();
 
-function fetchTab(tab, book = SHEET_ID, extra = '') {
+function fetchTab(tab, book = SHEET_ID(), extra = '') {
   const cacheKey = `${book}|${tab}|${extra}`;
   if (tabCache.has(cacheKey)) return tabCache.get(cacheKey);
 
@@ -358,7 +362,7 @@ export async function loadDesks() {
  * so they are found by looking for the question rather than by position.
  */
 export async function loadAbsences() {
-  const rows = await fetchTab('Form Responses 1', ABSENCE_SHEET_ID, '&headers=0');
+  const rows = await fetchTab('Form Responses 1', ABSENCE_SHEET_ID(), '&headers=0');
   if (!rows || rows.length < 2) return [];
 
   const head = rows[0].map(h => String(h || '').toLowerCase());
@@ -395,7 +399,7 @@ export function formStamp(text) {
  */
 export async function loadMajors() {
   const tabs = await Promise.all(MAJOR_TABS.map(([gid]) =>
-    fetchTab('', MAJORS_SHEET_ID, `&headers=0&gid=${gid}`)));
+    fetchTab('', MAJORS_SHEET_ID(), `&headers=0&gid=${gid}`)));
 
   const people = new Map();
   const get = name => {

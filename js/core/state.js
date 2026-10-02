@@ -12,6 +12,7 @@ export const state = {
   me: null,          // { id, full_name, email, role }
   role: null,        // { name, is_admin, in_recruitment, in_training }
 
+  settings: {},      // operational settings from app_settings (never secrets)
   guides: [],
   counts: {},
   neededTotal: 0,
@@ -31,6 +32,9 @@ export const myName    = () => state.me?.full_name || '';
    code. The database already knows, in terms.is_current, so ask it. */
 export const termId    = () => state.term?.id || 'fall-2026';
 export const termLabel = () => state.term?.label || window.CONFIG?.TERM_LABEL || '';
+
+/** An operational setting set under Admin > Settings, or the built-in default. */
+export const setting = (key, fallback) => { const v = state.settings?.[key]; return v == null || v === '' ? fallback : v; };
 
 /** The term after this one: fall-2026 -> spring-2027, spring-2027 -> fall-2027. */
 export function nextTermId() {
@@ -85,6 +89,7 @@ export function clearSession() {
   state.token = state.refreshToken = '';
   state.expiresAt = 0;
   state.me = state.role = null;
+  state.settings = {};
   state.guides = [];
   state.loadedAt = null;
   state.guideToursLoaded = false;

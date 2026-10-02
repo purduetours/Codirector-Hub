@@ -26,9 +26,16 @@ export const HUBS = [
   { id: 'team', title: 'Team', icon: 'team', crumb: 'News, evaluations and the people behind them',
     lede: 'Notices, evaluations, the guide directory and recruitment.',
     children: ['announcements', 'evals', 'directory', 'interviews', 'training'] },
-  { id: 'admin', title: 'Admin', icon: 'admin', needs: 'admin', crumb: 'Access, data and semester tools',
-    lede: 'Codirector tools. Nobody else sees this area.',
-    children: ['people', 'health'], actions: ['rollover'] },
+  { id: 'admin', title: 'Admin', icon: 'admin', needs: 'admin', crumb: 'People, guides, semesters and settings',
+    lede: 'Everything needed to run the program, with no database work. Nobody else sees this area.',
+    children: ['people', 'guides', 'semester', 'audit', 'settings', 'health'],
+    groups: [
+      { title: 'Run the program', children: ['people', 'guides', 'semester'] },
+      { title: 'Records and settings', children: ['audit', 'settings'] },
+      { title: 'Check the setup', children: ['health'] }
+    ],
+    advanced: 'Database setup, email-provider keys, deployments and recovery are not part of day-to-day running. They are covered in DEVELOPERS.md and are the only things that need a developer.' },
+  { id: 'actions', title: 'Action Center', icon: 'bell', crumb: 'Everything that needs you', always: true, nav: false },
   { id: 'more', title: 'More', icon: 'more', crumb: 'Profile, appearance and help', always: true }
 ];
 
@@ -51,8 +58,12 @@ export const ACTIONS = [
     icon: 'training', words: 'training session makeup absent' },
   { id: 'makeups', title: 'Draft makeup reminders', hint: 'Vanessa drafts them; nothing is sent', needs: 'admin', quick: true,
     icon: 'spark', words: 'makeup owe remind email' },
-  { id: 'rollover', title: 'End of semester', hint: 'Move everyone up one priority tier', needs: 'admin',
-    icon: 'rollover', words: 'rollover semester priority term' },
+  { id: 'rollover', title: 'Start the next semester', hint: 'Guided: returning guides, leavers, training dates', needs: 'admin', quick: true,
+    icon: 'rollover', words: 'rollover semester end of semester priority term new' },
+  { id: 'add-guide', title: 'Add a guide', hint: 'Put a new tour guide on the roster', needs: 'admin', quick: true,
+    icon: 'directory', words: 'guide roster new tour' },
+  { id: 'import-roster', title: 'Import a roster from CSV', hint: 'Check it before anything is saved', needs: 'admin',
+    icon: 'directory', words: 'csv upload spreadsheet guides people' },
   { id: 'brief', title: 'Brief me', hint: 'Ask Vanessa what needs attention', icon: 'spark', words: 'summary today vanessa' },
   { id: 'theme', title: 'Switch light / dark', hint: 'Appearance', icon: 'moon', words: 'theme dark light mode appearance' },
   { id: 'refresh', title: 'Refresh everything', hint: 'Reload the latest data', icon: 'refresh', words: 'reload sync update' },
@@ -93,7 +104,7 @@ export function primaryNav(mods, homeId = 'today') {
   if (home) out.push({ id: home.id, title: 'Home', icon: ICONS.today, owns: [home.id] });
 
   for (const hub of HUBS) {
-    if (!hubVisible(hub, mods)) continue;
+    if (hub.nav === false || !hubVisible(hub, mods)) continue;
     const kids = hubChildren(hub, mods);
     if (hub.always || kids.length !== 1 || hubActions(hub).length) {
       out.push({ id: hub.id, title: hub.title, icon: ICONS[hub.icon] || ICONS.menu, owns: [hub.id, ...kids.map(k => k.id)], hub: true });

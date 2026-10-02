@@ -1,6 +1,6 @@
 /* ============================================================ hub entry point */
 import { initPresence, resetPresence } from './core/presence.js';
-import { state, myName, isAdmin, inTraining, onSessionReset } from './core/state.js';
+import { state, myName, isAdmin, inTraining, termLabel, onSessionReset } from './core/state.js';
 import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
 import { register, registerHub, buildNav, render, paintNav, go, list, onRoute } from './core/router.js';
 import { $, $$, esc, initials, toast } from './core/ui.js';
@@ -12,6 +12,8 @@ import { registerEvalActions } from './core/vanessa-eval.js';
 import { submitReviewedEval } from './core/vanessa-eval-submit.js';
 import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup, openVanessa, toggleVanessa, onVanessaToggle } from './core/vanessa-ui.js';
 import { initPalette } from './core/palette.js';
+import { initBell } from './core/bell.js';
+import { resetActions } from './core/actioncenter.js';
 import { registerLoaders } from './core/vanessa-data.js';
 
 import evals, { loadRoster } from './modules/evals.js';
@@ -25,11 +27,16 @@ import people        from './modules/people.js';
 import training      from './modules/training.js';
 import health        from './modules/health.js';
 import more          from './modules/more.js';
+import guides        from './modules/guides.js';
+import semester      from './modules/semester.js';
+import settings      from './modules/settings.js';
+import audit         from './modules/audit.js';
+import actionpage    from './modules/actionpage.js';
 import { hubModules } from './modules/hubs.js';
 
-[today, announcements, evals, interviews, training, schedule, directory, desks, people, health].forEach(register);
+[today, announcements, evals, interviews, training, schedule, directory, desks, people, guides, semester, audit, settings, health].forEach(register);
 /* Hubs group the tools above into a few areas; the sidebar shows those, not every tool. */
-[...hubModules, more].forEach(registerHub);
+[...hubModules, more, actionpage].forEach(registerHub);
 
 /* The modules already know how to fetch their own data; Vanessa just asks them
    to, rather than reaching past them into the database herself. */
@@ -42,7 +49,7 @@ registerWarmers([
 ]);
 
 onSessionReset(() => {
-  list().forEach(m => m.bust?.()); bustSheets(); resetVanessa(); resetPresence();
+  list().forEach(m => m.bust?.()); bustSheets(); resetVanessa(); resetPresence(); resetActions();
   $('#view').replaceChildren();
 });
 
@@ -61,7 +68,7 @@ function paintShell() {
   $('#who-name').textContent = myName();
   $('#who-role').textContent = state.role?.name || '';
   $('#who-avatar').textContent = initials(myName());
-  $('#hub-term').textContent = window.CONFIG?.TERM_LABEL || '';
+  $('#hub-term').textContent = termLabel();
   $('#sync').textContent = state.loadedAt
     ? 'Synced ' + state.loadedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : '';
@@ -72,6 +79,7 @@ async function start() {
   buildNav();
   initVanessa();
   initPalette();
+  initBell();
   initPresence();
   await render();
   paintShell();
@@ -301,11 +309,9 @@ async function refreshAll() {
 $('#btn-refresh').addEventListener('click', refreshAll);
 document.addEventListener('hub:refresh', refreshAll);
 
-document.addEventListener('hub:rollover', async () => {
-  if (!isAdmin()) return;
-  if (location.hash.slice(2) !== 'evals') { go('evals'); await new Promise(r => setTimeout(r, 220)); }
-  evals.openRollover();
-});
+/* The old end-of-semester button now opens the guided semester wizard. */
+document.addEventListener('hub:rollover', () => { if (isAdmin()) go('semester'); });
+
 
 /* Sessions last about an hour. Renew quietly in the background so nobody is
    thrown back to the sign-in screen in the middle of writing an eval. */

@@ -45,3 +45,50 @@ export function downloadCsv(name, rows) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   return rows.length - 1;                 // how many data rows went out
 }
+
+/* ================================================================== reading
+   The other direction: a file somebody chose, turned into rows. Handles what
+   spreadsheets really produce — a byte order mark, Windows line endings,
+   quoted cells with commas, quotes and newlines inside them, and a ragged last
+   line. Pure and synchronous, so a preview costs nothing and tests can reach it.
+========================================================================== */
+
+/** Text -> array of arrays. Blank lines are dropped. */
+export function parseCsv(text) {
+  const src = String(text ?? '').replace(/^﻿/, '');
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (quoted) {
+      if (c === '"') { if (src[i + 1] === '"') { cell += '"'; i++; } else quoted = false; }
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && src[i + 1] === '\n') i++;
+      row.push(cell); cell = '';
+      if (row.some(v => v.trim() !== '')) rows.push(row);
+      row = [];
+    } else cell += c;
+  }
+  row.push(cell);
+  if (row.some(v => v.trim() !== '')) rows.push(row);
+  return rows;
+}
+
+/**
+ * A CSV with a header row -> records keyed by a forgiving version of each
+ * header ("Full Name", "full_name" and "FULL NAME" are all "fullname"), so the
+ * file does not have to be spelled exactly the way the importer expects.
+ */
+export function readTable(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return { headers: [], records: [] };
+  const key = h => String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const headers = rows[0].map(key);
+  return { headers, records: rows.slice(1).map(r => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? '').trim()]))) };
+}
+
+/** First non-empty value among several possible header spellings. */
+export const pick = (rec, ...keys) => { for (const k of keys) if (rec[k]) return rec[k]; return ''; };

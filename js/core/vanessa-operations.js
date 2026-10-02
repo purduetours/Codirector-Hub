@@ -10,6 +10,8 @@ import { outstandingMakeups } from '../modules/training.js';
 import { go, denied } from './vanessa-exec.js';
 import { startEvaluation } from './vanessa-flow-eval.js';
 import { completeMakeup, undoTraining } from './vanessa-training-flow.js';
+import { adminIntent, runAdmin } from './vanessa-admin.js';
+import { getActions, LEVELS } from './actioncenter.js';
 import { conversationContext, rememberConversation, recentReceipts, currentDraft, rememberDraft, pendingReview, clearReview } from './vanessa-conversation.js';
 
 export const WORKFLOWS = [
@@ -80,6 +82,8 @@ async function briefing(meeting=false) {
     if(owing.length) steps.push(`Follow up on makeup training with ${owing.slice(0,5).map(([name])=>name).join(', ')}${owing.length>5?` and ${owing.length-5} others`:''}.`);
     actions.push({label:'Work through makeups',run:()=>makeups()},{label:'Draft reminders',run:()=>reminders()});
   }
+  const needs=getActions().filter(a=>LEVELS[a.level].badge);
+  if(needs.length){rows.unshift(['Needs attention',needs.slice(0,4).map(a=>a.title).join('\n')+(needs.length>4?`\n…and ${needs.length-4} more`:'')]);actions.push(go('actions','Open Action Center'));}
   rememberConversation(meeting?'meeting':'briefing');
   const text=missing.length?`This is a partial briefing: I couldn’t load ${missing.join(' or ')}.`:rows.length?'Here’s where things stand and what I’d tackle next.':'Your account can use Vanessa for the tour schedule and handbook.';
   const plan={type:'summary',title:meeting?'Your meeting brief':'Let’s get you caught up',text,rows,steps,source:sourceSummary([r,t]),at:new Date(),actions:actions.concat({label:meeting?'Rebuild brief':'Prepare meeting agenda',run:()=>briefing(true)})};
@@ -207,7 +211,13 @@ export async function handleOperations(raw) {
   if(pending && /^(?:yes|yep|yeah|confirm|save(?: it| them)?|go ahead|do it|looks good)[.!]*$/i.test(raw.trim())) {return pending.confirm.run();}
   if(pending && /^(?:no|nope|cancel|never mind|not now)[.!]*$/i.test(raw.trim()))return pending.cancel.run();
   if(pending)clearReview();
-  const intent=operationIntent(raw);if(!intent)return null;
+  const intent=operationIntent(raw);
+  if(!intent) {
+    const adm=adminIntent(raw);
+    if(!adm)return null;
+    const out=await runAdmin(adm);
+    return out?.run==='makeups'?makeups():out;
+  }
   if(intent.id==='undo')return undoTraining();
   if(intent.id==='receipts') {
     if(!isAdmin())return denied();const receipts=recentReceipts();

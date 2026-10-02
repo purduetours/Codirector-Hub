@@ -80,6 +80,12 @@ export async function loadMe() {
     const terms = await select('terms', 'select=id,label&is_current=is.true&limit=1');
     if (terms && terms[0]) state.term = terms[0];
   } catch { /* the fallback covers it */ }
+  // Operational settings (sheet links, thresholds, contact details). Optional:
+  // a missing table just means the defaults in the code are used.
+  try {
+    const rows = await select('app_settings', 'select=key,value');
+    state.settings = Object.fromEntries((rows || []).map(r => [r.key, r.value]));
+  } catch { state.settings = {}; }
   const roles = await select('roles', `select=*&name=eq.${encodeURIComponent(me.role)}`);
   state.role = (roles && roles[0]) || { name: me.role, is_admin: false, in_recruitment: false, in_training: false };
 

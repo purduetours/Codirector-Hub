@@ -31,15 +31,22 @@ function makeHub(def) {
     id: def.id, title: def.title, crumb: def.crumb, icon: def.icon, quiet: true,
     needs: def.needs,
     mount(view) {
-      const kids = hubChildren(def, visibleModules());
+      const mods = visibleModules();
+      const kids = hubChildren(def, mods);
       const acts = hubActions(def);
+      const grid = items => `<div class="hub-grid">${items.map(toolCard).join('')}</div>`;
+      /* A hub may arrange its tools in labelled groups (Admin does), so the
+         everyday ones are not mixed in with the ones used once a semester. */
+      const body = def.groups
+        ? def.groups.map(g => { const items = hubChildren({ children: g.children }, mods);
+            return items.length ? `<h3 class="hub-h">${esc(g.title)}</h3>${grid(items)}` : ''; }).join('')
+        : grid(kids);
       view.innerHTML = `
         <section class="hub" aria-label="${esc(def.title)}">
           <p class="hub-lede">${esc(def.lede)}</p>
-          <div class="hub-grid">
-            ${kids.map(toolCard).join('')}
-            ${acts.map(a => hubCard({ act: a.id, icon: ICONS[a.icon] || ICONS.spark, title: a.title, desc: a.hint, tool: a.id })).join('')}
-          </div>
+          ${body}
+          ${acts.length ? `<div class="hub-grid">${acts.map(a => hubCard({ act: a.id, icon: ICONS[a.icon] || ICONS.spark, title: a.title, desc: a.hint, tool: a.id })).join('')}</div>` : ''}
+          ${def.advanced ? `<details class="hub-adv"><summary>Advanced</summary><p>${esc(def.advanced)}</p></details>` : ''}
         </section>`;
       view.querySelector('.hub').addEventListener('click', e => {
         const b = e.target.closest('[data-act]');
@@ -50,4 +57,4 @@ function makeHub(def) {
   };
 }
 
-export const hubModules = HUBS.filter(h => h.id !== 'more').map(makeHub);
+export const hubModules = HUBS.filter(h => !['more', 'actions'].includes(h.id)).map(makeHub);

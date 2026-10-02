@@ -4,7 +4,7 @@
    this page rather than navigation items of their own; the admin-only ones
    live under Admin.
 ============================================================================ */
-import { state, myName, termLabel, has } from '../core/state.js';
+import { state, myName, termLabel, has, setting } from '../core/state.js';
 import { $, esc, initials } from '../core/ui.js';
 import { visibleModules } from '../core/router.js';
 import { orphans, hubById } from '../core/nav.js';
@@ -50,6 +50,9 @@ function paint(view) {
         <button type="button" class="more-row" data-act="refresh"><span>Data</span><b>Refresh everything</b></button>
         <button type="button" class="more-row" data-search><span>Search &amp; commands</span><b><kbd>${isMac ? '⌘' : 'Ctrl'}</kbd> <kbd>K</kbd></b></button>
       </div></div>
+
+    ${setting('contact.email', '') || setting('contact.name', '') ? `<div class="more-block"><h4>Who to ask</h4>
+      <p class="faint" style="font-size:var(--fs-md);color:var(--text-soft)">${esc(setting('contact.name', 'The Codirectors'))}${setting('contact.email', '') ? ` · <a href="mailto:${esc(setting('contact.email', ''))}">${esc(setting('contact.email', ''))}</a>` : ''}</p></div>` : ''}
 
     <div class="more-block"><h4>Help</h4>
       <div class="more-rows">

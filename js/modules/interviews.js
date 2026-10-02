@@ -6,7 +6,7 @@
    Script, on its own spreadsheet and token auth.
 ============================================================================ */
 import { select, update, upsert, insert, remove, toCandidate } from '../core/db.js';
-import { state, myName, isAdmin } from '../core/state.js';
+import { state, myName, isAdmin, termLabel } from '../core/state.js';
 import { shareInterviews } from '../core/vanessa-ui.js';
 import { downloadCsv } from '../core/csv.js';
 import { takeJumpTarget } from '../core/quicksearch.js';
@@ -928,7 +928,7 @@ async function refresh() {
   }
 
   data = {
-    cycle: window.CONFIG?.TERM_LABEL || '',
+    cycle: termLabel(),
     groups: (groups || []).map(g => g.name),
     interviewers: (panel || []).map(m => m.full_name),
     candidates

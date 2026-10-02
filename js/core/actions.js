@@ -42,7 +42,9 @@ export function runAction(id) {
     case 'start-eval': ask('I need to do an evaluation'); break;
     case 'attendance': go('training'); break;
     case 'makeups':    ask('Draft makeup reminders for everyone'); break;
-    case 'rollover':   document.dispatchEvent(new CustomEvent('hub:rollover')); break;
+    case 'rollover':   go('semester'); break;
+    case 'add-guide':  goThen('guides', '#gd-add', el => el.click()); break;
+    case 'import-roster': goThen('guides', '#gd-import', el => el.click()); break;
     case 'brief':      ask('Brief me'); break;
     case 'theme':      document.dispatchEvent(new CustomEvent('hub:toggle-theme')); break;
     case 'refresh':    document.dispatchEvent(new CustomEvent('hub:refresh')); break;
