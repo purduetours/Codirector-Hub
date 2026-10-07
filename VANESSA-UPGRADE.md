@@ -1,3 +1,6 @@
+> **Superseded in part.** Vanessa now has a deterministic engine with typed tools, follow-ups and confirmation cards (Standard mode) and an optional local-model layer (Enhanced mode), described in `VANESSA_ARCHITECTURE.md`; nothing needs a paid AI service. The workflows below remain as her older built-in answers: they handle what the newer engine does not recognise (handbook questions, the evaluation write-up and undo flows).
+
+
 # Vanessa workspace upgrade
 
 Vanessa is the main working surface: Home starts with her conversation, and her expanded chat supports briefings, record updates, guide profiles and editable drafts. Use Compact when working alongside a form; navigation also returns her to the compact layout.
