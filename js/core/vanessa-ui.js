@@ -23,6 +23,7 @@ import { setVanessaState } from './vanessa-state.js';
 import { ICONS } from './icons.js';
 import { handleEvalMessage, evalDraft, resetEvalFlow, editEvalDraft, savedEvalSummary, bufferEvalDraft } from './vanessa-eval.js';
 import { handleAction, resetActions, pendingConfirmation } from './vanessa-actions.js';
+import { mountAgent, agentSend, agentAvailable, checkAgent, resetAgent, newConversationNow, wantsLegacy } from './agent/index.js';
 import { voiceSupported, voiceState, onVoiceChange, startVoice, stopVoice, resetVoice, setVoiceText } from './vanessa-voice.js';
 let voiceDraftRef=null;
 export { shareInterviews };
@@ -802,7 +803,7 @@ async function generate(q, deterministic, ticket, user) {
   return true;
 }
 
-function send(question) {
+function send(question, opts = {}) {
   const q = question.trim();
   if (!q || !appState.me) return;
   const ticket = epoch, user = appState.me.id;
@@ -811,7 +812,7 @@ function send(question) {
   // Keep follow-up memory and displayed answers in submission order.
   sendQueue = sendQueue.then(async () => {
     if (ticket !== epoch || user !== appState.me?.id) return;
-    const note = say('her', 'Checking…');
+    let note = say('her', 'Checking…');
     note?.classList.add('is-typing');
     note?.setAttribute('aria-label', 'Vanessa is thinking');
     setMood('thinking');
@@ -819,6 +820,18 @@ function send(question) {
     try {
       /* Answering a choice she offered, by typing it. */
       if (typedChoice(q)) { note?.remove(); inFlow = true; return; }
+
+      /* The assistant (tool-using, permission-checked, confirms every change) answers
+         first when it is connected. A task already under way in one of her older
+         flows keeps going there; and if the assistant is unavailable the message
+         falls straight through to her built-in answers below, unchanged. */
+      if (!activeFlow() && !evalDraft() && !pendingConfirmation() && !wantsLegacy(q)) {
+        note?.remove();
+        const res = await agentSend(q, { voice: !!opts.voice });
+        if (ticket !== epoch || user !== appState.me?.id) return;
+        if (res.handled) { inFlow = true; return; }
+        note = say('her', 'Checking…'); note?.classList.add('is-typing');
+      }
 
       /* The fast path, before anything is warmed: tasks, navigation, help,
          references and the workflow under way. Each intent loads only the
@@ -926,10 +939,18 @@ export function resetVanessa() {
   resetConversation();
   resetLlmHistory();
   resetActions();
-  resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
+  resetAgent(); resetWarmup(); resetVanessaData(); resetModel(); resetEvalFlow(); resetVoice(); voiceDraftRef=null; sendQueue = Promise.resolve(); open = false;
   plans.clear(); pendingSelect = null; resetMemory(null);
   $('#v-launch')?.remove(); $('#v-panel')?.remove(); document.body.classList.remove('v-open');
   setVanessaState('idle'); tellToggle();
+}
+let agentUi = null;
+async function welcome() {
+  const ticket = epoch;
+  await checkAgent().catch(() => {});
+  if (ticket !== epoch || !$('#v-log') || $('#v-log').children.length) return;
+  if (agentAvailable() && agentUi) { try { await agentUi.home(); return; } catch { /* fall back to the older greeting */ } }
+  welcomeWorkspace();
 }
 function welcomeWorkspace() {
   renderPlan({type:'summary',title:`Hi ${myName().split(' ')[0] || 'there'} — let’s get things done.`,
@@ -957,7 +978,7 @@ export function initVanessa() {
     <div id="v-saved" class="v-saved" hidden></div>
     <div class="v-log" id="v-log" role="log" aria-live="polite"></div>
     <div class="v-chips" data-suggestions></div>
-    <details><summary style="padding:8px 14px;cursor:pointer;font-size:.8rem">Smarter answers (optional)</summary>
+    <details class="v-legacy"><summary style="padding:8px 14px;cursor:pointer;font-size:.8rem">Smarter answers (optional)</summary>
       <div class="v-chips" id="v-llm"></div>
       <div class="v-chips" id="v-model"></div></details>
     <details id="v-voice"><summary style="padding:8px 14px;cursor:pointer;font-size:.875rem">Voice notes</summary>
@@ -973,6 +994,7 @@ export function initVanessa() {
   if (!appState.role?.is_admin) panel.querySelector('[data-question="Who owes makeup?"]')?.remove();
   document.body.appendChild(panel);
   const ticket = epoch;
+  agentUi = mountAgent({ panel, send: (q, o) => send(q, o) });
   paintLlmRow();paintModelRow();paintSavedDraft();paintVoice();
   // Weights are cached after the first time, so this needs no click.
   resumeLlmIfWanted().catch(() => {});
@@ -1000,7 +1022,7 @@ export function initVanessa() {
       await warmUp();
       if (ticket !== epoch || !open) return;
       paintSavedDraft();
-      if (!$('#v-log').children.length) welcomeWorkspace();
+      if (!$('#v-log').children.length) welcome();
     }
   });
   $('#v-close').addEventListener('click', close);
@@ -1012,7 +1034,8 @@ export function initVanessa() {
     if (activeFlow() || evalDraft()) { say('her','Finish or cancel the task in progress first, then start a new conversation.');return; }
     if (document.documentElement.dataset.vanessa === 'thinking') return;
     resetConversation();resetMemory(appState.me.id);resetActions();resetLlmHistory();plans.clear();pendingSelect=null;
-    $('#v-log').replaceChildren();welcomeWorkspace();
+    newConversationNow();
+    $('#v-log').replaceChildren();welcome();
   });
   $('#v-form').addEventListener('submit', e => { e.preventDefault(); send($('#v-input').value); });
   panel.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); launch.focus(); } });

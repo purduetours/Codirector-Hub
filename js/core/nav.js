@@ -29,12 +29,12 @@ export const HUBS = [
   { id: 'trainnav', title: 'Training', icon: 'training', crumb: 'Sessions, requirements and your status', virtual: true, children: ['trainhub'] },
   { id: 'admin', title: 'Admin', icon: 'admin', needs: 'admin', crumb: 'People, guides, semesters and settings',
     lede: 'Everything needed to run the program, with no database work. Nobody else sees this area.',
-    children: ['people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health'],
+    children: ['people', 'guides', 'evalroster', 'semester', 'sources', 'reconcile', 'datarules', 'audit', 'settings', 'health', 'assistant'],
     groups: [
       { title: 'Run the program', children: ['people', 'guides', 'evalroster', 'semester'] },
       { title: 'Data & spreadsheets', children: ['sources', 'reconcile', 'datarules'] },
       { title: 'Records and settings', children: ['audit', 'settings'] },
-      { title: 'Check the setup', children: ['health'] }
+      { title: 'Check the setup', children: ['health', 'assistant'] }
     ],
     advanced: 'Database setup, email-provider keys, deployments and recovery are not part of day-to-day running. They are covered in DEVELOPERS.md and are the only things that need a developer.' },
   { id: 'actions', title: 'Action Center', icon: 'bell', crumb: 'Everything that needs you', always: true, nav: false },

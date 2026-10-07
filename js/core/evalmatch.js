@@ -29,6 +29,34 @@
 
 const key = (date, start) => `${date}|${start || ''}`;
 
+/** Map evaluatorId -> Set of "date|start" they have already claimed (from the roster's claimed evaluations). */
+export function bookedSlots(guides) {
+  const busy = new Map();
+  for (const g of guides) {
+    if (g.evaluatorId && g.date && g.status === 'claimed') {
+      if (!busy.has(g.evaluatorId)) busy.set(g.evaluatorId, new Set());
+      busy.get(g.evaluatorId).add(key(g.date, g.time));
+    }
+  }
+  return busy;
+}
+
+/**
+ * Who could evaluate `guide` at `tour`, best first: not the guide, not already
+ * booked at that time, fewest evaluations so far, ties away from the evaluator
+ * just used, then alphabetical. This is THE ordering rule -- the auto-match
+ * screen and Vanessa both call it, so they cannot disagree about who is "best".
+ *
+ * @param o.taken  Map evaluatorId -> Set of "date|start" already committed
+ * @param o.load   Map evaluatorId -> evaluations so far
+ */
+export function rankFreeEvaluators({ guide, tour, evaluators, taken = new Map(), load = new Map(), lastEvaluator = null }) {
+  const n = id => load.get(id) ?? 0;
+  return evaluators
+    .filter(e => e.id !== guide.memberId && !taken.get(e.id)?.has(key(tour.date, tour.start)))
+    .sort((a, b) => n(a.id) - n(b.id) || (a.id === lastEvaluator) - (b.id === lastEvaluator) || a.name.localeCompare(b.name));
+}
+
 /**
  * @param o.guides      state.guides-shaped rows: {id (eval id), guideId, name, status, rank, priority, tours:[{date,start,slot}], tourEligible?, memberId?}
  * @param o.evaluators  [{id, name, workload}] already filtered to people who may evaluate
@@ -54,9 +82,7 @@ export function suggestMatches({ guides, evaluators, busy = new Map(), today, no
 
     let pick = null, skipped = 0;
     for (const t of tours) {
-      const free = evaluators
-        .filter(e => e.id !== g.memberId && !taken.get(e.id)?.has(key(t.date, t.start)))
-        .sort((a, b) => load.get(a.id) - load.get(b.id) || (a.id === lastEvaluator) - (b.id === lastEvaluator) || a.name.localeCompare(b.name));
+      const free = rankFreeEvaluators({ guide: g, tour: t, evaluators, taken, load, lastEvaluator });
       if (free.length) { pick = { t, e: free[0], free: free.length }; break; }
       skipped++;
     }

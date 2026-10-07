@@ -84,10 +84,10 @@ export function upsert(table, rows, onConflict) {
   });
 }
 
-export function insert(table, rows) {
+export function insert(table, rows, o = {}) {
   return rest(table, {
     method: 'POST',
-    headers: { Prefer: 'return=representation' },
+    headers: { Prefer: 'return=representation', ...via(o) },
     body: JSON.stringify(Array.isArray(rows) ? rows : [rows])
   });
 }
@@ -97,9 +97,13 @@ export function remove(table, filter) {
 }
 
 /** Call one of the database functions (submit_eval, run_rollover, ...). */
-export function rpc(name, args = {}) {
-  return rest(`rpc/${name}`, { method: 'POST', body: JSON.stringify(args) });
+export function rpc(name, args = {}, o = {}) {
+  return rest(`rpc/${name}`, { method: 'POST', headers: via(o), body: JSON.stringify(args) });
 }
+
+/** Vanessa tags the changes she makes for somebody: the database only believes the tag if that
+    action was really confirmed by that person (see hub_audit in supabase/21-vanessa-agent.sql). */
+const via = o => (o && o.via ? { 'x-vanessa-action': o.via } : {});
 
 /* ------------------------------------------------------------------ shapes
    The modules were written against the old Apps Script payloads and they look
