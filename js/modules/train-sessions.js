@@ -7,6 +7,7 @@
    Nothing is deleted. A session is cancelled (its attendance and history stay),
    and only one that nobody has been marked at can be removed outright.
 ============================================================================ */
+import { setPageEntity, clearPageEntity } from '../core/agent/page.js';
 import { $, esc, toast, openModal, closeModal, prettyDate } from '../core/ui.js';
 import { confirmDialog, formDialog } from '../core/dialog.js';
 import { admin, emptyState, fail } from './admin-kit.js';
@@ -71,7 +72,8 @@ function info(ctx, id) {
       ${mats.length ? `<div class="alias-list">${mats.map(m => `<div class="alias-row"><span>${kindIcon(m.kind)} <a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a></span></div>`).join('')}</div>` : ''}</div>
     <footer class="modal-foot"><button class="btn btn-ghost" data-close>Close</button></footer></div>`;
   document.body.append(root);
-  const done = () => { closeModal(root); setTimeout(() => root.remove(), 260); };
+  if (s) setPageEntity({ kind: 'training_session', id: s.id, name: s.label });
+  const done = () => { clearPageEntity(); closeModal(root); setTimeout(() => root.remove(), 260); };
   root.addEventListener('click', e => { if (e.target.closest('[data-close]')) done(); }); root.addEventListener('keydown', e => { if (e.key === 'Escape') done(); });
   openModal(root);
 }
@@ -125,7 +127,8 @@ async function drawer(ctx, id, host) {
       <span style="display:flex;gap:8px"><button type="button" class="btn btn-ghost" data-close>Close</button><button type="submit" class="btn btn-primary">${isNew ? 'Create session' : 'Save'}</button></span></footer>
   </form>`;
   document.body.append(root);
-  const done = () => { closeModal(root); setTimeout(() => root.remove(), 260); };
+  if (s) setPageEntity({ kind: 'training_session', id: s.id, name: s.label });
+  const done = () => { clearPageEntity(); closeModal(root); setTimeout(() => root.remove(), 260); };
   const err = m => { const e = $('#dr-err', root); e.textContent = m; e.hidden = !m; };
   const redo = async msg => { await ctx.reload(); done(); if (msg) toast(msg); paint(ctx, host); };
 

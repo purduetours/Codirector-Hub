@@ -26,6 +26,7 @@ import today         from './modules/today.js';
 import people        from './modules/people.js';
 import training      from './modules/training.js';
 import health        from './modules/health.js';
+import assistant     from './modules/assistant.js';
 import more          from './modules/more.js';
 import guides        from './modules/guides.js';
 import semester      from './modules/semester.js';
@@ -39,7 +40,7 @@ import trainhub      from './modules/trainhub.js';
 import actionpage    from './modules/actionpage.js';
 import { hubModules } from './modules/hubs.js';
 
-[today, announcements, trainhub, evals, interviews, training, schedule, directory, desks, people, guides, evalroster, semester, sources, reconcile, datarules, audit, settings, health].forEach(register);
+[today, announcements, trainhub, evals, interviews, training, schedule, directory, desks, people, guides, evalroster, semester, sources, reconcile, datarules, audit, settings, health, assistant].forEach(register);
 /* Hubs group the tools above into a few areas; the sidebar shows those, not every tool. */
 [...hubModules, more, actionpage].forEach(registerHub);
 

@@ -7,7 +7,8 @@
      leadership · evaluator and tour eligibility · linked committee account ·
      evaluation priority and whether they still need evaluating · aliases (the
      other spellings the schedule or a sheet uses for them) · notes ·
-     search, sort, filter, bulk actions, CSV import and export
+     search, sort, filter, bulk actions, CSV import { setPageEntity, clearPageEntity } from '../core/agent/page.js';
+import and export
 
    Three ideas worth knowing
      Archived       the person left; they leave every list, their history stays
@@ -154,7 +155,8 @@ function drawer(g) {
     <footer class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">${isNew ? 'Add guide' : 'Save'}</button></footer>
    </form>`;
   document.body.append(root);
-  const done = () => { closeModal(root); setTimeout(() => root.remove(), 260); };
+  if (g) setPageEntity({ kind: 'guide', id: g.id, name: g.full_name });
+  const done = () => { clearPageEntity(); closeModal(root); setTimeout(() => root.remove(), 260); };
   const err = m => { const e = $('#dr-err', root); e.textContent = m; e.hidden = !m; };
   root.addEventListener('click', async e => {
     if (e.target.closest('[data-close]')) return done();

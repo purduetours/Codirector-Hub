@@ -13,6 +13,7 @@ import { emptyState, setupNotice, setupMissing } from './admin-kit.js';
 
 injectStyle('audit-css', `
 .au-row { display:grid; grid-template-columns:150px 1fr; gap:4px 14px; padding:11px 14px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--bg-elev); margin-bottom:8px; font-size:.88rem; }
+.au-via { color:var(--pink-soft); font-size:.85em; }
 .au-when { color:var(--text-faint); font-size:.78rem; font-variant-numeric:tabular-nums; }
 .au-what b { font-weight:650; } .au-what em { font-style:normal; color:var(--text-soft); display:block; font-size:.8rem; margin-top:2px; }
 @media (max-width:640px){ .au-row { grid-template-columns:1fr; } }
@@ -25,7 +26,7 @@ const WORDS = {
   'term.saved': 'edited the semester', 'semester.started': 'started the semester', 'setting.changed': 'changed the setting',
   'reminders.changed': 'changed tour reminder settings', 'import.people': 'imported', 'import.guides': 'imported'
 };
-const GROUPS = [['', 'Everything'], ['person', 'People'], ['guide', 'Guides'], ['semester', 'Semesters'], ['term', 'Semester edits'], ['role', 'Roles'], ['setting', 'Settings'], ['import', 'Imports']];
+const GROUPS = [['', 'Everything'], ['via', 'Made by Vanessa'], ['person', 'People'], ['guide', 'Guides'], ['semester', 'Semesters'], ['term', 'Semester edits'], ['role', 'Roles'], ['setting', 'Settings'], ['import', 'Imports']];
 
 const show = v => v == null ? '' : typeof v === 'object' ? Object.entries(v).filter(([, x]) => x != null && x !== '').map(([k, x]) => `${k.replace(/_/g, ' ')}: ${typeof x === 'object' ? JSON.stringify(x) : x}`).join(', ') : String(v);
 
@@ -36,9 +37,9 @@ const PAGE = 50;
 
 function paint() {
   const g = $('#au-group').value, q = $('#au-q').value.trim().toLowerCase();
-  const list = rows.filter(r => (!g || r.action.startsWith(g + '.')) && (!q || `${r.actor_name} ${r.target_label} ${r.action} ${r.note || ''}`.toLowerCase().includes(q)));
+  const list = rows.filter(r => (!g || (g === 'via' ? r.via === 'vanessa' : r.action.startsWith(g + '.'))) && (!q || `${r.actor_name} ${r.target_label} ${r.action} ${r.note || ''}`.toLowerCase().includes(q)));
   $('#au-list').innerHTML = list.length ? list.map(r => `<div class="au-row"><span class="au-when">${esc(when(r.at))}</span>
-    <span class="au-what"><b>${esc(r.actor_name || 'Someone')}</b> ${esc(WORDS[r.action] || r.action)} <b>${esc(r.target_label || '')}</b>
+    <span class="au-what">${r.via === 'vanessa' ? `<b>Vanessa</b> <span class="au-via">on behalf of <b>${esc(r.actor_name || 'someone')}</b></span>` : `<b>${esc(r.actor_name || 'Someone')}</b>`} ${esc(WORDS[r.action] || r.action)} <b>${esc(r.target_label || '')}</b>
     ${r.before || r.after ? `<em>${r.before ? `${esc(show(r.before))} → ` : ''}${esc(show(r.after))}</em>` : ''}${r.note ? `<em>Reason: ${esc(r.note)}</em>` : ''}</span></div>`).join('')
     : emptyState({ title: rows.length ? 'Nothing matches that filter' : 'No administrative changes recorded yet',
         text: rows.length ? 'Try a different filter.' : 'When someone is added or archived, a role changes, or a semester starts, it appears here.', icon: 'search' });
@@ -65,6 +66,6 @@ export default {
     $('#au-q').addEventListener('input', debounce(paint, 120));
     $('#au-more').addEventListener('click', async () => { await load(true); paint(); });
     $('#au-export').addEventListener('click', () => downloadCsv('activity', [['When', 'Who', 'Action', 'Target', 'Before', 'After', 'Reason'],
-      ...rows.map(r => [r.at, r.actor_name, r.action, r.target_label, show(r.before), show(r.after), r.note || ''])]));
+      ...rows.map(r => [r.at, r.via === 'vanessa' ? `Vanessa (for ${r.actor_name})` : r.actor_name, r.action, r.target_label, show(r.before), show(r.after), r.note || ''])]));
   }
 };

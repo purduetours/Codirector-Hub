@@ -30,7 +30,8 @@ import { confirmDialog } from '../core/dialog.js';
 import { admin, emptyState, setupNotice, fail } from './admin-kit.js';
 import { tableHtml, bindTable, sortRows, nextSort } from './datatable.js';
 import { loadRoster } from './evals.js';
-import { suggestMatches, priorityBand } from '../core/evalmatch.js';
+import { suggestMatches, priorityBand, bookedSlots } from '../core/evalmatch.js';
+import { loadEvaluators } from '../core/evaldata.js';
 import { refreshActions } from '../core/actioncenter.js';
 
 injectStyle('evalroster-css', `
@@ -49,12 +50,10 @@ const ui = { tab: 'roster', q: '', band: '', status: '', need: '', sort: { key: 
 
 async function load() {
   await loadRoster();
-  const [gs, subs, pr, mem, roles] = await Promise.all([
+  const [gs, subs, pr] = await Promise.all([
     select('guides', 'select=id,first_name,last_name,full_name,active,tour_eligible,member_id,is_leadership').catch(() => { setupMissing = true; return select('guides', 'select=id,first_name,last_name,full_name,active'); }),
     select('evals', 'select=guide_id,submitted_at&submitted_at=not.is.null').catch(() => []),
-    select('priorities', 'select=name,sort_order,needs_eval&order=sort_order.asc'),
-    select('members', 'select=id,full_name,role,evaluator_available&active=eq.true&order=full_name.asc').catch(() => select('members', 'select=id,full_name,role&active=eq.true')),
-    select('roles', 'select=name,is_admin,in_training')
+    select('priorities', 'select=name,sort_order,needs_eval&order=sort_order.asc')
   ]);
   guideInfo = new Map(gs.map(g => [g.id, g]));
   prios = pr;
@@ -63,10 +62,7 @@ async function load() {
   const termsOff = await select('guide_terms', `select=guide_id&term_id=eq.${termId()}&active=eq.false`).catch(() => []);
   const off = new Set(termsOff.map(t => t.guide_id));
   notOnRoster = gs.filter(g => g.active && !onRoster.has(g.id) && !off.has(g.id));
-  const team = new Set(roles.filter(r => r.in_training || r.is_admin).map(r => r.name));
-  const claimed = new Map();
-  state.guides.forEach(g => { if (g.evaluatorId) claimed.set(g.evaluatorId, (claimed.get(g.evaluatorId) || 0) + 1); });
-  evaluators = mem.filter(m => team.has(m.role)).map(m => ({ id: m.id, name: m.full_name, available: m.evaluator_available !== false, workload: claimed.get(m.id) || 0 }));
+  evaluators = await loadEvaluators(state.guides);
 }
 
 const band = g => priorityBand(g.rank, !g.skip);
@@ -147,8 +143,7 @@ function paint(view) {
 async function build() {
   await loadRoster();
   const now = new Date(), hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const busy = new Map();
-  state.guides.forEach(g => { if (g.evaluatorId && g.date && g.status === 'claimed') { if (!busy.has(g.evaluatorId)) busy.set(g.evaluatorId, new Set()); busy.get(g.evaluatorId).add(`${g.date}|${g.time || ''}`); } });
+  const busy = bookedSlots(state.guides);
   const guides = state.guides.map(g => ({ ...g, tourEligible: guideInfo.get(g.guideId)?.tour_eligible, memberId: guideInfo.get(g.guideId)?.member_id }));
   ui.plan = suggestMatches({ guides, evaluators: evaluators.filter(e => e.available), busy, today: todayISO(), now: hhmm });
 }

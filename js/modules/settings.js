@@ -70,7 +70,7 @@ function paint(view) {
     <div><button class="btn btn-primary btn-sm" type="submit">Save</button></div></form>
 
   <form class="st-card" data-form="vanessa"><h3>Vanessa</h3>
-    <p class="muted">Vanessa can help with administration in plain language. She uses the same checks as the screens and always asks before changing anything.</p>
+    <p class="muted">Vanessa can help with administration in plain language. She uses the same checks as the screens and always asks before changing anything. How she is running, and the optional local AI, are under Admin → Vanessa.</p>
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="adminActions" ${v('vanessa.adminActions', true) !== false ? 'checked' : ''} style="width:17px;height:17px;accent-color:var(--accent)">
       Let her archive, restore and invite people and guides when I ask (“deactivate John”, “add Alex Kim, alex@purdue.edu”)</label>
     <div><button class="btn btn-primary btn-sm" type="submit">Save</button></div></form>
