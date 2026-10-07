@@ -1,0 +1,331 @@
+/* ============================================================ hub entry point */
+import { initPresence, resetPresence } from './core/presence.js';
+import { state, myName, isAdmin, inTraining, termLabel, onSessionReset } from './core/state.js';
+import { initAuth, showGate, hideGate, restore, refreshIfStale } from './core/auth.js';
+import { register, registerHub, buildNav, render, paintNav, go, list, onRoute } from './core/router.js';
+import { $, $$, esc, initials, toast } from './core/ui.js';
+import { ICONS } from './core/icons.js';
+import { hintsFor } from './core/vanessa-hints.js';
+import { TOOL_INFO } from './core/vanessa-context.js';
+import { bustSheets, loadAbsences, formStamp } from './core/sheets.js';
+import { registerEvalActions } from './core/vanessa-eval.js';
+import { submitReviewedEval } from './core/vanessa-eval-submit.js';
+import { initVanessa, registerWarmers, prewarm, resetVanessa, resetWarmup, openVanessa, toggleVanessa, onVanessaToggle } from './core/vanessa-ui.js';
+import { initPalette } from './core/palette.js';
+import { initBell } from './core/bell.js';
+import { resetActions } from './core/actioncenter.js';
+import { registerLoaders } from './core/vanessa-data.js';
+
+import evals, { loadRoster } from './modules/evals.js';
+import interviews    from './modules/interviews.js';
+import schedule      from './modules/schedule.js';
+import directory     from './modules/directory.js';
+import desks         from './modules/desks.js';
+import announcements from './modules/announcements.js';
+import today         from './modules/today.js';
+import people        from './modules/people.js';
+import training      from './modules/training.js';
+import health        from './modules/health.js';
+import assistant     from './modules/assistant.js';
+import more          from './modules/more.js';
+import guides        from './modules/guides.js';
+import semester      from './modules/semester.js';
+import settings      from './modules/settings.js';
+import audit         from './modules/audit.js';
+import evalroster    from './modules/evalroster.js';
+import sources       from './modules/sources.js';
+import reconcile     from './modules/reconcile.js';
+import datarules     from './modules/datarules.js';
+import trainhub      from './modules/trainhub.js';
+import actionpage    from './modules/actionpage.js';
+import { hubModules } from './modules/hubs.js';
+
+[today, announcements, trainhub, evals, interviews, training, schedule, directory, desks, people, guides, evalroster, semester, sources, reconcile, datarules, audit, settings, health, assistant].forEach(register);
+/* Hubs group the tools above into a few areas; the sidebar shows those, not every tool. */
+[...hubModules, more, actionpage].forEach(registerHub);
+
+/* The modules already know how to fetch their own data; Vanessa just asks them
+   to, rather than reaching past them into the database herself. */
+registerWarmers([
+  { needs: 'training', label: 'evaluations', load: () => (state.guides.length ? null : loadRoster()) },
+  { needs: 'recruitment', label: 'interviews', load: () => interviews.prefetch?.() },
+  { needs: 'any', label: 'tour schedule', load: () => schedule.prefetch?.() },
+  { needs: 'training', label: 'desk coverage', load: () => desks.prefetch?.() },
+  { needs: 'admin', label: 'training attendance', load: () => training.prefetch?.() }
+]);
+
+onSessionReset(() => {
+  list().forEach(m => m.bust?.()); bustSheets(); resetVanessa(); resetPresence(); resetActions();
+  $('#view').replaceChildren();
+});
+
+registerEvalActions({ load: loadRoster, submit: submitReviewedEval });
+
+/* The same loaders, by kind, for Vanessa's facts: she asks the module that
+   owns the data to load it, once, only when a question needs it. */
+registerLoaders({
+  roster:     () => (state.guides.length ? null : loadRoster()),
+  tours:      () => schedule.prefetch?.(),
+  training:   () => (isAdmin() ? training.prefetch?.() : null),
+  interviews: () => interviews.prefetch?.()
+});
+
+function paintShell() {
+  $('#who-name').textContent = myName();
+  $('#who-role').textContent = state.role?.name || '';
+  $('#who-avatar').textContent = initials(myName());
+  $('#hub-term').textContent = termLabel();
+  $('#sync').textContent = state.loadedAt
+    ? 'Synced ' + state.loadedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : '';
+}
+
+async function start() {
+  paintShell();
+  buildNav();
+  initVanessa();
+  initPalette();
+  initBell();
+  initPresence();
+  await render();
+  paintShell();
+
+  /* Load what Vanessa needs now, in the background, rather than when somebody
+     clicks her and waits. The screen is already painted at this point, so this
+     costs the user nothing and saves them a pause later. */
+  prewarm();
+}
+
+/* ------------------------------------------------- what came in overnight
+   A line on the sign-in page saying how many absence submissions have arrived
+   since this person last read them.
+
+   Two deliberate limits.
+
+   It shows a COUNT and nothing else. The sign-in page is public — anybody who
+   reaches the URL sees it, signed in or not — so a student's name next to
+   "will be absent" has no business there. The names are one sign-in away.
+
+   And it only appears where a Developer last signed in, because that is who
+   asked to be told. Everyone else gets the ordinary sign-in page.
+-------------------------------------------------------------------------- */
+const ABS_SEEN = 'hub2.abs.seen';
+
+async function paintGateNews() {
+  const el = $('#gate-news');
+  if (!el) return;
+  try { if (localStorage.getItem('hub2.dev') !== '1') return; } catch { return; }
+
+  try {
+    const rows = await loadAbsences();
+    if (!rows.length) return;
+
+    let seen = 0;
+    try { seen = Number(localStorage.getItem(ABS_SEEN) || 0); } catch {}
+    const fresh = rows.filter(r => formStamp(r.when) > seen);
+    if (!fresh.length) return;
+
+    const newest = new Date(Math.max(...fresh.map(r => formStamp(r.when))));
+    el.textContent = `${fresh.length} new absence ${fresh.length === 1 ? 'submission' : 'submissions'} ` +
+      `since you last looked — the most recent ${newest.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}. ` +
+      `Sign in to see who.`;
+    el.hidden = false;
+  } catch { /* the form is unreachable; the sign-in page is not the place to say so */ }
+}
+paintGateNews();
+
+/* --------------------------------------------------------- version stamp
+   "Did my upload actually go live?"
+
+   GitHub Pages tells browsers to hold these files for ten minutes without
+   checking, so right after an upload the answer is often no, and there was no
+   way to tell except by squinting at the page. This asks the server when
+   index.html was last written and prints it, which needs no version number to
+   remember to bump — every upload changes it by itself.
+
+   The request deliberately bypasses the cache, or it would cheerfully report
+   the age of the copy already in the browser, which is precisely the thing in
+   doubt. If the file on the server is newer than the one this page was built
+   from, it says so: your upload has landed and a reload will pick it up.
+-------------------------------------------------------------------------- */
+async function paintVersion() {
+  const el = $('#rail-ver');
+  if (!el) return;
+  try {
+    const res = await fetch(`${location.pathname}?v=${Date.now()}`, { method: 'HEAD', cache: 'no-store' });
+    const when = res.headers.get('last-modified');
+    if (!when) { el.textContent = ''; return; }
+
+    const built = new Date(when);
+    const stamp = built.toLocaleString(undefined,
+      { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+
+    // Newer on the server than what this tab loaded? Then this tab is behind.
+    const loaded = window.__hubLoadedAt || 0;
+    if (loaded && built.getTime() > loaded + 1000) {
+      el.textContent = `Updated ${stamp} — reload to get it`;
+      el.classList.add('stale');
+    } else {
+      el.textContent = `Updated ${stamp}`;
+      el.classList.remove('stale');
+    }
+  } catch { el.textContent = ''; }
+}
+paintVersion();
+// Cheap enough to re-check occasionally, so a tab left open all day notices.
+setInterval(paintVersion, 10 * 60 * 1000);
+
+/* ------------------------------------------------------------- dark mode
+   Follows the laptop until somebody says otherwise, then remembers.
+
+   The toggle lives on the More page (and in the command palette) rather than
+   in the sidebar, so it is not competing with navigation.
+-------------------------------------------------------------------------- */
+const THEME_KEY = 'hub2.theme';
+// Noir is the identity, so dark is the default; light is an explicit choice.
+const isDark = () => document.documentElement.dataset.theme !== 'light';
+
+function toggleTheme() {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(THEME_KEY, next); } catch { /* private window */ }
+  document.dispatchEvent(new CustomEvent('hub:theme-changed'));
+}
+document.addEventListener('hub:toggle-theme', toggleTheme);
+
+/* Somebody who has never touched the toggle should still follow their laptop
+   when it flips at sunset. */
+window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+  if (!document.documentElement.dataset.theme) document.dispatchEvent(new CustomEvent('hub:theme-changed'));
+});
+
+const app = $('#app');
+
+/* --- shell chrome ------------------------------------------------------ */
+$('#view-back').innerHTML = ICONS.arrow;
+$('#refresh-ico').innerHTML = ICONS.refresh;
+
+/* Vanessa is opened from the rail, the top bar and the phone dock. All three
+   go through the one launcher, so her open/closed state has one owner. */
+['#rail-ask', '#v-top', '#v-float'].forEach(sel => $(sel).addEventListener('click', () => toggleVanessa()));
+// The dock is rebuilt with the navigation, so its Vanessa button is found by delegation.
+$('#dock').addEventListener('click', e => { if (e.target.closest('#dock-vanessa')) toggleVanessa(); });
+onVanessaToggle(isOpen => $('#v-top').setAttribute('aria-expanded', String(isOpen)));
+
+/* The top bar turns to glass once content passes under it, and the corner
+   pill tucks away on the way down. One passive listener, throttled to the
+   frame, and it only ever flips two classes — and only when they change —
+   so scrolling never re-styles the page. (It used to write a --scroll
+   variable on <html> each frame for parallax, which invalidated every
+   element's style while scrolling.) */
+let scrollTick = false;
+window.addEventListener('scroll', () => {
+  if (scrollTick) return;
+  scrollTick = true;
+  requestAnimationFrame(() => {
+    scrollTick = false;
+    const y = window.scrollY;
+    const scrolled = y > 8;
+    if (scrolled !== wasScrolled) { wasScrolled = scrolled; document.body.classList.toggle('is-scrolled', scrolled); }
+    if (Math.abs(y - lastY) > 6) {
+      const down = y > lastY && y > 120;
+      if (down !== wasDown) { wasDown = down; document.body.classList.toggle('is-scrolling-down', down); }
+      lastY = y;
+    }
+  });
+}, { passive: true });
+let lastY = 0, wasScrolled = false, wasDown = false;
+
+/* Fold the rail to icons on a big screen, for people who know the way. */
+const paintFold = () => {
+  const folded = document.documentElement.classList.contains('rail-folded');
+  $('#rail-fold').setAttribute('aria-pressed', String(folded));
+  $('#rail-fold').setAttribute('aria-label', folded ? 'Unfold the sidebar' : 'Fold the sidebar');
+};
+$('#rail-fold').innerHTML = ICONS.arrow;
+$('#rail-fold').addEventListener('click', () => {
+  const folded = document.documentElement.classList.toggle('rail-folded');
+  try { localStorage.setItem('hub2.rail', folded ? 'folded' : 'open'); } catch { /* private window */ }
+  paintFold();
+});
+paintFold();
+
+/* A background tab does nothing: every CSS animation pauses (perf.css) until
+   the person comes back. */
+const paintHidden = () => document.documentElement.classList.toggle('is-hidden', document.hidden);
+document.addEventListener('visibilitychange', paintHidden);
+paintHidden();
+
+/* The corner control names the page and her best question for it. Arriving
+   from Home, she introduces herself for a moment — "here with you in Eval
+   Tracker" — then settles into the corner. */
+let lastRoute = null, peekTimer = null;
+onRoute(mod => {
+  const [first] = mod.quiet ? [] : hintsFor(mod.id);
+  const float = $('#v-float');
+  $('#v-float-title').textContent = `Ask Vanessa about ${mod.title}`;
+  $('#v-float-sub').textContent = first ? `Try “${first}”` : 'Questions, tours, the handbook';
+  clearTimeout(peekTimer);
+  float.classList.remove('is-peek');
+  if (lastRoute === 'today' && mod.id !== 'today') {
+    $('#v-float-sub').textContent = `Here with you in ${mod.title}${first ? ` · try “${first}”` : ''}`;
+    float.classList.add('is-peek');
+    peekTimer = setTimeout(() => {
+      float.classList.remove('is-peek');
+      $('#v-float-sub').textContent = first ? `Try “${first}”` : 'Questions, tours, the handbook';
+    }, 3200);
+  }
+  lastRoute = mod.id;
+});
+
+/* Her one contextual question for the page you are on. */
+onRoute(mod => {
+  const box = $('#v-hint');
+  const qs = mod.quiet ? [] : hintsFor(mod.id);
+  const helps = TOOL_INFO[mod.id]?.helps;
+  box.hidden = mod.id === 'today' || mod.quiet || (!qs.length && !helps);
+  box.innerHTML = box.hidden ? '' :
+    `<span class="v-hint-lead"><span class="orb orb-xs"><i></i></span>` +
+    `<span class="v-hint-say">You're in ${esc(mod.title)}.${helps ? ` ${esc(helps)}` : ''}</span></span>` +
+    qs.map(q => `<button type="button" class="v-hint-chip" data-ask="${esc(q)}">${esc(q)}</button>`).join('');
+});
+$('#v-hint').addEventListener('click', e => {
+  const chip = e.target.closest('[data-ask]');
+  if (chip) openVanessa(chip.dataset.ask);
+});
+
+/* The home screen asks her things too; it raises this rather than importing
+   her panel, so the module stays a plain page. */
+document.addEventListener('hub:ask', e => openVanessa(e.detail?.question || ''));
+async function refreshAll() {
+  const btn = $('#btn-refresh');
+  btn.classList.add('is-busy');
+  try {
+    list().forEach(m => m.bust?.());
+    bustSheets(); resetWarmup();
+    if (inTraining()) await loadRoster();
+    paintShell(); paintNav(); await render();
+    prewarm();
+    toast('Up to date.');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  btn.classList.remove('is-busy');
+}
+$('#btn-refresh').addEventListener('click', refreshAll);
+document.addEventListener('hub:refresh', refreshAll);
+
+/* The old end-of-semester button now opens the guided semester wizard. */
+document.addEventListener('hub:rollover', () => { if (isAdmin()) go('semester'); });
+
+
+/* Sessions last about an hour. Renew quietly in the background so nobody is
+   thrown back to the sign-in screen in the middle of writing an eval. */
+setInterval(() => { refreshIfStale().catch(() => {}); }, 5 * 60 * 1000);
+
+/* --- boot -------------------------------------------------------------- */
+initAuth(start);
+
+restore()
+  .then(ok => { if (ok) { hideGate(); return start(); } showGate(); })
+  .catch(err => showGate(err.message));
