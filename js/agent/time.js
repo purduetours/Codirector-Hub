@@ -1,45 +1,164 @@
-// Operations use Purdue's timezone; callers may supply a validated IANA override.
-export const HUB_ZONE='America/Indiana/Indianapolis';
-export function zonedParts(now=new Date(),zone=HUB_ZONE){
- const parts=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(now);
- const get=k=>parts.find(x=>x.type===k).value;
- return {date:`${get('year')}-${get('month')}-${get('day')}`,time:`${get('hour')}:${get('minute')}`};
+/* ============================================================ time, deterministically
+   "Friday", "next week", "after 3 PM" become real dates here, in code, in the
+   application's timezone. The model is never asked to work out what day it is
+   or what date next Friday falls on -- it passes the phrase through and this
+   answers. That is the whole point: language models are confidently wrong
+   about calendars.
+
+   Pure functions. `now` and the timezone are arguments so tests are exact.
+============================================================================ */
+export const DEFAULT_TZ = 'America/Indiana/Indianapolis';
+const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const ABBR = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, thu: 4, thur: 4, thurs: 4, fri: 5, sat: 6 };
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+const MON_ABBR = { jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
+
+const pad = n => String(n).padStart(2, '0');
+const utc = iso => new Date(iso + 'T12:00:00Z');
+const iso = d => d.toISOString().slice(0, 10);
+export const addDays = (s, n) => { const d = utc(s); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+export const weekday = s => utc(s).getUTCDay();
+const mondayOf = s => addDays(s, -((weekday(s) + 6) % 7));
+
+/** Today's date, and the time of day, as seen in `tz`. */
+export function clock(now = new Date(), tz = DEFAULT_TZ) {
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(now).reduce((o, p) => (o[p.type] = p.value, o), {});
+  } catch {
+    return { today: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`, time: `${pad(now.getHours())}:${pad(now.getMinutes())}`, tz: 'local' };
+  }
+  return { today: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour === '24' ? '00' : parts.hour}:${parts.minute}`, tz };
 }
-export function validDate(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;const d=new Date(value+'T12:00:00Z');return !isNaN(d)&&d.toISOString().slice(0,10)===value;}
-export function addDays(date,n){const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
-export function localInstant(date,time,zone=HUB_ZONE){
- if(!validDate(date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(time))throw Error('Use a valid date and time.');
- const target=Date.parse(`${date}T${time}:00Z`);let estimate=target;
- for(let i=0;i<4;i++){const p=zonedParts(new Date(estimate),zone);const delta=target-Date.parse(`${p.date}T${p.time}:00Z`);if(!delta)break;estimate+=delta;}
- const p=zonedParts(new Date(estimate),zone);
- if(p.date!==date||p.time!==time)throw Error('That local time does not exist because of the daylight-saving change. Choose another time.');
- // A repeated autumn clock hour has two valid instants: do not choose silently.
- for(const shift of [-3600000,3600000]){const other=zonedParts(new Date(estimate+shift),zone);if(other.date===date&&other.time===time)throw Error('That local time occurs twice because of the daylight-saving change. Choose a time outside that hour.');}
- return new Date(estimate).toISOString();
+
+export function dayLabel(s, today) {
+  if (!s) return '';
+  if (today) {
+    if (s === today) return 'today';
+    if (s === addDays(today, 1)) return 'tomorrow';
+    if (s === addDays(today, -1)) return 'yesterday';
+  }
+  const d = utc(s);
+  return `${DAYS[d.getUTCDay()][0].toUpperCase()}${DAYS[d.getUTCDay()].slice(1)}, ${MONTHS[d.getUTCMonth()].slice(0, 3).replace(/^./, c => c.toUpperCase())} ${d.getUTCDate()}`;
 }
-export function parseTimeWindow(raw,now=new Date(),zone=HUB_ZONE){
- const q=String(raw).toLowerCase(),p=zonedParts(now,zone);let from=p.date,to=p.date,explicit=false;
- const relative=q.match(/\b(?:today|tomorrow|yesterday|(?:next )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:this|next) week)\b/g)||[];
- if(relative.length>1)return {error:'Which date should I use? Include one day or an explicit YYYY-MM-DD range.'};
- const exact=[...q.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)].map(x=>x[0]);
- if(exact.length){if(exact.some(x=>!validDate(x))||exact.length>2)return {error:'Use one valid date or a start and end date (YYYY-MM-DD).'};[from,to]=[exact[0],exact[1]||exact[0]];explicit=true;}
- else if(/\bend of (?:the |this )?month\b/.test(q)){const d=new Date(p.date+'T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+1,0);to=d.toISOString().slice(0,10);from=/\b(?:by|through|until)\b/.test(q)?p.date:to;explicit=true;}
- else if(/\b(?:this|next) week\b/.test(q)){const dow=new Date(p.date+'T12:00:00Z').getUTCDay(),mon=addDays(p.date,-((dow+6)%7));from=/\bnext week\b/.test(q)?addDays(mon,7):p.date;to=addDays(/\bnext week\b/.test(q)?addDays(mon,7):mon,6);explicit=true;}
- else if(/\btomorrow\b/.test(q)){from=to=addDays(p.date,1);explicit=true;}
- else if(/\byesterday\b/.test(q)){from=to=addDays(p.date,-1);explicit=true;}
- else {
-  const names=['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];const hits=names.filter(x=>new RegExp('\\b'+x+'\\b').test(q));
-  if(hits.length>1)return {error:'Which day should I use? Give one date or an explicit YYYY-MM-DD range.'};
-  if(hits.length){const day=names.indexOf(hits[0]),dow=new Date(p.date+'T12:00:00Z').getUTCDay();if(new RegExp('\\bnext '+hits[0]).test(q)){const mon=addDays(p.date,-((dow+6)%7));from=to=addDays(mon,7+(day+6)%7);}else from=to=addDays(p.date,(day-dow+7)%7);explicit=true;}
-  else if(/\btoday\b/.test(q)){explicit=true;}
-  else if(/\b(?:last|next month|recently|ago|weekend)\b|\d+\/\d+/.test(q))return {error:'Which date range do you mean? Give a start and end date so I don’t guess.'};
- }
- if(from>to)return {error:'The end date must be after the start date.'};
- let after=null,before=null,at=null;
- const matches=[...q.matchAll(/\b(after|before|at)\s+(noon|midnight|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/g)];
- if(new Set(matches.map(m=>m[1])).size!==matches.length)return {error:'Give one start and one end time, or one exact time.'};
- for(const m of matches){let t=m[2].trim();if(t==='noon')t='12:00';else if(t==='midnight')t='00:00';else{const v=/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/.exec(t);let h=+v[1],min=+(v[2]||0);if(h>23||min>59||(v[3]&&(h<1||h>12)))return {error:'Use a valid time, such as 2 PM or 14:00.'};if(v[3])h=h%12+(v[3]==='pm'?12:0);else if(h>=1&&h<=12&&!v[2])return {error:`Do you mean ${h} AM or ${h} PM? Include the time in your request.`};t=String(h).padStart(2,'0')+':'+String(min).padStart(2,'0');}if(m[1]==='after')after=t;if(m[1]==='before')before=t;if(m[1]==='at')at=t;}
- if((after&&before&&after>=before)||(at&&((after&&at<=after)||(before&&at>=before))))return {error:'Those time limits conflict. Give a valid time window.'};
- if(/\blater today\b/.test(q))after=p.time;
- return {from,to,after,before,at,explicit,zone,convention:/\bnext (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(q)?'“Next weekday” means that day in the next calendar week.':null};
+export function timeLabel(t) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
+  if (!m) return '';
+  const h = Number(m[1]), ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12 || 12;
+  return m[2] === '00' ? `${h12} ${ap}` : `${h12}:${m[2]} ${ap}`;
+}
+
+/* ---- clock times: "3 pm", "3:30pm", "15:00" -------------------------------- */
+function clockTime(txt) {
+  const m = /(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/i.exec(txt);
+  if (!m) return null;
+  let h = Number(m[1]); const min = Number(m[2] || 0), ap = (m[3] || '').toLowerCase().replace(/\./g, '');
+  if (min > 59 || h > 24) return null;
+  if (ap === 'pm' && h < 12) h += 12;
+  if (ap === 'am' && h === 12) h = 0;
+  if (!ap && !m[2] && h <= 7) h += 12;               // "after 3" at a tour desk means 3 PM
+  if (h > 23) return null;
+  return `${pad(h)}:${pad(min)}`;
+}
+
+/**
+ * @param {string} text   e.g. "tomorrow after 2pm", "next week", "this weekend", "Oct 9"
+ * @returns {{ok:true, from?:string, to?:string, label:string, after?:string, before?:string, at?:string, semester?:string, needs?:string}
+ *          | {ok:false, reason:string}}
+ */
+export function parseWhen(text, { now = new Date(), tz = DEFAULT_TZ } = {}) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return { ok: false, reason: 'No time was given.' };
+  const { today } = clock(now, tz);
+  let s = ` ${raw.toLowerCase().replace(/[,.]/g, ' ').replace(/\s+/g, ' ')} `;
+  const out = { ok: true, label: raw };
+
+  /* time-of-day pieces first, so they do not confuse the date words */
+  let m;
+  if ((m = / (?:after|from|starting|past) (\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?) /.exec(s))) { out.after = clockTime(m[1]); s = s.replace(m[0], ' '); }
+  if ((m = / (?:before|until|by|prior to) (\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?) /.exec(s))) { out.before = clockTime(m[1]); s = s.replace(m[0], ' '); }
+  if (/ before (?:the )?(?:new guide |orientation |safety )?training /.test(s)) { out.needs = 'training_session'; s = s.replace(/ before (?:the )?(?:new guide |orientation |safety )?training /, ' '); }
+  if ((m = / (?:at|@) (\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?) /.exec(s)) || (m = / (\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)) /.exec(s)) || (m = / (\d{1,2}:\d{2}) /.exec(s))) { out.at = clockTime(m[1]); s = s.replace(m[0], ' '); }
+  if (/ morning /.test(s)) { out.before = out.before || '12:00'; s = s.replace(/ (?:in the )?morning /, ' '); }
+  else if (/ afternoon /.test(s)) { out.after = out.after || '12:00'; out.before = out.before || '17:00'; s = s.replace(/ (?:in the )?afternoon /, ' '); }
+  else if (/ (?:evening|tonight) /.test(s) && !/ tonight /.test(s)) { out.after = out.after || '17:00'; s = s.replace(/ (?:in the )?evening /, ' '); }
+  else if (/ tonight /.test(s)) { out.after = out.after || '17:00'; }
+
+  const set = (from, to, label) => { out.from = from; out.to = to ?? from; out.label = label; return out; };
+  s = s.replace(/ (?:on|for|during|the|of|in|at) /g, ' ').replace(/\s+/g, ' ');
+  s = ` ${s.trim()} `;
+
+  if (/ (?:this|next|last) semester /.test(s)) { out.semester = /next/.test(s) ? 'next' : /last/.test(s) ? 'previous' : 'current'; out.label = `${out.semester === 'current' ? 'this' : out.semester === 'next' ? 'next' : 'last'} semester`; return out; }
+
+  if (/ day after tomorrow /.test(s)) return set(addDays(today, 2), null, 'the day after tomorrow');
+  if (/ (?:tomorrow|tmrw|tmr) /.test(s)) return set(addDays(today, 1), null, 'tomorrow');
+  if (/ yesterday /.test(s)) return set(addDays(today, -1), null, 'yesterday');
+  if (/ (?:today|tonight|now) /.test(s)) return set(today, null, 'today');
+
+  if ((m = /(\d{4}-\d{2}-\d{2})/.exec(s))) {
+    const d = m[1]; if (Number.isNaN(+utc(d)) || iso(utc(d)) !== d) return { ok: false, reason: `"${d}" is not a real date.` };
+    return set(d, null, d);
+  }
+  if ((m = / (\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))? /.exec(s))) {
+    let y = m[3] ? Number(m[3]) : Number(today.slice(0, 4)); if (y < 100) y += 2000;
+    let d = `${y}-${pad(m[1])}-${pad(m[2])}`;
+    if (Number.isNaN(+utc(d)) || iso(utc(d)) !== d) return { ok: false, reason: `"${m[0].trim()}" is not a real date.` };
+    if (!m[3] && d < today) d = `${y + 1}-${pad(m[1])}-${pad(m[2])}`;
+    return set(d, null, d);
+  }
+  const monthRe = new RegExp(` (${MONTHS.join('|')}|${Object.keys(MON_ABBR).join('|')}) (\\d{1,2})(?:st|nd|rd|th)?(?: (\\d{4}))? `);
+  const monthRe2 = new RegExp(` (\\d{1,2})(?:st|nd|rd|th)? (${MONTHS.join('|')}|${Object.keys(MON_ABBR).join('|')}) `);
+  let mo, dd, yy;
+  if ((m = monthRe.exec(s))) { mo = m[1]; dd = Number(m[2]); yy = m[3]; }
+  else if ((m = monthRe2.exec(s))) { mo = m[2]; dd = Number(m[1]); }
+  if (mo) {
+    const mi = MONTHS.includes(mo) ? MONTHS.indexOf(mo) : MON_ABBR[mo];
+    let y = yy ? Number(yy) : Number(today.slice(0, 4)); let d = `${y}-${pad(mi + 1)}-${pad(dd)}`;
+    if (Number.isNaN(+utc(d)) || iso(utc(d)) !== d) return { ok: false, reason: `"${mo} ${dd}" is not a real date.` };
+    if (!yy && d < today) d = `${y + 1}-${pad(mi + 1)}-${pad(dd)}`;
+    return set(d, null, d);
+  }
+
+  if (/ (?:rest of (?:the )?week|remainder of (?:the )?week) /.test(s)) return set(today, addDays(mondayOf(today), 6), 'the rest of this week');
+  if (/ this weekend /.test(s) || / (?:the )?weekend /.test(s) && !/ next /.test(s)) { const sat = addDays(mondayOf(today), 5); return set(weekday(today) === 0 ? today : weekday(today) === 6 ? today : sat, addDays(mondayOf(today), 6), 'this weekend'); }
+  if (/ next weekend /.test(s)) { const sat = addDays(mondayOf(today), 12); return set(sat, addDays(sat, 1), 'next weekend'); }
+  if (/ next week /.test(s)) { const mon = addDays(mondayOf(today), 7); return set(mon, addDays(mon, 6), 'next week'); }
+  if (/ last week /.test(s)) { const mon = addDays(mondayOf(today), -7); return set(mon, addDays(mon, 6), 'last week'); }
+  if (/ this week /.test(s) || / (?:the )?week /.test(s)) { const mon = mondayOf(today); return set(mon, addDays(mon, 6), 'this week'); }
+  if (/ next month /.test(s)) { const d = utc(today); const a = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1, 12)); const z = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 2, 0, 12)); return set(iso(a), iso(z), 'next month'); }
+  if (/ last month /.test(s)) { const d = utc(today); const a = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1, 12)); const z = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0, 12)); return set(iso(a), iso(z), 'last month'); }
+  if (/ this month /.test(s)) { const d = utc(today); const a = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 12)); const z = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0, 12)); return set(iso(a), iso(z), 'this month'); }
+  if ((m = / (?:the )?next (\d{1,2}) days /.exec(s))) return set(today, addDays(today, Number(m[1])), `the next ${m[1]} days`);
+  if (/ (?:upcoming|soon|coming up) /.test(s)) return set(today, addDays(today, 14), 'the next two weeks');
+
+  const dayWord = Object.keys(ABBR).concat(DAYS).find(w => new RegExp(` ${w} `).test(s));
+  if (dayWord) {
+    const target = DAYS.includes(dayWord) ? DAYS.indexOf(dayWord) : ABBR[dayWord];
+    const nextWord = new RegExp(` next ${dayWord} `).test(s), lastWord = new RegExp(` last ${dayWord} `).test(s);
+    let d;
+    if (lastWord) { d = addDays(today, -(((weekday(today) - target) + 6) % 7 + 1)); }
+    else if (nextWord) { d = addDays(mondayOf(today), 7 + ((target + 6) % 7)); }
+    else { d = addDays(today, (target - weekday(today) + 7) % 7); }
+    return set(d, null, `${DAYS[target][0].toUpperCase()}${DAYS[target].slice(1)}`);
+  }
+
+  if (out.after || out.before || out.at || out.needs) { out.from = today; out.to = today; out.label = raw; return out; }
+  return { ok: false, reason: `I couldn't turn "${raw}" into a date.` };
+}
+
+/** Is this clock time inside the window the phrase asked for? */
+export function inWindow(time, w) {
+  const t = String(time || '').slice(0, 5);
+  if (!t) return !(w.after || w.before || w.at);
+  if (w.at && t !== w.at) return false;
+  if (w.after && t < w.after) return false;
+  if (w.before && t >= w.before) return false;
+  return true;
+}
+
+/** Clamp a range so it never starts in the past (for "what's coming up" questions). */
+export function fromToday(range, today) {
+  if (!range?.from) return range;
+  return { ...range, from: range.from < today ? today : range.from, to: range.to < today ? today : range.to };
 }
