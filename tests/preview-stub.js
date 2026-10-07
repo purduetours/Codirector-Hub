@@ -155,6 +155,16 @@
       if (a.p_apply) { reqs.forEach(r => db.training_requirements.push({ ...r, id: 'q' + Date.now() + r.id, term_id: a.p_to })); audit('training.setup_copied', a.p_to); } return out; },
     admin_save_training_group: a => { const id = 'tg' + Date.now(); db.training_groups.push({ id, name: a.p_name, description: a.p_description }); return id; },
     admin_set_group_members: a => { db.training_group_members = db.training_group_members.filter(m => m.group_id !== a.p_group).concat(a.p_guides.map(g => ({ group_id: a.p_group, guide_id: g }))); return { members: a.p_guides.length }; },
+    /* ---- Vanessa (mirrors supabase/21-vanessa-agent.sql closely enough for the UI) ---- */
+    vanessa_begin_action: a => { db.va = db.va || []; db.va.forEach(x => { if (x.status === 'pending') x.status = 'cancelled'; }); const id = 'va' + (db.va.length + 1); db.va.push({ id, kind: a.p_kind, hash: a.p_hash, status: 'pending', mode: a.p_mode, summary: a.p_summary, at: new Date().toISOString() }); return id; },
+    vanessa_confirm_action: a => { const x = (db.va || []).find(y => y.id === a.p_id); if (!x) throw new Error('I could not find that request. Ask me again and I will set it up fresh.'); if (x.status !== 'pending') throw new Error('That request was already used. Ask me again if you want to repeat it.'); if (x.hash !== a.p_hash) throw new Error('The details changed after you reviewed them, so I did not run it.'); x.status = 'confirmed'; return { ok: true }; },
+    vanessa_finish_action: a => { const x = (db.va || []).find(y => y.id === a.p_id); if (x && x.status === 'confirmed') x.status = a.p_ok ? 'executed' : 'failed'; return null; },
+    vanessa_cancel_action: a => { const x = (db.va || []).find(y => y.id === a.p_id); if (x && x.status === 'pending') x.status = 'cancelled'; return null; },
+    vanessa_log_turn: a => { (db.vt = db.vt || []).push(a); return null; },
+    admin_vanessa_stats: () => { const t = db.vt || [], by = {}; t.forEach(x => { by[x.p_engine] = (by[x.p_engine] || 0) + 1; });
+      return { hours: 24, turns: t.length, ok: t.filter(x => x.p_ok).length, avg_latency_ms: 40, p95_latency_ms: 90, people: 1, last_success_at: t.length ? new Date().toISOString() : null, by_engine: by, local_calls: t.reduce((n, x) => n + (x.p_local_calls || 0), 0),
+        provider_failures: t.filter(x => x.p_provider_failed).length, not_understood: t.filter(x => x.p_engine === 'legacy').length, avg_confidence: 0.9, by_intent: [], by_tool: [], failing_tools: [], recent_failures: [],
+        actions: (db.va || []).reduce((m, x) => ({ ...m, [x.status]: (m[x.status] || 0) + 1 }), {}), recent_actions: (db.va || []).slice(-5).map(x => ({ at: x.at, kind: x.kind, status: x.status, mode: x.mode, person: 'Test Person' })) }; },
     /* ---- data management (mirrors supabase/19 closely enough to exercise the screens) ---- */
     admin_data_status: () => ({ term: { id: 'fall-2026', label: 'Fall 2026' }, active_guides: db.guides.filter(g => g.active).length, archived_guides: 0, needing_eval: db.evals.length, awaiting_assignment: db.evals.length - 1, not_on_eval_roster: 0,
       issues: db.sync_issues.filter(i => i.status === 'open').reduce((m, i) => ({ ...m, [i.kind]: (m[i.kind] || 0) + 1 }), {}), sources: db.external_sources.filter(x => x.active),
@@ -201,10 +211,34 @@
   const filt = (rows, q) => { let out = rows; q.forEach((v, k) => { const m = /^(eq|is)\.(.*)$/.exec(v); if (!m || ['select', 'order', 'limit', 'offset', 'on_conflict'].includes(k)) return;
       out = out.filter(x => String(x[k]) === m[2] || (m[1] === 'is' && String(x[k]) === m[2])); }); return out; };
 
+
+  /* ---- a pretend local model (Ollama), so the Enhanced path can be driven in a browser ----
+     ?agent=local  : a healthy local model that understands a couple of unusual phrasings
+     ?agent=down   : a configured local model that is not running (Vanessa must carry on in Standard mode)
+     (default)     : no local model at all: Standard Vanessa only */
+  const agentMode = new URLSearchParams(location.search).get('agent') || 'standard';
+  if (agentMode === 'local' || agentMode === 'down') { try { localStorage.setItem('hub2.vanessa.local', JSON.stringify({ enabled: true, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'llama3.2:3b', rephrase: false, timeoutMs: 4000 })); } catch (e) { /* storage blocked */ } }
+  else { try { localStorage.removeItem('hub2.vanessa.local'); } catch (e) { /* storage blocked */ } }
+  window.__localCalls = [];
+  function fakeOllama(u, o) {
+    window.__localCalls.push(u);
+    if (agentMode === 'down') return Promise.reject(new TypeError('Failed to fetch'));
+    if (/\/api\/tags$/.test(u)) return json({ models: [{ name: 'llama3.2:3b' }] });
+    if (/\/api\/chat$/.test(u)) {
+      const b = JSON.parse(o.body), t = b.messages[1].content.toLowerCase();
+      let q = { action: 'none' };
+      if (/eyes|benefit|neglect/.test(t)) q = { action: 'query', queries: [{ intent: 'evaluation.opportunities', priority: 'High', when: 'this week' }] };
+      else if (/somebody is out|someone is out/.test(t)) q = { action: 'clarify', question: 'Which tour do you want covered?' };
+      return json({ message: { content: JSON.stringify(q) }, prompt_eval_count: 220, eval_count: 24 });
+    }
+    return json({}, 404);
+  }
+
   const real = window.fetch;
   window.fetch = function (u, o) {
     u = String(u);
     if (u.indexOf('stub.invalid/auth/v1/user') > -1) return json({ id: 'u1' });
+    if (u.indexOf('localhost:11434') > -1) return fakeOllama(u, o || {});
     const rp = /stub\.invalid\/rest\/v1\/rpc\/([a-z_]+)/.exec(u);
     if (rp) { const body = o && o.body ? JSON.parse(o.body) : {}; return rpcs[rp[1]] ? json(rpcs[rp[1]](body)) : json({ message: 'Could not find the function public.' + rp[1] + ' in the schema cache' }, 404); }
     const m = /stub\.invalid\/rest\/v1\/([a-z_]+)(\?.*)?$/.exec(u);
