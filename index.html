@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
-<meta name="theme-color" content="#09090b">
+<meta name="theme-color" content="#151515">
 <title>Codirector Hub</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><radialGradient id='g' cx='38%25' cy='32%25' r='75%25'><stop offset='0' stop-color='%23ffe3f1'/><stop offset='.45' stop-color='%23ff4fa3'/><stop offset='1' stop-color='%238e5bff'/></radialGradient></defs><circle cx='32' cy='32' r='26' fill='url(%23g)'/></svg>">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23242424'/%3E%3Cpath d='M20 20v24m24-24v24M20 32h24' stroke='white' stroke-width='5'/%3E%3C/svg%3E">
 <script>
 /* Runs before the stylesheets so a dark-mode user never gets a white flash on
    load. Deliberately inline and tiny: anything imported would arrive too late.
@@ -18,8 +18,8 @@ try { var t = localStorage.getItem('hub2.theme');
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:wght@400..800&display=swap">
-<link rel="stylesheet" href="app-f4a6a0457055.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&display=swap">
+<link rel="stylesheet" href="app-6780f7341b02.css">
 
 
 
@@ -107,6 +107,7 @@ try { var t = localStorage.getItem('hub2.theme');
       <div class="topbar-lead">
         <a class="icon-btn back" id="view-back" href="#/today" hidden aria-label="Back"></a>
         <span class="view-ico" id="view-ico" aria-hidden="true"></span>
+        <span class="hub-life" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8" stroke-dasharray="12 5"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg></span>
         <div class="topbar-title">
           <h2 id="view-title">—</h2>
           <div class="crumb" id="view-crumb"></div>
@@ -138,6 +139,6 @@ try { var t = localStorage.getItem('hub2.theme');
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="config.js"></script>
-<script type="module" src="app-844c5a357730.js"></script>
+<script type="module" src="app-f7eec92511ec.js"></script>
 </body>
 </html>
