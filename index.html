@@ -19,7 +19,7 @@ try { var t = localStorage.getItem('hub2.theme');
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&display=swap">
-<link rel="stylesheet" href="app-6780f7341b02.css">
+<link rel="stylesheet" href="app-1ebfe36df76f.css">
 
 
 
@@ -41,10 +41,10 @@ try { var t = localStorage.getItem('hub2.theme');
   <form class="gate-card" id="gate-form">
     <div class="gate-brand">
       <span class="orb orb-sm"><i></i></span>
-      <span>Codirector Hub <em>Purdue Admissions · Tour Guides</em></span>
+      <span>Codirector Hub</span>
     </div>
-    <h1 class="gate-title">Welcome back.</h1>
-    <p class="muted gate-lede">Sign in with your Purdue email and Vanessa will have your day ready.</p>
+    <h1 class="gate-title" hidden>Sign in</h1>
+    <p class="muted gate-lede">Enter your Purdue email and the provided password.</p>
     <div class="gate-news" id="gate-news" hidden></div>
 
     <label class="field">
@@ -64,10 +64,10 @@ try { var t = localStorage.getItem('hub2.theme');
 
     <p class="form-error" id="gate-error" hidden></p>
     <button class="btn btn-primary btn-block" type="submit" id="gate-submit">Continue</button>
-    <p class="hint gate-swap">
+    <details class="gate-account"><summary>Account setup</summary><p class="hint gate-swap">
       <span id="gate-swap-text">First time here?</span>
       <button type="button" class="linkish" id="gate-swap">Make a password</button>
-    </p>
+    </p></details>
   </form>
 </div>
 
@@ -117,7 +117,7 @@ try { var t = localStorage.getItem('hub2.theme');
         <span class="crumb sync" id="sync"></span>
         <button class="icon-btn" id="btn-refresh" aria-label="Refresh" title="Refresh everything"><span class="spin" id="refresh-ico"></span></button>
         <button class="v-top" id="v-top" type="button" aria-label="Ask Vanessa">
-          <span class="orb orb-xs"><i></i></span><span class="v-top-lbl">Vanessa</span>
+          <span class="orb orb-xs" aria-hidden="true"><svg class="vanessa-mark" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20M5 5l14 14M5 19L19 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="v-top-lbl">Vanessa</span>
         </button>
       </div>
     </header>
@@ -139,6 +139,6 @@ try { var t = localStorage.getItem('hub2.theme');
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="config.js"></script>
-<script type="module" src="app-f7eec92511ec.js"></script>
+<script type="module" src="app-46a11db56ac9.js"></script>
 </body>
 </html>
