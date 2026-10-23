@@ -19,8 +19,7 @@ try { var t = localStorage.getItem('hub2.theme');
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&display=swap">
-<link rel="stylesheet" href="app-1ebfe36df76f.css">
-
+<link rel="stylesheet" href="app-ae036050534c.css">
 
 
 
@@ -73,7 +72,7 @@ try { var t = localStorage.getItem('hub2.theme');
 
 <!-- ===================================================== app -->
 <div class="app" id="app" hidden>
-  <aside class="rail">
+  <header class="rail">
     <a class="rail-brand" href="#/today" title="Home">
       <span class="orb orb-sm"><i></i></span>
       <span class="rail-brand-text">
@@ -100,20 +99,21 @@ try { var t = localStorage.getItem('hub2.theme');
       </a>
       <div class="rail-ver" id="rail-ver" title="When this hub was last uploaded"></div>
     </div>
-  </aside>
+  </header>
 
   <div class="main">
-    <header class="topbar">
+    <header class="topbar" role="region" aria-label="Workspace controls">
       <div class="topbar-lead">
         <a class="icon-btn back" id="view-back" href="#/today" hidden aria-label="Back"></a>
         <span class="view-ico" id="view-ico" aria-hidden="true"></span>
-        <span class="hub-life" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8" stroke-dasharray="12 5"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg></span>
+
         <div class="topbar-title">
           <h2 id="view-title">—</h2>
           <div class="crumb" id="view-crumb"></div>
         </div>
       </div>
       <div class="topbar-actions">
+        <details class="shell-status" data-motion="off"><summary aria-label="Workspace status and refresh" title="Workspace status and refresh">⋯</summary><div class="shell-status-body" id="shell-status-body"></div></details>
         <span class="crumb sync" id="sync"></span>
         <button class="icon-btn" id="btn-refresh" aria-label="Refresh" title="Refresh everything"><span class="spin" id="refresh-ico"></span></button>
         <button class="v-top" id="v-top" type="button" aria-label="Ask Vanessa">
@@ -139,6 +139,6 @@ try { var t = localStorage.getItem('hub2.theme');
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="config.js"></script>
-<script type="module" src="app-fd4d499082e0.js"></script>
+<script type="module" src="app-69b5a1e3f7ac.js"></script>
 </body>
 </html>
